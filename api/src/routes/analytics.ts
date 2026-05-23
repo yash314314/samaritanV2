@@ -98,21 +98,29 @@ router.get("/daily", async (req, res) => {
       res.status(500).json({ error: "Server error" });
     }
   });
+  import { getHeatmapV2, type HeatmapColorMode } from "../services/analyticsService";
   router.get("/heatmap", async (req, res) => {
-    const { userId } = req.query;
+    const { userId, from, to, colorMode, category } = req.query;
   
     if (!userId || typeof userId !== "string") {
       return res.status(400).json({ error: "Missing userId" });
     }
   
     try {
-      const heatmap = await getHeatmap(userId);
+      const heatmap = await getHeatmapV2({
+        userId,
+        from: typeof from === "string" ? from : undefined,
+        to: typeof to === "string" ? to : undefined,
+        colorMode: (colorMode as HeatmapColorMode) ?? "score",
+        categoryFilter: typeof category === "string" ? category : null,
+      });
       res.json(heatmap);
     } catch (error) {
-      console.error(error);
+      console.error("Heatmap V2 error:", error);
       res.status(500).json({ error: "Server error" });
     }
   });
+  
   
 export default router;
 import { getAssistantInsights } from "../services/intelligenceService";
@@ -151,17 +159,25 @@ router.get("/dashboard", async (req, res) => {
 
 });
 import { getTimeline } from "../services/timelineservice";  
-router.get("/timeline", async (req,res)=>{
+router.get("/timeline", async (req, res) => {
+  const { userId, date, from, to } = req.query;
 
-  const { userId, date } = req.query;
+  if (!userId || typeof userId !== "string") {
+    return res.status(400).json({ error: "Missing userId" });
+  }
 
-  const data = await getTimeline(
-    userId as string,
-    date as string
-  );
-
-  res.json(data);
-
+  try {
+    const data = await getTimeline(
+      userId,
+      typeof date === "string" ? date : undefined,
+      typeof from === "string" ? from : undefined,
+      typeof to === "string" ? to : undefined,
+    );
+    res.json(data);
+  } catch (error) {
+    console.error("Timeline error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 import { getFocusBlocks } from "../services/activityService";
 

@@ -1,62 +1,78 @@
 import { prisma } from "../prisma";
 import { getISTDayRange } from "../utils/time";
 
-export async function getTimeline(userId: string, date: string) {
 
-  /* ---------- IST SAFE RANGE ---------- */
+export async function getTimeline(userId: string, date?: string, from?: string, to?: string) {
+  // Build where clause
+  const where: any = {
+    session: { userId },
+  };
 
-  const { start, end } =
-    getISTDayRange(new Date(date + "T00:00:00"));
-
-  /* ---------- FETCH ACTIVITIES ---------- */
+  if (from && to) {
+    where.startTime = {
+      gte: new Date(from + "T00:00:00"),
+      lt: new Date(to + "T23:59:59.999"),
+    };
+  } else if (date) {
+    const target = new Date(date + "T00:00:00");
+    const nextDay = new Date(target);
+    nextDay.setDate(nextDay.getDate() + 1);
+    where.startTime = {
+      gte: target,
+      lt: nextDay,
+    };
+  }
 
   const activities = await prisma.activity.findMany({
-    where: {
-      session: { userId },
-      startTime: {
-        gte: start,
-        lt: end
-      }
+    where,
+    orderBy: { startTime: "asc" },
+    include: {
+      session: {
+        select: { id: true, userId: true },
+      },
     },
-    orderBy: {
-      startTime: "asc"
+  });
+
+  // Group into sessions by contiguous app usage
+  const sessions: any[] = [];
+  let currentSession: any = null;
+
+  for (const activity of activities) {
+    if (
+      !currentSession ||
+      currentSession.appName !== activity.appName ||
+      new Date(activity.startTime).getTime() - new Date(currentSession.end).getTime() > 60000 // 1 min gap = new session
+    ) {
+      if (currentSession) sessions.push(currentSession);
+      currentSession = {
+        appName: activity.appName,
+        iconUrl: activity.iconUrl,
+        domain: activity.domain,
+        url: activity.url,
+        start: activity.startTime,
+        end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
+        duration: 0,
+        category: activity.category ?? "unknown",
+        items: [],
+      };
     }
-  });
 
-  /* ---------- MERGE ---------- */
+    currentSession.end = activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration);
+    currentSession.duration = new Date(currentSession.end).getTime() - new Date(currentSession.start).getTime();
+    currentSession.items.push({
+      title: activity.windowTitle ?? activity.appName,
+      iconUrl: activity.iconUrl,
+      domain: activity.domain,
+      url: activity.url,
+      start: activity.startTime,
+      end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
+      duration: activity.duration,
+    });
+  }
 
-  const merged = mergeActivities(activities);
+  if (currentSession) sessions.push(currentSession);
 
-  const latestRaw = activities[activities.length - 1];
-  const latestMerged = merged[merged.length - 1];
-  const latestMergedItem = latestMerged?.items?.[latestMerged.items.length - 1];
-
-  console.log("[Timeline Fetch]", {
-    userId,
-    date,
-    rawCount: activities.length,
-    mergedCount: merged.length,
-    latestRaw: latestRaw
-      ? {
-          appName: latestRaw.appName,
-          title: latestRaw.windowTitle,
-          start: latestRaw.startTime,
-          end: latestRaw.endTime,
-          duration: latestRaw.duration
-        }
-      : null,
-    latestMerged: latestMerged
-      ? {
-          appName: latestMerged.appName,
-          title: latestMergedItem?.title,
-          start: latestMerged.start,
-          end: latestMerged.end,
-          duration: latestMerged.duration
-        }
-      : null
-  });
-  return merged;
-
+  return sessions;
 }
 
 

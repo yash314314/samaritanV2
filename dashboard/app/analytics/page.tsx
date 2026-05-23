@@ -445,10 +445,6 @@ const ValidationBadge = ({ result }: { result: ValidationResult }) => {
 //  HEATMAP TOOLTIP — robust floating detail card
 // ═══════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════
-//  HEATMAP TOOLTIP — robust floating detail card
-// ═══════════════════════════════════════════════════════════
-
 const HeatmapTooltipCard = ({
   date,
   hour,
@@ -555,8 +551,9 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
   return (
     <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
       {[...byHour.entries()].map(([hour, hourSessions]) => {
-        const totalMs = hourSessions.reduce((sum, s) => sum + s.duration, 0);
-        const uniqueApps = [...new Set(hourSessions.map((s) => s.appName))];
+        const sortedSessions = [...hourSessions].sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+        const totalMs = sortedSessions.reduce((sum, s) => sum + s.duration, 0);
+        const uniqueApps = [...new Set(sortedSessions.map((s) => s.appName))];
         return (
           <div key={hour} className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/30">
             <div className="bg-zinc-900/80 px-4 py-3 flex items-center justify-between border-b border-zinc-800">
@@ -567,14 +564,14 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">{hourSessions.length} sessions</p>
+                  <p className="text-sm font-medium text-zinc-200">{sortedSessions.length} sessions</p>
                   <p className="text-xs text-zinc-500">
                     {formatHMS(totalMs / 1000)} total • {uniqueApps.length} apps
                   </p>
                 </div>
               </div>
               <div className="flex -space-x-2 overflow-hidden">
-                {hourSessions.slice(0, 4).map((s, i) =>
+                {sortedSessions.slice(0, 4).map((s, i) =>
                   s.iconUrl ? (
                     <img
                       key={i}
@@ -594,16 +591,16 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
                     </div>
                   )
                 )}
-                {hourSessions.length > 4 && (
+                {sortedSessions.length > 4 && (
                   <div className="w-6 h-6 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[8px] text-zinc-400 font-bold">
-                    +{hourSessions.length - 4}
+                    +{sortedSessions.length - 4}
                   </div>
                 )}
               </div>
             </div>
 
             <div className="divide-y divide-zinc-800/50">
-              {hourSessions.map((session, idx) => (
+              {sortedSessions.map((session, idx) => (
                 <div key={idx} className="px-4 py-3 hover:bg-zinc-800/40 transition-colors">
                   <div className="flex items-start gap-3">
                     {session.iconUrl ? (

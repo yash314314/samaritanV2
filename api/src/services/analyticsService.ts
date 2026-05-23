@@ -313,3 +313,147 @@ export async function getHeatmap(userId: string) {
 
   return finalHeatmap;
 }
+// ═══════════════════════════════════════════════════════════
+//  HEATMAP V2 — date ranges, color-by modes, category filter
+// ═══════════════════════════════════════════════════════════
+
+export type HeatmapColorMode = "score" | "productivity" | "duration" | "focus" | "idle";
+
+interface HeatmapV2Options {
+  userId: string;
+  from?: string;        // ISO date string (inclusive)
+  to?: string;          // ISO date string (inclusive)
+  colorMode?: HeatmapColorMode;
+  categoryFilter?: string | null;
+}
+
+export async function getHeatmapV2(options: HeatmapV2Options) {
+  const { userId, from, to, colorMode = "score", categoryFilter } = options;
+
+  // Build date filter
+  const where: Prisma.ActivityWhereInput = {
+    session: { userId },
+    duration: { gt: 0 },
+  };
+
+  if (from || to) {
+    where.startTime = {};
+    if (from) where.startTime.gte = new Date(from + "T00:00:00");
+    if (to) where.startTime.lt = new Date(to + "T23:59:59.999");
+  }
+
+  const activities = await prisma.activity.findMany({
+    where,
+    orderBy: { startTime: "asc" },
+  });
+
+  const heatmap: Record<string, Record<number, any>> = {};
+
+  for (const activity of activities) {
+    // Category filter
+    if (categoryFilter && activity.category !== categoryFilter) continue;
+
+    const score = getActivityProductivityScore(activity);
+    const focusImpact = activity.focusImpact ?? 0.5;
+
+    let current = new Date(activity.startTime);
+    const end =
+      activity.endTime > activity.startTime
+        ? new Date(activity.endTime)
+        : new Date(activity.startTime.getTime() + activity.duration);
+
+    while (current < end) {
+      const boundary = nextISTHourBoundary(current);
+      const segmentEnd = boundary < end ? boundary : end;
+      const segmentMs = segmentEnd.getTime() - current.getTime();
+
+      const { dateKey, hour } = getISTBucket(current);
+
+      if (!heatmap[dateKey]) heatmap[dateKey] = {};
+      if (!heatmap[dateKey][hour]) {
+        heatmap[dateKey][hour] = {
+          totalProductivity: 0,
+          totalFocus: 0,
+          totalMs: 0,
+          idleMs: 0,
+          appDurations: {},
+          categoryDurations: {},
+          intentDurations: {},
+        };
+      }
+
+      const bucket = heatmap[dateKey][hour];
+      const appName = activity.appName ?? "Unknown";
+      const category = activity.category ?? "unknown";
+      const intent = activity.intent ?? "unknown";
+
+      bucket.totalProductivity += score * segmentMs;
+      bucket.totalFocus += focusImpact * segmentMs;
+      bucket.totalMs += segmentMs;
+
+      if (isIdleActivity(activity)) {
+        bucket.idleMs += segmentMs;
+      }
+
+      bucket.appDurations[appName] = (bucket.appDurations[appName] || 0) + segmentMs;
+      bucket.categoryDurations[category] = (bucket.categoryDurations[category] || 0) + segmentMs;
+      bucket.intentDurations[intent] = (bucket.intentDurations[intent] || 0) + segmentMs;
+
+      current = segmentEnd;
+    }
+  }
+
+  const getDominantKey = (values: Record<string, number>) => {
+    const [key] = Object.entries(values).sort((a, b) => b[1] - a[1])[0] ?? [];
+    return key ?? null;
+  };
+
+  const getTopEntries = (values: Record<string, number>, totalMs: number) =>
+    Object.entries(values)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, duration]) => ({
+        name,
+        duration,
+        minutes: Number((duration / 60000).toFixed(1)),
+        percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
+      }));
+
+  const finalHeatmap: Record<string, Record<number, any>> = {};
+
+  Object.entries(heatmap).forEach(([date, hours]) => {
+    finalHeatmap[date] = {};
+    Object.entries(hours).forEach(([hour, data]) => {
+      const rawScore = data.totalMs > 0 ? data.totalProductivity / data.totalMs : 0;
+      const rawFocus = data.totalMs > 0 ? data.totalFocus / data.totalMs : 0;
+      const idleRatio = data.totalMs > 0 ? data.idleMs / data.totalMs : 0;
+
+      // Compute color value based on mode
+      let colorValue = rawScore;
+      if (colorMode === "focus") colorValue = rawFocus;
+      else if (colorMode === "duration") colorValue = data.totalMs / 3600000; // hours
+      else if (colorMode === "idle") colorValue = idleRatio;
+      // productivity = rawScore (default)
+
+      finalHeatmap[date][Number(hour)] = {
+        score: rawScore,
+        productivity: rawScore,
+        focus: rawFocus,
+        duration: data.totalMs,
+        idleRatio,
+        trackedMinutes: Number((data.totalMs / 60000).toFixed(1)),
+        idleMinutes: Number((data.idleMs / 60000).toFixed(1)),
+        colorValue,              // ← what the grid uses for coloring
+        colorMode,               // ← so frontend knows what it's looking at
+        dominantApp: getDominantKey(data.appDurations),
+        dominantCategory: getDominantKey(data.categoryDurations),
+        dominantIntent: getDominantKey(data.intentDurations),
+        topApps: getTopEntries(data.appDurations, data.totalMs),
+        categoryBreakdown: getTopEntries(data.categoryDurations, data.totalMs),
+        intentBreakdown: getTopEntries(data.intentDurations, data.totalMs),
+      };
+    });
+  });
+
+  return finalHeatmap;
+}

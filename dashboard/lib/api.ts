@@ -118,19 +118,43 @@ export async function fetchDailyFocusTrend(userId: string, date: string, bucketM
   return request(`/analytics/daily-focus-trend?userId=${userId}&date=${date}&bucketMinutes=${bucketMinutes}`);
 }
 
-export function fetchTimeline(userId: string, date: string) {
-  return request(`/analytics/timeline?userId=${userId}&date=${date}`);
-}
+export const fetchTimeline = async (
+  userId: string,
+  from?: string,
+  to?: string,
+  date?: string
+) => {
+  const params = new URLSearchParams({ userId });
+  if (from) params.append("from", from);
+  if (to) params.append("to", to);
+  if (date) params.append("date", date);
+
+  const res = await fetch(`${API_BASE}/analytics/timeline?${params}`);
+  if (!res.ok) throw new Error(`Timeline fetch failed: ${res.status}`);
+  return res.json();
+};
 
 export function fetchAnalytics(userId: string) {
   return request(`/analytics?userId=${userId}`);
 }
 
-export function fetchHeatmap(userId: string, date?: string) {
-  const query = date ? `?userId=${userId}&date=${date}` : `?userId=${userId}`;
-  return request(`/analytics/heatmap${query}`);
-}
+export const fetchHeatmap = async (
+  userId: string,
+  from?: string,
+  to?: string,
+  colorMode?: "score" | "productivity" | "duration" | "focus" | "idle",
+  category?: string | null
+) => {
+  const params = new URLSearchParams({ userId });
+  if (from) params.append("from", from);
+  if (to) params.append("to", to);
+  if (colorMode) params.append("colorMode", colorMode);
+  if (category) params.append("category", category);
 
+  const res = await fetch(`${API_BASE}/analytics/heatmap?${params}`);
+  if (!res.ok) throw new Error(`Heatmap fetch failed: ${res.status}`);
+  return res.json();
+};
 export async function fetchDailyComparison(userId: string) {
   const res = await fetch(`${API_BASE}/analytics/compare?userId=${userId}`);
   return res.json();
