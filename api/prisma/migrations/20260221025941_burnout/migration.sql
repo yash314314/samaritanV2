@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Session" ADD COLUMN     "burnoutScore" DOUBLE PRECISION NOT NULL DEFAULT 0;

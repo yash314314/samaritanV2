@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+:root {
+  --bg-dark: #0B0B0F;
+  --card-dark: #14141A;
+
+  --purple-accent: #7C3AED;
+  --pink-accent: #EC4899;
+  --blue-accent: #3B82F6;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: white;
+  font-family: system-ui, sans-serif;
+}
+/* ===========================
+   Square Tile Calendar (Fixed)
+   =========================== */
+
+   /* ===========================
+   Modern Square Grid Calendar (v9 compatible)
+   =========================== */
+
+/* ===========================
+   Square Grid Calendar - v9.13.2
+   =========================== */
+
+   .rdp {
+    background: #111111;
+    padding: 16px;
+    border-radius: 16px;
+    color: white;
+    display: grid;
+  }
+  
+  /* Header */
+  .rdp-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+  /* Dark Scrollbar */
+
+/* ===========================
+   Dark Scrollbars
+   =========================== */
+
+   * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a #14141A;
+  }
+  
+  /* Chrome / Edge / Safari */
+  
+  ::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: #14141A;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a2a;
+    border-radius: 8px;
+    border: 2px solid #14141A;
+  }
+  /* Heatmap specific scrollbar */
+
+.heatmap-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.heatmap-scroll::-webkit-scrollbar-track {
+  background: #14141A;
+}
+
+.heatmap-scroll::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 8px;
+}
+
+.heatmap-scroll::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a3a;
+  }
+  /* Weekday header row */
+  .rdp-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 42px);
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+  
+  .rdp-weekday {
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+  }
+  
+  /* Each week row becomes a 7-column grid */
+  .rdp-week {
+    display: grid;
+    grid-template-columns: repeat(7, 42px);
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  
+  /* Day tiles */
+  .rdp-day {
+    width: 42px;
+    height: 42px;
+    background: #1a1a1a;
+    border: 1px solid #222;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+  
+  /* Hover */
+  .rdp-day:hover {
+    background: #262626;
+  }
+  
+  /* Selected */
+  .rdp-day_selected {
+    background: #333333 !important;
+    border: 1px solid #555 !important;
+  }
+  
+  /* Today */
+  .rdp-day_today {
+    border: 1px solid #888;
+  }
+  
+  /* Outside month */
+  .rdp-day_outside {
+    opacity: 0.3;
+  }
+  
+  /* Navigation buttons */
+  .rdp-nav_button {
+    background: #1f1f1f;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #aaa;
+  }
+  
+  .rdp-nav_button:hover {
+    background: #2a2a2a;
+  }
+  

@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+
+  sessions  Session[]
+}
+
+model Session {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  startTime     DateTime @default(now())
+  endTime       DateTime?
+  createdAt     DateTime @default(now())
+  focusScore    Float    @default(0)
+  burnoutScore  Float    @default(0)
+  deepWorkScore Float    @default(0)
+  entropyScore  Float    @default(0)
+  switchCount   Int      @default(0)
+  idleTime      Int      @default(0)
+  totalDuration Int      @default(0)
+  productivityScore Float @default(0)
+
+  isDeepWork    Boolean  @default(false)
+
+  activities    Activity[]
+
+  @@index([userId])
+  @@index([startTime])
+}
+
+model AppCategory {
+  id        String   @id @default(uuid())
+  appName   String   @unique
+  category  String   // productive | neutral | distracting
+  createdAt DateTime @default(now())
+}
+
+
+model Activity {
+  id              String   @id @default(uuid())
+  session         Session  @relation(fields: [sessionId], references: [id])
+  sessionId       String
+
+  appName         String
+  windowTitle     String
+
+  startTime       DateTime
+  endTime         DateTime
+  duration        Int
+  type            String?
+
+  category        String?
+  intent          String?
+  focusImpact     Float?
+  energyImpact    Float?
+  confidence      Float?
+
+  iconUrl         String?
+  domain          String?
+  url             String?
+
+  @@index([sessionId])
+  @@index([startTime])
+}
+model AppPattern {
+  id          String   @id @default(uuid())
+  appName     String
+  titleRegex  String
+  category    String
+  intent      String?
+  focusImpact Float?
+  energyImpact Float?
+  confidence  Float?
+  createdAt   DateTime @default(now())
+
+  @@index([appName])
+}
+model DeepWorkSession {
+  id              String   @id @default(uuid())
+  userId          String
+  goal            String?
+  plannedMinutes  Int
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  status          String   // active | completed | abandoned
+  enforcement     String   // observe | warn | require_reason | block
+
+  allowedApps     String[]
+  allowedDomains  String[]
+  blockedApps     String[]
+  blockedDomains  String[]
+
+  focusScore      Float    @default(0)
+  violationCount  Int      @default(0)
+  interruptionMs  Int      @default(0)
+  productiveMs    Int      @default(0)
+  distractionMs   Int      @default(0)
+  idleMs          Int      @default(0)
+  productivityScore Float @default(0)
+  interventions   FocusIntervention[]
+  minuteLogs      DeepWorkMinuteLog[]
+  createdAt       DateTime @default(now())
+}
+
+model FocusIntervention {
+  id              String   @id @default(uuid())
+
+  deepWorkId      String
+
+  deepWork        DeepWorkSession @relation(fields: [deepWorkId], references: [id])
+
+  appName         String
+  domain          String?
+  windowTitle     String
+
+  detectedAt      DateTime @default(now())
+
+  action          String
+  reason          String?
+  durationMs      Int?
+    @@index([deepWorkId])
+  @@index([detectedAt])
+}
+model DeepWorkMinuteLog {
+  id            String   @id @default(uuid())
+  deepWorkId    String
+  deepWork      DeepWorkSession @relation(fields: [deepWorkId], references: [id], onDelete: Cascade)
+  
+  minuteIndex   Int      // 0, 1, 2, 3... relative to session start
+  timestamp     DateTime @default(now())
+  
+  // Metrics at this minute
+  focusScore        Float @default(0)
+  productivityScore Float @default(0)
+  
+  // Flags
+  distractionFlag   Boolean @default(false)
+  idleFlag          Boolean @default(false)
+  
+  // Context snapshot
+  appName       String?
+  windowTitle   String?
+  category      String?
+  intent        String?
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([deepWorkId])
+  @@index([minuteIndex])
+  @@index([timestamp])
+}

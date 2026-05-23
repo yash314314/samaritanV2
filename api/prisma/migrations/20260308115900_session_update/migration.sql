@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Session" ADD COLUMN     "productivityScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "totalDuration" INTEGER NOT NULL DEFAULT 0;

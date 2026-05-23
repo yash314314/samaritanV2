@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Focus Blocked</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #0a0a0a;
+      color: #ff4444;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      text-align: center;
+    }
+    .icon { font-size: 80px; margin-bottom: 20px; }
+    h1 { font-size: 32px; margin-bottom: 10px; }
+    p { font-size: 18px; color: #ccc; margin-bottom: 30px; }
+    .timer { font-size: 48px; font-weight: bold; color: #fff; }
+    .reason-box {
+      margin-top: 30px;
+      display: none;
+    }
+    input {
+      padding: 12px 20px;
+      font-size: 16px;
+      border: 2px solid #ff4444;
+      border-radius: 8px;
+      background: #1a1a1a;
+      color: #fff;
+      width: 300px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #ff4444;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:hover { background: #ff6666; }
+  </style>
+</head>
+<body>
+  <div class="icon">🚫</div>
+  <h1>Deep Work Protected</h1>
+  <p id="message">This app is blocked during your focus session.</p>
+  <div class="timer" id="timer">--:--</div>
+  
+  <div class="reason-box" id="reasonBox">
+    <input type="text" id="reasonInput" placeholder="Why do you need this app?" />
+    <button onclick="submitReason()">Request Override</button>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    ipcRenderer.on('focus-blocked', (event, data) => {
+      document.getElementById('message').textContent = 
+        `${data.appName} is blocked during your deep work session.`;
+      
+      // Show reason input if enforcement is "require_reason"
+      if (data.showReason) {
+        document.getElementById('reasonBox').style.display = 'block';
+      }
+    });
+
+    // Update timer from main process
+    ipcRenderer.on('session-tick', (event, data) => {
+      const mins = Math.floor(data.remaining / 60);
+      const secs = data.remaining % 60;
+      document.getElementById('timer').textContent = 
+        `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    });
+
+    function submitReason() {
+      const reason = document.getElementById('reasonInput').value;
+      if (reason.trim()) {
+        ipcRenderer.send('override-requested', { reason });
+      }
+    }
+  </script>
+</body>
+</html>

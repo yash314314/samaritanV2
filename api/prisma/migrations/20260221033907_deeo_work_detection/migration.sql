@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Session" ADD COLUMN     "deepWorkScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "isDeepWork" BOOLEAN NOT NULL DEFAULT false;

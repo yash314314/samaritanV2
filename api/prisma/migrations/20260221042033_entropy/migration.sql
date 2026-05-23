@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Session" ADD COLUMN     "entropyScore" DOUBLE PRECISION NOT NULL DEFAULT 0;
