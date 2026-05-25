@@ -1350,7 +1350,13 @@ export default function AnalyticsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
                       <XAxis dataKey="label" stroke={chartAxisColor} fontSize={12} />
                       <YAxis domain={[0, 100]} stroke={chartAxisColor} fontSize={12} />
-                      <Tooltip contentStyle={chartTooltipStyle} formatter={(value: number) => [`${round0(value)}%`, "Focus"]} />
+                      <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        formatter={(value) => [
+                          typeof value === "number" ? `${round0(value)}%` : "—",
+                          "Focus",
+                        ]}
+                      />
                       <Area type="monotone" dataKey="focus" stroke="#a855f7" fill="url(#focusGrad)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
