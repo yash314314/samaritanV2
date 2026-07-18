@@ -4,13 +4,7 @@ const { startTracking } = require("./tracker");
 const { startSyncLoop } = require("./syncEngine");
 const { startSessionPoller } = require("./sessionPoller");
 
-app.whenReady().then(() => {
-  console.log("Samaritan is watching you...");
-  createWindow();
-  startTracking();
 
-  startSessionPoller(); // ← ADD THIS
-});
 const isDev = !app.isPackaged;
 
 // Overlay window reference
