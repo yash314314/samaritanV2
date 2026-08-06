@@ -1,98 +1,213 @@
-const { app, BrowserWindow, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const { startTracking } = require("./tracker");
+const { startTracking, setActiveDeepWorkRef, clearActiveDeepWorkRef } = require("./tracker");
 const { startSyncLoop } = require("./syncEngine");
-const { startSessionPoller } = require("./sessionPoller");
-
+const {
+  connect: connectWs,
+  on: onWs,
+  subscribeToDeepWork,
+  unsubscribeFromDeepWork
+} = require("./wsClient");
+const { flushCurrentSession, handleFocusIntervention } = require("./sessionEngine");
 
 const isDev = !app.isPackaged;
+const API_BASE = "http://localhost:4000";
 
-// Overlay window reference
-let blockOverlay = null;
+let mainWindow;
+let activeDeepWork = null;
+let activeIntervention = null;
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1300,
-    height: 900,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      nodeIntegration: true, // Required for renderer IPC
-      contextIsolation: false // Simplify for now
-    }
+function setActiveDeepWork(session) {
+  activeDeepWork = {
+    id: session.id,
+    goal: session.goal || null,
+    plannedMinutes: session.plannedMinutes,
+    enforcement: session.enforcement || "warn",
+    startedAt: session.startedAt,
+    allowedApps: session.allowedApps || [],
+    allowedDomains: session.allowedDomains || [],
+    blockedApps: session.blockedApps || [],
+    blockedDomains: session.blockedDomains || []
+  };
+
+  // Sync the deep work session to the tracker for pre-emptive process killing
+  setActiveDeepWorkRef(activeDeepWork);
+
+  subscribeToDeepWork(activeDeepWork.id);
+  console.log("[DeepWork] Desktop runtime armed:", {
+    id: activeDeepWork.id,
+    enforcement: activeDeepWork.enforcement,
+    blockedApps: activeDeepWork.blockedApps,
+    blockedDomains: activeDeepWork.blockedDomains
   });
-
-  if (isDev) {
-    win.loadURL("http://localhost:3000");
-    win.webContents.openDevTools();
-  } else {
-    win.loadFile(
-      path.join(__dirname, "../dashboard/out/index.html")
-    );
-  }
-
-  return win;
 }
 
-function createBlockOverlay(data) {
-  if (blockOverlay) {
-    blockOverlay.focus();
+async function clearActiveDeepWork(sessionId, endedAt = null) {
+  const id = sessionId || activeDeepWork?.id;
+  if (id) {
+    await flushCurrentSession("deepwork-ended", endedAt);
+  }
+  if (id) unsubscribeFromDeepWork(id);
+  clearActiveDeepWorkRef();
+  activeDeepWork = null;
+  activeIntervention = null;
+  console.log("[DeepWork] Desktop runtime cleared");
+}
+
+function showIntervention(intervention) {
+  const appName = intervention.appName || "This app";
+  const action = intervention.action || activeDeepWork?.enforcement || "observe";
+  const message =
+    intervention.reason ||
+    `${appName} is outside your active deep work protocol.`;
+
+  activeIntervention = {
+    id: intervention.id || null,
+    appName,
+    action,
+    deepWorkId: intervention.deepWorkId || activeDeepWork?.id || null
+  };
+
+  handleFocusIntervention(
+    {
+      id: intervention.id,
+      intervention,
+      enforcement: action,
+      message
+    },
+    appName
+  );
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("show-intervention", {
+      ...intervention,
+      enforcement: action,
+      message,
+      activeDeepWork
+    });
+  }
+}
+
+function clearInterventionOverlay(payload = {}) {
+  activeIntervention = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("focus-cleared", {
+      ...payload,
+      activeDeepWork
+    });
+  }
+}
+
+async function resolveActiveIntervention(reason) {
+  if (!activeIntervention?.id) {
+    console.warn("[DeepWork] Override requested, but no active intervention is tracked");
     return;
   }
 
-  blockOverlay = new BrowserWindow({
-    width: 500,
-    height: 400,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+  try {
+    const response = await fetch(`${API_BASE}/focus/interventions/${activeIntervention.id}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reason,
+        action: "allowed_once"
+      })
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("[DeepWork] Override resolution failed:", response.status, text);
+      return;
     }
-  });
 
-  blockOverlay.loadFile(path.join(__dirname, "renderer/block-overlay.html"));
-
-  blockOverlay.webContents.on('did-finish-load', () => {
-    blockOverlay.webContents.send('focus-blocked', data);
-  });
-
-  blockOverlay.on('closed', () => {
-    blockOverlay = null;
-  });
-}
-
-function closeBlockOverlay() {
-  if (blockOverlay) {
-    blockOverlay.close();
-    blockOverlay = null;
+    console.log("[DeepWork] Override reason recorded for intervention:", activeIntervention.id);
+    activeIntervention = null;
+  } catch (err) {
+    console.error("[DeepWork] Override resolution error:", err.message);
   }
 }
 
-// IPC handlers
-ipcMain.on('focus-blocked', (event, data) => {
-  createBlockOverlay(data);
-});
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 600,
+    height: 800,
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
 
-ipcMain.on('override-requested', async (event, data) => {
-  console.log("[Samaritan] Override requested with reason:", data.reason);
-  
-  // TODO: Send to backend to resolve intervention
-  // await resolveInterventionAPI(data.reason);
-  
-  closeBlockOverlay();
-});
+  mainWindow.loadURL(
+    isDev
+      ? "http://localhost:3000"
+      : `file://${path.join(__dirname, "../renderer/out/index.html")}`
+  );
+
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
 
 app.whenReady().then(() => {
-  console.log("Samaritan is watching you...");
   createWindow();
+
+  // Connect WebSocket
+  connectWs();
+
+  // Listen for deep work events from server via WS
+  onWs("deepwork:started", (session) => {
+    console.log("[WS] Deep work started:", session.id);
+    setActiveDeepWork(session);
+  });
+
+  onWs("deepwork:ended", ({ sessionId, result } = {}) => {
+    console.log("[WS] Deep work ended");
+    clearActiveDeepWork(sessionId, result?.endedAt).catch((err) => {
+      console.error("[DeepWork] Failed to flush session on end:", err.message);
+    });
+  });
+
+  onWs("deepwork:expired", ({ sessionId, endedAt } = {}) => {
+    console.log("[WS] Deep work expired");
+    clearActiveDeepWork(sessionId, endedAt).catch((err) => {
+      console.error("[DeepWork] Failed to flush session on expiry:", err.message);
+    });
+  });
+
+  onWs("intervention:triggered", (intervention) => {
+    console.log("[WS] Intervention:", intervention.action, intervention.appName);
+    showIntervention(intervention);
+  });
+
+  onWs("intervention:cleared", (payload) => {
+    console.log("[WS] Intervention cleared:", payload?.appName || "allowed activity");
+    clearInterventionOverlay(payload);
+  });
+
+  ipcMain.on("override-requested", (_event, data = {}) => {
+    const reason = typeof data.reason === "string" ? data.reason.trim() : "";
+    if (!reason) return;
+    resolveActiveIntervention(reason);
+  });
+
   startTracking();
-  startSessionPoller();
+  //startSyncLoop();
 });
 
-// Clean up overlay on quit
-app.on("before-quit", () => {
-  closeBlockOverlay();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });

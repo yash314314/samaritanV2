@@ -1,77 +1,33 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { LayoutDashboard, Sparkles, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { LayoutDashboard, Loader2, Sparkles } from "lucide-react";
 
-import CognitiveSummary from "../../components/intelligence/CognitiveSummary";
+import AssistantInsights from "../../components/intelligence/AssistantInsights";
+import BurnoutRiskPanel from "../../components/intelligence/BurnoutRiskPanel";
 import CognitiveStabilityCard from "../../components/intelligence/CognitiveStabilityCard";
+import CognitiveSummary from "../../components/intelligence/CognitiveSummary";
+import EntropyTrendChart from "../../components/intelligence/EntropyTrendChart";
+import GrowthTrendChart from "../../components/intelligence/GrowthTrendChart";
+import IntentHeatmap from "../../components/intelligence/IntentHeatmap";
+import PatternDetector from "../../components/intelligence/PatternDetector";
 import PeakFocusCard from "../../components/intelligence/PeakFocusCard";
 import PerformanceProbabilityCard from "../../components/intelligence/PerformanceProbabilityCard";
-import DeepWorkReadinessCard from "../../components/intelligence/DeepWorkReadinessCard";
-import PatternDetector from "../../components/intelligence/PatternDetector";
-import GrowthTrendChart from "../../components/intelligence/GrowthTrendChart";
-import EntropyTrendChart from "../../components/intelligence/EntropyTrendChart";
-import IntentHeatmap from "../../components/intelligence/IntentHeatmap";
-import BurnoutRiskPanel from "../../components/intelligence/BurnoutRiskPanel";
-import AssistantInsights from "../../components/intelligence/AssistantInsights";
-
 import {
-  fetchIntelligence,
+  fetchBurnoutRisk,
   fetchDailyComparison,
   fetchGrowthTrend,
-  fetchBurnoutRisk,
+  fetchIntelligence,
   fetchIntentHeatmap,
 } from "../../lib/api";
-import { focusApi } from "../../lib/api";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
-// Compute readiness from available data
-function computeReadiness(intel: any, burnout: any, compare: any) {
-  if (!intel || !burnout) return null;
-
-  const now = new Date();
-  const hour = now.getHours() + now.getMinutes() / 60;
-  
-  // Time of day factor (peak hours 9-11, 14-16)
-  const timeFactor = (hour >= 9 && hour <= 11) || (hour >= 14 && hour <= 16) ? 85 :
-                     (hour >= 7 && hour <= 18) ? 60 : 30;
-
-  // Recent pattern from comparison
-  const recentPattern = compare?.change > 0 ? 75 : compare?.change < -10 ? 35 : 55;
-
-  // Burnout buffer (inverted risk)
-  const burnoutScore = burnout.burnoutScore ?? 0;
-  const burnoutFactor = burnoutScore > 70 ? 20 : burnoutScore > 40 ? 50 : 85;
-
-  // Last session quality (from deep work ratio)
-  const lastSession = intel.deepWorkRatio ?? 0;
-  const lastFactor = lastSession > 40 ? 80 : lastSession > 20 ? 55 : 30;
-
-  const score = Math.round((timeFactor + recentPattern + burnoutFactor + lastFactor) / 4);
-
-  return {
-    score,
-    factors: {
-      timeOfDay: timeFactor,
-      recentPattern,
-      burnoutRisk: burnoutFactor,
-      lastSessionQuality: lastFactor,
-    },
-    recommendedDuration: score >= 75 ? 90 : score >= 50 ? 60 : score >= 25 ? 30 : 0,
-    bestWindow: score >= 50 ? { start: 9, end: 12 } : null,
-    riskFactors: burnoutScore > 60 ? ["Elevated burnout risk detected"] : 
-                 intel.fragmentationScore > 50 ? ["High fragmentation recently"] : [],
-  };
-}
-
-// Compute patterns from intel data
 function computePatterns(intel: any, intents: any[]) {
   if (!intel || !intents?.length) return null;
 
   const patterns = [];
-  
-  // Example pattern: communication vs focus correlation
+
   if (intel.communicationRatio > 30 && intel.focusScore < 70) {
     patterns.push({
       type: "negative" as const,
@@ -83,14 +39,25 @@ function computePatterns(intel: any, intents: any[]) {
     });
   }
 
-  if (intel.deepWorkRatio > 30) {
+  if (intel.fragmentationScore > 50) {
+    patterns.push({
+      type: "negative" as const,
+      metric: "Fragmentation",
+      condition: "Frequent context switches",
+      impact: -18,
+      confidence: 82,
+      recommendation: "Group similar work together and reduce task switching.",
+    });
+  }
+
+  if (intel.cognitiveStability > 70) {
     patterns.push({
       type: "positive" as const,
-      metric: "Deep work blocks",
-      condition: "Ratio > 30%",
-      impact: 22,
-      confidence: 85,
-      recommendation: "Maintain current block scheduling. Consider extending by 15 min.",
+      metric: "Cognitive stability",
+      condition: `${intel.cognitiveStability.toFixed(0)} stability`,
+      impact: 16,
+      confidence: 84,
+      recommendation: "Use this window for demanding work.",
     });
   }
 
@@ -128,8 +95,8 @@ export default function IntelligencePage() {
       setGrowth(growthData);
       setBurnout(burnoutData);
       setIntents(intentData);
-    } catch (e) {
-      console.error("Intelligence load failed:", e);
+    } catch (error) {
+      console.error("Intelligence load failed:", error);
     } finally {
       setLoading(false);
     }
@@ -139,22 +106,13 @@ export default function IntelligencePage() {
     load();
   }, [load]);
 
-  const readiness = computeReadiness(intel, burnout, compare);
   const patterns = computePatterns(intel, intents?.intents || intents);
-
-  const handleStartSession = async (duration: number) => {
-    await focusApi.start({
-      plannedMinutes: duration,
-      enforcement: "warn",
-      goal: "Deep work from intelligence dashboard",
-    });
-  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-zinc-100 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-black text-zinc-100">
         <div className="flex items-center gap-3 text-zinc-500">
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin" />
           <span className="text-sm">Loading intelligence diagnostics...</span>
         </div>
       </div>
@@ -163,74 +121,57 @@ export default function IntelligencePage() {
 
   return (
     <div className="min-h-screen bg-black text-zinc-100">
-      {/* Header */}
-      <div className="bg-zinc-900 border-b border-zinc-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+      <div className="border-b border-zinc-800 bg-zinc-900">
+        <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                <Sparkles className="w-6 h-6 text-purple-500" />
+              <h1 className="flex items-center gap-2 text-xl font-bold text-zinc-100">
+                <Sparkles className="h-6 w-6 text-purple-500" />
                 Intelligence
               </h1>
-              <p className="mt-0.5 text-sm text-zinc-500">Cognitive analytics & predictive insights</p>
+              <p className="mt-0.5 text-sm text-zinc-500">Cognitive analytics and predictive insights</p>
             </div>
             <div className="flex items-center gap-2 text-xs text-zinc-600">
-              <LayoutDashboard className="w-4 h-4" />
+              <LayoutDashboard className="h-4 w-4" />
               <span>Samaritan AI</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Summary Header */}
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <CognitiveSummary intel={intel} compare={compare} />
 
-        {/* Main Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-6 auto-rows-[minmax(180px,auto)]">
-          
-          {/* ROW 1: Core Metrics */}
-          <div className="xl:col-span-3">
-            <DeepWorkReadinessCard data={readiness} onStartSession={handleStartSession} />
-          </div>
-
-          <div className="xl:col-span-3">
+        <div className="grid grid-cols-1 gap-6 auto-rows-[minmax(180px,auto)] md:grid-cols-2 xl:grid-cols-12">
+          <div className="xl:col-span-4">
             <CognitiveStabilityCard data={intel} />
           </div>
-
-          <div className="xl:col-span-3">
+          <div className="xl:col-span-4">
             <PeakFocusCard data={intel} />
           </div>
-
-          <div className="xl:col-span-3">
+          <div className="xl:col-span-4">
             <PerformanceProbabilityCard data={intel} />
           </div>
 
-          {/* ROW 2: Trends + Patterns */}
           <div className="xl:col-span-8">
             <GrowthTrendChart data={growth} />
           </div>
-
           <div className="xl:col-span-4">
             <EntropyTrendChart data={growth} />
           </div>
 
-          {/* ROW 3: Intent + Burnout + Patterns */}
           <div className="xl:col-span-4">
             <PatternDetector data={patterns} />
           </div>
-
           <div className="xl:col-span-4">
             <IntentHeatmap data={intents?.intents || intents} />
           </div>
-
           <div className="xl:col-span-4">
             <BurnoutRiskPanel data={burnout} />
           </div>
 
-          {/* ROW 4: AI Insights */}
           <div className="xl:col-span-12">
-            <AssistantInsights data={{ ...intel, readinessScore: readiness?.score }} />
+            <AssistantInsights data={intel} />
           </div>
         </div>
       </div>

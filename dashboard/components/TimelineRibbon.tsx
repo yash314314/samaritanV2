@@ -1,7 +1,7 @@
 "use client"
 
 import useSWR from "swr"
-import { getTimeline } from "@/lib/api"
+import { fetchTimeline } from "@/lib/api"
 
 const USER = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4"
 
@@ -11,7 +11,7 @@ export default function TimelineRibbon() {
 
   const { data } = useSWR(
     "timeline",
-    () => getTimeline(USER, date)
+    () => fetchTimeline(USER, undefined, undefined, date)
   )
 
   if (!data) return null

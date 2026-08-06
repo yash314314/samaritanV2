@@ -1,6 +1,4 @@
 "use client";
-
-import { useMemo } from "react";
 import { Lightbulb, TrendingUp, TrendingDown, ArrowRight, Clock, Monitor } from "lucide-react";
 
 interface Pattern {
@@ -22,13 +20,11 @@ interface PatternDetectorProps {
 }
 
 export default function PatternDetector({ data }: PatternDetectorProps) {
+  const { patterns = [], topPerformer = null, worstPerformer = null, timeOfDayWinner = null } = data ?? {};
+
+  const sortedPatterns = [...patterns].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 4);
+
   if (!data || !data.patterns?.length) return null;
-
-  const { patterns, topPerformer, worstPerformer, timeOfDayWinner } = data;
-
-  const sortedPatterns = useMemo(() => 
-    [...patterns].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 4),
-  [patterns]);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 h-full">
@@ -61,14 +57,15 @@ export default function PatternDetector({ data }: PatternDetectorProps) {
       </div>
 
       {/* Best Time */}
-      {timeOfDayWinner && (
+      {timeOfDayWinner?.hour != null && (
         <div className="flex items-center gap-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/10 mb-5">
           <Clock className="w-4 h-4 text-purple-400" />
           <div>
             <p className="text-xs text-zinc-300">Peak performance window</p>
             <p className="text-sm font-bold text-purple-400">
-              {timeOfDayWinner.hour.toString().padStart(2, "0")}:00 — {timeOfDayWinner.avgFocus.toFixed(0)}% focus
-            </p>
+  {String(timeOfDayWinner.hour).padStart(2, "0")}:00 —{" "}
+  {timeOfDayWinner.avgFocus.toFixed(0)}% focus
+</p>
           </div>
         </div>
       )}

@@ -1,4 +1,7 @@
 const { app, Notification, BrowserWindow } = require("electron");
+const { streamActivity } = require("./wsClient");
+const { killProcessByName } = require("./taskkill");
+const crypto = require("crypto");
 
 let currentSession = null;
 
@@ -13,32 +16,34 @@ function now() {
 /* ---------------- START SESSION ---------------- */
 
 function startNewSession(event) {
- const startTime = event.startTime
+  const startTime = event.startTime
     ? new Date(event.startTime).getTime()
     : now();
-    currentSession = {
-      startTime,
-      endTime: startTime,
-      app: event.app,
-      title: event.title,
-      icon: event.icon || null,
-      url: event.url || null,
-      domain: event.domain || null,
-      type: event.type || "active"
-    };
+  currentSession = {
+    id: crypto.randomUUID(),
+    startTime,
+    endTime: startTime,
+    lastSentTime: startTime,
+    app: event.app,
+    title: event.title,
+    icon: event.icon || null,
+    url: event.url || null,
+    domain: event.domain || null,
+    type: event.type || "active"
+  };
   console.log(
     "[Samaritan] New observation initiated.",
-    "\n  App:", event.app,
-    "\n  Title:", event.title,
-    "\n  Timestamp:", new Date(currentSession.startTime).toISOString()
+    "\n App:", event.app,
+    "\n Title:", event.title,
+    "\n Timestamp:", new Date(currentSession.startTime).toISOString()
   );
-
 }
 
 /* ---------------- SEND TO BACKEND ---------------- */
 
 async function sendSessionToBackend(session) {
   const payload = {
+    id: session.id,
     userId: USER_ID,
     app: session.app,
     title: session.title,
@@ -52,8 +57,17 @@ async function sendSessionToBackend(session) {
   };
 
   console.log("[Samaritan] Preparing transmission to backend.");
-  console.log("[Samaritan] Payload:", JSON.stringify(payload, null, 2));
 
+  // Primary: Stream via WebSocket. Only use HTTP if WS is unavailable,
+  // otherwise the same activity is processed twice on the backend.
+  console.log("[Samaritan] Streaming activity via WS");
+  const streamed = streamActivity(payload);
+  if (streamed) {
+    return;
+  }
+
+  // Fallback: HTTP POST for reliability when WS is down.
+  console.log("[Samaritan] WS unavailable; using HTTP fallback");
   try {
     const response = await fetch(BACKEND_URL, {
       method: "POST",
@@ -65,14 +79,14 @@ async function sendSessionToBackend(session) {
 
     if (!response.ok) {
       console.error(
-        "[Samaritan] Backend rejected the observation.",
-        "\n  Status:", response.status,
-        "\n  Response:", text
+        "[Samaritan] HTTP fallback rejected.",
+        "\n Status:", response.status,
+        "\n Response:", text
       );
       return;
     }
 
-    console.log("[Samaritan] Transmission acknowledged by backend.");
+    console.log("[Samaritan] HTTP fallback acknowledged.");
 
     try {
       const data = JSON.parse(text);
@@ -84,12 +98,12 @@ async function sendSessionToBackend(session) {
 
         console.log(
           "[Samaritan] Strict focus intervention.",
-          "\n  Action:", focusIntervention.intervention?.action,
-          "\n  App:", appName,
-          "\n  Message:", focusIntervention.message
+          "\n Action:", focusIntervention.intervention?.action,
+          "\n App:", appName,
+          "\n Message:", focusIntervention.message
         );
 
-        handleIntervention(focusIntervention, appName);
+        handleFocusIntervention(focusIntervention, appName);
       }
     } catch {
       // Backend returned a valid acknowledgement without JSON intervention data.
@@ -97,20 +111,21 @@ async function sendSessionToBackend(session) {
 
   } catch (err) {
     console.error(
-      "[Samaritan] Transmission failed.",
-      "\n  Error:", err.message
+      "[Samaritan] HTTP fallback failed.",
+      "\n Error:", err.message
     );
+    // WS already sent the data, so no data loss
   }
 }
 
-/* ---------- INTERVENTION HANDLER ---------- */
+/* ---------------- INTERVENTION HANDLER ---------- */
 
-function handleIntervention(focusIntervention, appName) {
+function handleFocusIntervention(focusIntervention, appName) {
   const { intervention, enforcement, message } = focusIntervention;
   const action = intervention?.action || enforcement || "observe";
+  const interventionId = intervention?.id || focusIntervention.id || null;
 
   if (action === "blocked" || action === "block") {
-    // BLOCK: Show critical notification + attempt to close/minimize window
     if (Notification.isSupported()) {
       new Notification({
         title: "🚫 Focus Blocked",
@@ -118,12 +133,20 @@ function handleIntervention(focusIntervention, appName) {
         urgency: "critical"
       }).show();
     }
-
-    // Attempt to block the window (Electron power)
-    blockDistractingWindow(appName);
+    blockDistractingWindow(appName, {
+      action,
+      interventionId,
+      message
+    });
+    // Actually kill the blocked app process
+    const killResult = killProcessByName(appName);
+    if (killResult.killed) {
+      console.log(`[Samaritan] Successfully terminated ${appName}: ${killResult.reason}`);
+    } else {
+      console.log(`[Samaritan] Could not terminate ${appName}: ${killResult.reason}`);
+    }
 
   } else if (action === "warned" || action === "warn") {
-    // WARN: Show warning notification
     if (Notification.isSupported()) {
       new Notification({
         title: "⚠️ Focus Warning",
@@ -133,11 +156,9 @@ function handleIntervention(focusIntervention, appName) {
     }
 
   } else if (action === "observed" || action === "observe") {
-    // OBSERVE: Silent log only, no notification
     console.log("[Samaritan] Observation logged (no enforcement):", message);
 
   } else if (action === "reason_required") {
-    // REASON REQUIRED: Show notification asking for justification
     if (Notification.isSupported()) {
       new Notification({
         title: "📝 Justification Required",
@@ -145,25 +166,39 @@ function handleIntervention(focusIntervention, appName) {
         urgency: "normal"
       }).show();
     }
+    blockDistractingWindow(appName, {
+      action,
+      interventionId,
+      message,
+      showReason: true
+    });
+    // For "reason_required" enforcement, also kill the app to force the user to provide a reason
+    const killResult = killProcessByName(appName);
+    if (killResult.killed) {
+      console.log(`[Samaritan] Successfully terminated ${appName} (reason required): ${killResult.reason}`);
+    } else {
+      console.log(`[Samaritan] Could not terminate ${appName} (reason required): ${killResult.reason}`);
+    }
   }
 }
 
 const { shell } = require("electron");
 
-function blockDistractingWindow(appName) {
-
-  
+function blockDistractingWindow(appName, options = {}) {
   console.log(`[Samaritan] Attempting to block ${appName}...`);
-  
-  // Strategy 1: Show a blocking overlay in our own app
   const win = BrowserWindow.getAllWindows()[0];
   if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
     win.webContents.send("focus-blocked", {
       appName,
-      message: "This app is blocked during your deep work session."
+      action: options.action || "blocked",
+      interventionId: options.interventionId || null,
+      showReason: Boolean(options.showReason),
+      message: options.message || "This app is blocked during your deep work session."
     });
   }
-
 }
 
 /* ---------------- CLOSE SESSION ---------------- */
@@ -192,15 +227,19 @@ async function closeSession(reason = "active", endTimeOverride = null) {
 
   console.log(
     "[Samaritan] Observation concluded.",
-    "\n  App:", currentSession.app,
-    "\n  Type:", currentSession.type,
-    "\n  Duration(ms):", duration,
-    "\n  Reason:", reason
+    "\n App:", currentSession.app,
+    "\n Type:", currentSession.type,
+    "\n Duration(ms):", duration,
+    "\n Reason:", reason
   );
 
   await sendSessionToBackend(currentSession);
 
   currentSession = null;
+}
+
+async function flushCurrentSession(reason = "flush", endTimeOverride = null) {
+  await closeSession(reason, endTimeOverride);
 }
 
 /* ---------------- EVENT HANDLER ---------------- */
@@ -225,35 +264,36 @@ async function handleEvent(event) {
     startNewSession(event);
   } else {
     currentSession.endTime = now();
+    // 10-second periodic heartbeat/update transmission for in-progress session
+    if (now() - currentSession.lastSentTime >= 10000) {
+      currentSession.duration = currentSession.endTime - currentSession.startTime;
+      console.log(`[Samaritan] Sending periodic heartbeat update for session: ${currentSession.id}`);
+      sendSessionToBackend(currentSession).catch(err => {
+        console.error("[Samaritan] Failed to send periodic session update:", err.message);
+      });
+      currentSession.lastSentTime = now();
+    }
   }
 }
 
 /* ---------------- SHUTDOWN HANDLER ---------------- */
 
 app.on("before-quit", async () => {
-
   console.log("[Samaritan] Shutdown sequence initiated.");
-
   await closeSession("shutdown");
-
   console.log("[Samaritan] All observations archived.");
-
 });
 
 /* ---------------- CRASH PROTECTION ---------------- */
 
 process.on("uncaughtException", (err) => {
-
   console.error("[Samaritan] Uncaught exception detected.");
   console.error("Details:", err);
-
 });
 
 process.on("unhandledRejection", (err) => {
-
   console.error("[Samaritan] Unhandled rejection detected.");
   console.error("Details:", err);
-
 });
 
-module.exports = { handleEvent, closeSession };
+module.exports = { handleEvent, closeSession, flushCurrentSession, handleFocusIntervention };

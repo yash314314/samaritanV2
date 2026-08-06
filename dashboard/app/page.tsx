@@ -45,7 +45,7 @@ export default function Home() {
         const [dailyData ,weeklyData, heatmapData, intelData, comparisonData,timelineData] =
         await Promise.all([
           fetchDaily(USER_ID,dateString),
-          fetchWeekly(USER_ID,dateString),
+          fetchWeekly(USER_ID),
           fetchHeatmap(USER_ID,dateString),
           fetchIntelligence(USER_ID),
           fetchDailyComparison(USER_ID),fetchTimeline(USER_ID,dateString)

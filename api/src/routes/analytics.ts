@@ -192,134 +192,112 @@ router.get("/intelligence", async (req, res) => {
   }
 
   try {
+    // ─── EXISTING: Regular Sessions ───
     const sessions = await prisma.session.findMany({
       where: { userId },
       orderBy: { startTime: "asc" },
       include: {
         activities: {
-          orderBy: { startTime: "asc" } // FIXED: was "start"
+          orderBy: { startTime: "asc" }
         }
       }
     });
 
-    if (sessions.length === 0) {
-      return res.json({
-        driftScore: 0,
-        entropyTrend: 0,
-        peakHour: null,
-        peakFocusScore: 0,
-        highPerformanceProbability: 0,
-        cognitiveStability: 0,
-        fragmentationScore: 0,
-        switchingRate: 0,
-        deepWorkRatio: 0,
-        avgFocusBlockMinutes: 0,
-        energyScore: 0,
-        communicationRatio: 0,
-        productivityScore: 0,
-        focusScore: 0,
-        suggestion: "No sessions recorded. Start tracking to see intelligence metrics."
-      });
-    }
+    // ─── NEW: Deep Work Sessions (last 30 days) ───
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    
+    const deepWorkSessions = await prisma.deepWorkSession.findMany({
+      where: { 
+        userId, 
+        startedAt: { gte: thirtyDaysAgo } 
+      },
+      orderBy: { startedAt: "desc" },
+      include: { 
+        interventions: { orderBy: { detectedAt: "asc" } },
+        minuteLogs: { orderBy: { minuteIndex: "asc" } }
+      }
+    });
 
-    // ---- Drift Score ----
+    const activeDeepWork = await prisma.deepWorkSession.findFirst({
+      where: { userId, status: "active" },
+      include: {
+        interventions: { orderBy: { detectedAt: "asc" } },
+      },
+    });
+
+    // ─── EXISTING COMPUTATIONS (preserved exactly) ───
     let declines = 0;
     for (let i = 1; i < sessions.length; i++) {
-      if (sessions[i].focusScore < sessions[i - 1].focusScore) {
-        declines++;
-      }
+      if (sessions[i].focusScore < sessions[i - 1].focusScore) declines++;
     }
     const driftScore = (declines / Math.max(1, sessions.length - 1)) * 100;
 
-    // ---- Entropy Trend ----
     let entropyRise = 0;
     for (let i = 1; i < sessions.length; i++) {
-      if (sessions[i].entropyScore > sessions[i - 1].entropyScore) {
-        entropyRise++;
-      }
+      if (sessions[i].entropyScore > sessions[i - 1].entropyScore) entropyRise++;
     }
     const entropyTrend = (entropyRise / Math.max(1, sessions.length - 1)) * 100;
 
-    // ---- Peak Focus Hour ----
     const hourMap: Record<number, { total: number; count: number }> = {};
     sessions.forEach((session: Session) => {
       const hour = new Date(session.startTime).getHours();
-      if (!hourMap[hour]) {
-        hourMap[hour] = { total: 0, count: 0 };
-      }
+      if (!hourMap[hour]) hourMap[hour] = { total: 0, count: 0 };
       hourMap[hour].total += session.focusScore;
       hourMap[hour].count += 1;
     });
-
     let peakHour = null;
     let bestScore = 0;
     Object.entries(hourMap).forEach(([hour, data]) => {
       const avg = data.total / data.count;
-      if (avg > bestScore) {
-        bestScore = avg;
-        peakHour = Number(hour);
-      }
+      if (avg > bestScore) { bestScore = avg; peakHour = Number(hour); }
     });
 
-    // ---- Performance Probability ----
-    const highPerformanceSessions = sessions.filter(
-      s => s.focusScore > 75 && s.burnoutScore < 40
-    ).length;
-    const highPerformanceProbability = highPerformanceSessions / sessions.length;
+    const highPerformanceSessions = sessions.filter(s => s.focusScore > 75 && s.burnoutScore < 40).length;
+    const highPerformanceProbability = sessions.length > 0 ? highPerformanceSessions / sessions.length : 0;
 
-    // ---- NEW: Cognitive Stability ----
     const cognitiveStability = Math.max(0, 100 - driftScore);
 
-    // ---- NEW: Fragmentation Score ----
-    // Count rapid context switches (< 5 min between activities)
     let rapidSwitches = 0;
     let totalActivityGaps = 0;
     sessions.forEach(session => {
       const activities = session.activities || [];
       for (let i = 1; i < activities.length; i++) {
-        const gap = new Date(activities[i].startTime).getTime() - new Date(activities[i - 1].endTime).getTime(); // FIXED: was .start and .end
-        if (gap < 5 * 60 * 1000) { // < 5 minutes
-          rapidSwitches++;
-        }
+        const gap = new Date(activities[i].startTime).getTime() - new Date(activities[i - 1].endTime).getTime();
+        if (gap < 5 * 60 * 1000) rapidSwitches++;
         totalActivityGaps++;
       }
     });
-    const fragmentationScore = totalActivityGaps > 0 
-      ? (rapidSwitches / totalActivityGaps) * 100 
-      : 0;
+    const fragmentationScore = totalActivityGaps > 0 ? (rapidSwitches / totalActivityGaps) * 100 : 0;
 
-    // ---- NEW: Switching Rate ----
-    // Average activities per hour
     const totalHours = sessions.reduce((sum, s) => {
-      const duration = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-      return sum + (duration / (1000 * 60 * 60));
+      if (!s.endTime) return sum;
+      const duration = s.endTime.getTime() - s.startTime.getTime();
+      return sum + duration / (1000 * 60 * 60);
     }, 0);
     const totalActivities = sessions.reduce((sum, s) => sum + (s.activities?.length || 0), 0);
     const switchingRate = totalHours > 0 ? totalActivities / totalHours : 0;
 
-    // ---- NEW: Deep Work Ratio ----
-    const deepWorkThreshold = 45; // minutes
-    const deepWorkSessions = sessions.filter(s => {
-      const duration = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
+    const deepWorkThreshold = 45;
+    const deepWorkSessionsRegular = sessions.filter(s => {
+      if (!s.endTime) return false;
+      const duration = s.endTime.getTime() - s.startTime.getTime();
       return duration >= deepWorkThreshold * 60 * 1000 && s.focusScore > 70;
     }).length;
-    const deepWorkRatio = (deepWorkSessions / sessions.length) * 100;
+    const deepWorkRatio = sessions.length > 0 ? (deepWorkSessionsRegular / sessions.length) * 100 : 0;
 
-    // ---- NEW: Avg Focus Block Minutes ----
     const focusBlocks = sessions.filter(s => s.focusScore > 60);
     const avgFocusBlockMinutes = focusBlocks.length > 0
       ? focusBlocks.reduce((sum, s) => {
-          const duration = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-          return sum + duration;
+          if (!s.endTime) return sum;
+          return sum + (s.endTime.getTime() - s.startTime.getTime());
         }, 0) / (focusBlocks.length * 60 * 1000)
       : 0;
 
-    // ---- NEW: Energy Score ----
-    // Derived from burnout trend (negative = draining)
-    const avgBurnout = sessions.reduce((sum, s) => sum + s.burnoutScore, 0) / sessions.length;
-    const energyScore = -((avgBurnout - 50) / 50); // -1 to 1 range
+    const avgBurnout = sessions.length > 0 
+      ? sessions.reduce((sum, s) => sum + s.burnoutScore, 0) / sessions.length 
+      : 0;
+    const energyScore = -((avgBurnout - 50) / 50);
 
-    // ---- NEW: Communication Ratio ----
     const communicationActivities = sessions.reduce((sum, s) => {
       const comms = (s.activities || []).filter((a: any) => {
         const intent = (a.intent || "").toLowerCase();
@@ -330,27 +308,166 @@ router.get("/intelligence", async (req, res) => {
     const totalActivityCount = sessions.reduce((sum, s) => sum + (s.activities?.length || 0), 0);
     const communicationRatio = totalActivityCount > 0 ? (communicationActivities / totalActivityCount) * 100 : 0;
 
-    // ---- NEW: Productivity & Focus Scores (averages) ----
-    const productivityScore = sessions.reduce((sum, s) => sum + (s.productivityScore || s.focusScore * 0.8), 0) / sessions.length;
-    const focusScore = sessions.reduce((sum, s) => sum + s.focusScore, 0) / sessions.length;
+    const productivityScore = sessions.length > 0
+      ? sessions.reduce((sum, s) => sum + (s.productivityScore || s.focusScore * 0.8), 0) / sessions.length
+      : 0;
+    const focusScore = sessions.length > 0
+      ? sessions.reduce((sum, s) => sum + s.focusScore, 0) / sessions.length
+      : 0;
 
-    // ---- NEW: Generate Suggestion ----
+    // ─── NEW: Deep Work Computations ───
+    const completedDWS = deepWorkSessions.filter(s => s.status === "completed");
+    const abandonedDWS = deepWorkSessions.filter(s => s.status === "abandoned");
+
+    const totalPlannedMinutes = deepWorkSessions.reduce((sum, s) => sum + (s.plannedMinutes || 0), 0);
+    const totalActualMinutes = completedDWS.reduce((sum, s) => {
+      if (!s.endedAt) return sum;
+      return sum + ((new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / (60 * 1000));
+    }, 0);
+
+    const avgDWFocus = deepWorkSessions.length > 0
+      ? deepWorkSessions.reduce((sum, s) => sum + (s.focusScore || 0), 0) / deepWorkSessions.length
+      : 0;
+    const avgDWProductivity = deepWorkSessions.length > 0
+      ? deepWorkSessions.reduce((sum, s) => sum + (s.productivityScore || 0), 0) / deepWorkSessions.length
+      : 0;
+
+    const totalProductiveMs = deepWorkSessions.reduce((sum, s) => sum + (s.productiveMs || 0), 0);
+    const totalDistractionMs = deepWorkSessions.reduce((sum, s) => sum + (s.distractionMs || 0), 0);
+    const totalIdleMs = deepWorkSessions.reduce((sum, s) => sum + (s.idleMs || 0), 0);
+    const totalInterruptionMs = deepWorkSessions.reduce((sum, s) => sum + (s.interruptionMs || 0), 0);
+
+    const enforcementEffectiveness = (totalProductiveMs + totalDistractionMs + totalIdleMs) > 0
+      ? (totalProductiveMs / (totalProductiveMs + totalDistractionMs + totalIdleMs)) * 100
+      : 0;
+
+    const totalViolations = deepWorkSessions.reduce((sum, s) => sum + (s.violationCount || 0), 0);
+    const avgViolations = deepWorkSessions.length > 0 ? totalViolations / deepWorkSessions.length : 0;
+    const totalInterventions = deepWorkSessions.reduce((sum, s) => sum + (s.interventions?.length || 0), 0);
+
+    // Deep work streak
+    const dwDays = new Set(completedDWS.map(s => new Date(s.startedAt).toISOString().split("T")[0]));
+    let deepWorkStreak = 0;
+    const checkDate = new Date();
+    while (true) {
+      const dateStr = checkDate.toISOString().split("T")[0];
+      if (dwDays.has(dateStr)) {
+        deepWorkStreak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else break;
+    }
+
+    // Best deep work hour
+    const dwHourMap: Record<number, { total: number; count: number }> = {};
+    deepWorkSessions.forEach(s => {
+      const hour = new Date(s.startedAt).getHours();
+      if (!dwHourMap[hour]) dwHourMap[hour] = { total: 0, count: 0 };
+      dwHourMap[hour].total += (s.focusScore || 0);
+      dwHourMap[hour].count++;
+    });
+    let bestDeepWorkHour = null;
+    let bestDWScore = 0;
+    Object.entries(dwHourMap).forEach(([hour, data]) => {
+      const avg = data.total / data.count;
+      if (avg > bestDWScore) { bestDWScore = avg; bestDeepWorkHour = Number(hour); }
+    });
+
+    // 7-day trend
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().split("T")[0];
+    });
+    const deepWorkTrend = last7Days.map(date => {
+      const daySessions = deepWorkSessions.filter(s => new Date(s.startedAt).toISOString().split("T")[0] === date);
+      const dayCompleted = daySessions.filter(s => s.status === "completed");
+      return {
+        date,
+        completed: dayCompleted.length,
+        abandoned: daySessions.filter(s => s.status === "abandoned").length,
+        focus: daySessions.length > 0 
+          ? daySessions.reduce((sum, s) => sum + (s.focusScore || 0), 0) / daySessions.length 
+          : 0,
+        productivity: daySessions.length > 0
+          ? daySessions.reduce((sum, s) => sum + (s.productivityScore || 0), 0) / daySessions.length
+          : 0,
+        plannedMinutes: daySessions.reduce((sum, s) => sum + (s.plannedMinutes || 0), 0),
+        actualMinutes: dayCompleted.reduce((sum, s) => {
+          if (!s.endedAt) return sum;
+          return sum + ((new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / (60 * 1000));
+        }, 0),
+      };
+    });
+
+    // Active session live data
+    const activeSessionDetail = activeDeepWork ? {
+      id: activeDeepWork.id,
+      goal: activeDeepWork.goal,
+      plannedMinutes: activeDeepWork.plannedMinutes,
+      elapsedMinutes: Math.floor((Date.now() - new Date(activeDeepWork.startedAt).getTime()) / (60 * 1000)),
+      remainingMinutes: Math.max(0, activeDeepWork.plannedMinutes - Math.floor((Date.now() - new Date(activeDeepWork.startedAt).getTime()) / (60 * 1000))),
+      enforcement: activeDeepWork.enforcement,
+      focusScore: Number((activeDeepWork.focusScore || 0).toFixed(2)),
+      productivityScore: Number((activeDeepWork.productivityScore || 0).toFixed(2)),
+      violationCount: activeDeepWork.violationCount || 0,
+      productiveMs: activeDeepWork.productiveMs || 0,
+      distractionMs: activeDeepWork.distractionMs || 0,
+      idleMs: activeDeepWork.idleMs || 0,
+      interventionCount: activeDeepWork.interventions?.length || 0,
+    } : null;
+
+    // Last session
+    const lastSession = deepWorkSessions[0] ? {
+      id: deepWorkSessions[0].id,
+      goal: deepWorkSessions[0].goal,
+      plannedMinutes: deepWorkSessions[0].plannedMinutes,
+      status: deepWorkSessions[0].status,
+      focusScore: Number((deepWorkSessions[0].focusScore || 0).toFixed(2)),
+      productivityScore: Number((deepWorkSessions[0].productivityScore || 0).toFixed(2)),
+      violationCount: deepWorkSessions[0].violationCount || 0,
+      startedAt: deepWorkSessions[0].startedAt,
+      endedAt: deepWorkSessions[0].endedAt,
+      enforcement: deepWorkSessions[0].enforcement,
+    } : null;
+
+    // ─── ENHANCED SUGGESTION ENGINE ───
     let suggestion = "";
-    if (deepWorkRatio < 20) {
-      suggestion = "Deep work ratio is low. Try scheduling 90-minute blocks during your peak hours.";
+    if (activeSessionDetail) {
+      const remaining = activeSessionDetail.remainingMinutes;
+      const progress = (activeSessionDetail.elapsedMinutes / activeSessionDetail.plannedMinutes) * 100;
+      if (activeSessionDetail.violationCount > 0) {
+        suggestion = `Session "${activeSessionDetail.goal}" active. ${remaining}m left. ${activeSessionDetail.violationCount} violation(s) detected — stay on track.`;
+      } else if (progress > 75) {
+        suggestion = `Final stretch! ${remaining} minutes left in your deep work block. Close out strong.`;
+      } else {
+        suggestion = `Deep work "${activeSessionDetail.goal}" in progress. ${remaining} minutes remaining.`;
+      }
+    } else if (deepWorkSessions.length === 0) {
+      suggestion = "No deep work sessions recorded. Start a 45-minute block to build focus endurance.";
+    } else if ((completedDWS.length / Math.max(1, deepWorkSessions.length)) < 0.5) {
+      suggestion = "Most deep work sessions are abandoned. Try 30-minute blocks to build consistency.";
+    } else if (avgViolations > 3) {
+      suggestion = "High violation rate during deep work. Tighten your blocked apps list or use stricter enforcement.";
+    } else if (enforcementEffectiveness < 60) {
+      suggestion = "Deep work effectiveness is below 60%. Review allowances — too many distractions are getting through.";
+    } else if (deepWorkStreak >= 3) {
+      suggestion = `🔥 ${deepWorkStreak}-day deep work streak! Your cognitive discipline is compounding.`;
+    } else if (deepWorkRatio < 20) {
+      suggestion = "Deep work ratio is low. Schedule a protected block during your peak hours.";
     } else if (fragmentationScore > 50) {
       suggestion = "High fragmentation detected. Use app blocking during focus sessions.";
     } else if (communicationRatio > 40) {
       suggestion = "Communication-heavy day. Consider async check-ins to protect deep work.";
     } else if (energyScore < -0.3) {
-      suggestion = "Energy levels declining. Take a 15-minute break before next session.";
+      suggestion = "Energy levels declining. Take a 15-minute break before your next session.";
     } else if (cognitiveStability > 70) {
       suggestion = "Excellent cognitive stability. Ideal conditions for extended deep work.";
     } else {
       suggestion = "Moderate conditions. Start with a 45-minute focused block.";
     }
 
+    // ─── RESPONSE ───
     res.json({
+      // Existing metrics
       driftScore: Number(driftScore.toFixed(2)),
       entropyTrend: Number(entropyTrend.toFixed(2)),
       peakHour,
@@ -365,7 +482,38 @@ router.get("/intelligence", async (req, res) => {
       communicationRatio: Number(communicationRatio.toFixed(1)),
       productivityScore: Number(productivityScore.toFixed(1)),
       focusScore: Number(focusScore.toFixed(1)),
-      suggestion
+      suggestion,
+
+      // NEW: Deep Work Intelligence
+      deepWork: {
+        sessionCount: deepWorkSessions.length,
+        completedCount: completedDWS.length,
+        abandonedCount: abandonedDWS.length,
+        completionRate: deepWorkSessions.length > 0 
+          ? Number(((completedDWS.length / deepWorkSessions.length) * 100).toFixed(1)) 
+          : 0,
+        totalPlannedMinutes,
+        totalActualMinutes: Number(totalActualMinutes.toFixed(1)),
+        adherenceRate: totalPlannedMinutes > 0 
+          ? Number(((totalActualMinutes / totalPlannedMinutes) * 100).toFixed(1)) 
+          : 0,
+        avgFocusScore: Number(avgDWFocus.toFixed(2)),
+        avgProductivityScore: Number(avgDWProductivity.toFixed(2)),
+        totalProductiveMinutes: Math.round(totalProductiveMs / (60 * 1000)),
+        totalDistractionMinutes: Math.round(totalDistractionMs / (60 * 1000)),
+        totalIdleMinutes: Math.round(totalIdleMs / (60 * 1000)),
+        totalInterruptionMinutes: Math.round(totalInterruptionMs / (60 * 1000)),
+        enforcementEffectiveness: Number(enforcementEffectiveness.toFixed(1)),
+        totalViolations,
+        avgViolations: Number(avgViolations.toFixed(2)),
+        totalInterventions,
+        deepWorkStreak,
+        bestDeepWorkHour,
+        bestDeepWorkScore: Number(bestDWScore.toFixed(2)),
+        trend: deepWorkTrend,
+        lastSession,
+        activeSession: activeSessionDetail,
+      }
     });
 
   } catch (error) {

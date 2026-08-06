@@ -29,10 +29,10 @@ router.get("/timeline", async (req, res) => {
   const timeline = await getTimeline(userId as string, date as string);
   res.json(timeline);
 });
-
 router.post("/session", async (req, res) => {
   try {
     const {
+      id,
       userId,
       app,
       title,
@@ -50,6 +50,7 @@ router.post("/session", async (req, res) => {
     }
 
     const activity = await createActivityFromTracker({
+      id,
       userId,
       app,
       title,

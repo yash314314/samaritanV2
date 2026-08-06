@@ -131,7 +131,6 @@ router.get("/:id/result", async (req, res) => {
 router.get("/active/status", async (req, res) => {
   try {
     const { userId } = req.query;
-
     if (!userId || typeof userId !== "string") {
       return res.status(400).json({ error: "Missing userId" });
     }
@@ -148,6 +147,7 @@ router.get("/active/status", async (req, res) => {
     );
     const remainingMinutes = Math.max(0, session.plannedMinutes - elapsedMinutes);
 
+    // CRITICAL FIX: Include live metrics for overlay
     res.json({
       active: true,
       session: {
@@ -159,7 +159,18 @@ router.get("/active/status", async (req, res) => {
         enforcement: session.enforcement,
         focusScore: Number(session.focusScore.toFixed(2)),
         productivityScore: Number(session.productivityScore.toFixed(2)),
-        violationCount: session.violationCount
+        violationCount: session.violationCount,
+        // NEW: Live time breakdown
+        productiveMs: session.productiveMs,
+        distractionMs: session.distractionMs,
+        idleMs: session.idleMs,
+        interruptionMs: session.interruptionMs,
+        // NEW: Recent interventions for live display
+        recentInterventions: session.interventions?.slice(0, 3).map(i => ({
+          appName: i.appName,
+          action: i.action,
+          detectedAt: i.detectedAt
+        })) || []
       }
     });
   } catch (error) {
