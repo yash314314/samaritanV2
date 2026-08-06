@@ -1,162 +1,149 @@
 import { prisma } from "../prisma";
-import {
-  getBaseFocus,
-  getActivityProductivityScore,
-  isIdleActivity
-} from "./metricEngine";
-import { evaluateProtocol } from "./deepWorkService";
+import { evaluateProtocol, pushDeepWorkState } from "./deepWorkService";
+import { isIdleActivity, getBaseFocus, getActivityProductivityScore } from "./metricEngine";
+import { emitDeepWorkMinute, emitDeepWorkState } from "../websocket/broadcaster";
 
-const MINUTE_MS = 60 * 1000;
+export function startMinuteLogger() {
+  console.log("[MinuteLogger] Started");
 
-export async function logMinuteForSession(sessionId: string) {
-  const now = new Date();
+  setInterval(async () => {
+    try {
+      const activeSessions = await prisma.deepWorkSession.findMany({
+        where: {
+          status: "active"
+        }
+      });
 
-  // 1. Get the session with current aggregates
+      for (const session of activeSessions) {
+        try {
+          await logMinuteForSession(session.id);
+        } catch (err) {
+          console.error(`[MinuteLogger] Error logging session ${session.id}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error("[MinuteLogger] Error fetching active sessions:", err);
+    }
+  }, 60000);
+}
+
+async function logMinuteForSession(sessionId: string) {
   const session = await prisma.deepWorkSession.findUnique({
     where: { id: sessionId },
-    include: {
-      minuteLogs: {
-        orderBy: { minuteIndex: "desc" },
-        take: 1
-      }
-    }
+    include: { minuteLogs: true }
   });
 
   if (!session || session.status !== "active") return;
 
-  // 2. Calculate next minute index
-  const lastMinute = session.minuteLogs[0];
-  const nextMinuteIndex = lastMinute ? lastMinute.minuteIndex + 1 : 0;
+  const nextMinuteIndex = session.minuteLogs.length;
 
-  // 3. Find the most recent activity for this user in the last minute
-  const minuteAgo = new Date(now.getTime() - MINUTE_MS);
-  
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - 60000);
+
   const recentActivity = await prisma.activity.findFirst({
     where: {
-      session: { userId: session.userId },
-      startTime: { gte: minuteAgo },
-      endTime: { lte: now }
+      session: {
+        userId: session.userId
+      },
+      startTime: {
+        lt: now
+      },
+      endTime: {
+        gte: windowStart
+      }
     },
-    orderBy: { endTime: "desc" }
+    orderBy: {
+      endTime: "desc"
+    }
   });
 
-  // 4. Evaluate against session protocol
-  let focusScore = 0;
-  let productivityScore = 0;
-  let distractionFlag = false;
-  let idleFlag = false;
-  let appName = null;
-  let windowTitle = null;
-  let category = null;
-  let intent = null;
-
   if (!recentActivity) {
-    // No activity in last minute = idle
-    idleFlag = true;
-    focusScore = 0;
-    productivityScore = 0;
-  } else {
-    appName = recentActivity.appName;
-    windowTitle = recentActivity.windowTitle;
-    category = recentActivity.category;
-    intent = recentActivity.intent;
-
-    const isIdle = isIdleActivity({
-      appName: recentActivity.appName,
-      type: recentActivity.type,
-      category: recentActivity.category
+    await prisma.deepWorkMinuteLog.create({
+      data: {
+        deepWorkId: session.id,
+        minuteIndex: nextMinuteIndex,
+        timestamp: now,
+        focusScore: session.focusScore,
+        productivityScore: session.productivityScore,
+        distractionFlag: false,
+        idleFlag: true,
+        appName: null,
+        windowTitle: "Idle",
+        category: "idle",
+        intent: "idle"
+      }
     });
 
-    if (isIdle) {
-      idleFlag = true;
-      focusScore = 0;
-      productivityScore = 0;
-    } else {
-      // Evaluate against deep work protocol
-      const protocolResult = evaluateProtocol(session, {
-        appName: recentActivity.appName,
-        windowTitle: recentActivity.windowTitle,
-        domain: recentActivity.domain,
-        url: recentActivity.url,
-        category: recentActivity.category,
-        intent: recentActivity.intent,
-        startTime: recentActivity.startTime,
-        endTime: recentActivity.endTime,
-        duration: recentActivity.duration
-      });
+    emitDeepWorkMinute(session.userId, sessionId, {
+      minute: nextMinuteIndex,
+      focusScore: session.focusScore,
+      productivityScore: session.productivityScore,
+      distraction: false,
+      idle: true,
+      appName: null,
+    });
 
-      if (!protocolResult.allowed) {
-        distractionFlag = true;
-        focusScore = 0;
-        productivityScore = 0;
-      } else {
-        // Calculate scores using metricEngine
-        const metricInput = {
-          appName: recentActivity.appName,
-          category: recentActivity.category,
-          intent: recentActivity.intent,
-          focusImpact: recentActivity.focusImpact,
-          confidence: recentActivity.confidence
-        };
-
-        focusScore = getBaseFocus(metricInput) * 100;
-        productivityScore = getActivityProductivityScore(metricInput);
-      }
-    }
+    await pushDeepWorkState(session.userId, sessionId);
+    return;
   }
 
-  // 5. Write the minute log
+  const protocolResult = evaluateProtocol(session, {
+    appName: recentActivity.appName,
+    windowTitle: recentActivity.windowTitle,
+    startTime: recentActivity.startTime,
+    endTime: recentActivity.endTime,
+    duration: recentActivity.duration,
+    type: recentActivity.type,
+    category: recentActivity.category,
+    intent: recentActivity.intent,
+    focusImpact: recentActivity.focusImpact,
+    confidence: recentActivity.confidence,
+    domain: recentActivity.domain,
+    url: recentActivity.url
+  });
+
+  const idle = isIdleActivity(recentActivity);
+  const productive = !idle && protocolResult.allowed;
+  const distraction = !idle && !protocolResult.allowed;
+
+  let focusScore = 0;
+  let productivityScore = 0;
+
+  // CRITICAL: Record the session's RUNNING focus/productivity score at this minute.
+  // This ensures the minute logs match the session's actual score progression
+  // (computed by evaluateDeepWorkActivity's proportional model).
+  // For productive minutes, the session score will be rising toward the target.
+  // For distraction minutes, the session score will be dropping.
+  // For idle minutes, the session score stays flat.
+  focusScore = session.focusScore;
+  productivityScore = session.productivityScore;
+
   await prisma.deepWorkMinuteLog.create({
     data: {
-      deepWorkId: sessionId,
+      deepWorkId: session.id,
       minuteIndex: nextMinuteIndex,
       timestamp: now,
       focusScore,
       productivityScore,
-      distractionFlag,
-      idleFlag,
-      appName,
-      windowTitle,
-      category,
-      intent
+      distractionFlag: distraction,
+      idleFlag: idle,
+      appName: recentActivity.appName,
+      windowTitle: recentActivity.windowTitle,
+      category: recentActivity.category ?? "unknown",
+      intent: recentActivity.intent ?? "unknown"
     }
   });
 
-  // 6. Update session running aggregates (optional, for quick access)
-  const totalMinutes = nextMinuteIndex + 1;
-  const productiveMinutes = session.productiveMs / MINUTE_MS + (distractionFlag || idleFlag ? 0 : 1);
-  
-  await prisma.deepWorkSession.update({
-    where: { id: sessionId },
-    data: {
-      focusScore: (session.focusScore * session.minuteLogs.length + focusScore) / totalMinutes,
-      productivityScore: (session.productivityScore * session.minuteLogs.length + productivityScore) / totalMinutes
-    }
+  // ─── WebSocket broadcast ───
+  emitDeepWorkMinute(session.userId, sessionId, {
+    minute: nextMinuteIndex,
+    focusScore,
+    productivityScore,
+    distraction,
+    idle,
+    appName: recentActivity.appName,
   });
 
-  console.log(`[MinuteLogger] Session ${sessionId} | Minute ${nextMinuteIndex} | Focus: ${focusScore.toFixed(1)} | Prod: ${productivityScore.toFixed(1)} | Idle: ${idleFlag} | Distraction: ${distractionFlag}`);
-}
-
-export async function logAllActiveSessions() {
-  const activeSessions = await prisma.deepWorkSession.findMany({
-    where: { status: "active" }
-  });
-
-  for (const session of activeSessions) {
-    try {
-      await logMinuteForSession(session.id);
-    } catch (err) {
-      console.error(`[MinuteLogger] Failed for session ${session.id}:`, err);
-    }
-  }
-}
-
-export function startMinuteLogger() {
-  console.log("[MinuteLogger] Started — ticking every 60 seconds");
-  
-  // Run immediately on start
-  logAllActiveSessions();
-
-  // Then every minute
-  setInterval(logAllActiveSessions, MINUTE_MS);
+  // Push full state update
+  await pushDeepWorkState(session.userId, sessionId);
 }

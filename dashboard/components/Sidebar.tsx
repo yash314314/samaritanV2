@@ -6,14 +6,16 @@ import {
   LayoutDashboard,
   BarChart3,
   Flame,
-  Brain
+  Brain,
+  Timer
 } from "lucide-react";
 
 const navItems = [
   { name: "Overview", path: "/", icon: LayoutDashboard },
   { name: "Analytics", path: "/analytics", icon: BarChart3 },
   { name: "Heatmap", path: "/heatmap", icon: Flame },
-  { name: "Intelligence", path: "/intelligence", icon: Brain }
+  { name: "Intelligence", path: "/intelligence", icon: Brain },
+  { name: "Focus Protocol", path: "/focus", icon: Timer }
 ];
 
 export default function Sidebar() {

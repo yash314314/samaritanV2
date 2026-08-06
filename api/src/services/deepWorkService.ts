@@ -4,6 +4,13 @@ import {
   getBaseFocus,
   isIdleActivity
 } from "./metricEngine";
+import {
+  emitDeepWorkStarted,
+  emitDeepWorkEnded,
+  emitDeepWorkState,
+  emitInterventionCleared,
+  emitInterventionTriggered,
+} from "../websocket/broadcaster";
 
 type StrictFocusInput = {
   userId: string;
@@ -50,131 +57,7 @@ const DISTRACTION_INTENTS = new Set([
   "video_streaming",
   "video"
 ]);
-export async function getDeepWorkSessionResult(sessionId: string, userId: string) {
-  const session = await prisma.deepWorkSession.findFirst({
-    where: {
-      id: sessionId,
-      userId
-    },
-    include: {
-      minuteLogs: {
-        orderBy: { minuteIndex: "asc" }
-      },
-      interventions: {
-        orderBy: { detectedAt: "asc" }
-      }
-    }
-  });
 
-  if (!session) return null;
-
-  const now = new Date();
-  const endedAt = session.endedAt ?? now;
-  const actualDurationMs = endedAt.getTime() - session.startedAt.getTime();
-  const actualMinutes = Math.floor(actualDurationMs / (60 * 1000));
-  const plannedMinutes = session.plannedMinutes;
-
-  // Build time-series data for curve lines
-  const timeSeries = session.minuteLogs.map((log) => ({
-    minute: log.minuteIndex,
-    timestamp: log.timestamp,
-    focusScore: Number(log.focusScore.toFixed(2)),
-    productivityScore: Number(log.productivityScore.toFixed(2)),
-    distraction: log.distractionFlag,
-    idle: log.idleFlag,
-    appName: log.appName,
-    category: log.category
-  }));
-
-  // Calculate aggregates
-  const totalMinutes = timeSeries.length;
-  const distractionMinutes = timeSeries.filter((t) => t.distraction).length;
-  const idleMinutes = timeSeries.filter((t) => t.idle).length;
-  const productiveMinutes = totalMinutes - distractionMinutes - idleMinutes;
-
-  const avgFocus =
-    totalMinutes > 0
-      ? timeSeries.reduce((sum, t) => sum + t.focusScore, 0) / totalMinutes
-      : 0;
-
-  const avgProductivity =
-    totalMinutes > 0
-      ? timeSeries.reduce((sum, t) => sum + t.productivityScore, 0) / totalMinutes
-      : 0;
-
-  const peakFocus =
-    totalMinutes > 0
-      ? Math.max(...timeSeries.map((t) => t.focusScore))
-      : 0;
-
-  const peakProductivity =
-    totalMinutes > 0
-      ? Math.max(...timeSeries.map((t) => t.productivityScore))
-      : 0;
-
-  // Recovery rate: how fast user got back to focus after distraction
-  let recoveryCount = 0;
-  let recoveryTotalMinutes = 0;
-  for (let i = 1; i < timeSeries.length; i++) {
-    if (timeSeries[i - 1].distraction && !timeSeries[i].distraction) {
-      recoveryCount++;
-      // Find how many minutes until next distraction or end
-      let recoveryMinutes = 1;
-      for (let j = i + 1; j < timeSeries.length; j++) {
-        if (timeSeries[j].distraction) break;
-        recoveryMinutes++;
-      }
-      recoveryTotalMinutes += recoveryMinutes;
-    }
-  }
-  const avgRecoveryMinutes =
-    recoveryCount > 0 ? recoveryTotalMinutes / recoveryCount : 0;
-
-  // Session completion rate
-  const completionRate = plannedMinutes > 0 
-    ? Math.min(100, (actualMinutes / plannedMinutes) * 100) 
-    : 0;
-
-  return {
-    session: {
-      id: session.id,
-      goal: session.goal,
-      status: session.status,
-      plannedMinutes,
-      actualMinutes,
-      completionRate: Number(completionRate.toFixed(2)),
-      startedAt: session.startedAt,
-      endedAt: session.endedAt,
-      enforcement: session.enforcement
-    },
-    metrics: {
-      totalMinutes,
-      productiveMinutes,
-      distractionMinutes,
-      idleMinutes,
-      violationCount: session.violationCount,
-      interruptionMs: session.interruptionMs,
-      avgFocus: Number(avgFocus.toFixed(2)),
-      avgProductivity: Number(avgProductivity.toFixed(2)),
-      peakFocus: Number(peakFocus.toFixed(2)),
-      peakProductivity: Number(peakProductivity.toFixed(2)),
-      avgRecoveryMinutes: Number(avgRecoveryMinutes.toFixed(2)),
-      finalFocusScore: Number(session.focusScore.toFixed(2)),
-      finalProductivityScore: Number(session.productivityScore.toFixed(2))
-    },
-    timeSeries,
-    interventions: session.interventions.map((i) => ({
-      id: i.id,
-      appName: i.appName,
-      windowTitle: i.windowTitle,
-      domain: i.domain,
-      action: i.action,
-      reason: i.reason,
-      detectedAt: i.detectedAt,
-      durationMs: i.durationMs
-    }))
-  };
-}
 function normalize(value?: string | null) {
   return (value ?? "").toLowerCase().trim();
 }
@@ -188,8 +71,25 @@ function normalizeList(values?: string[] | null) {
 function includesRule(rules: string[], value?: string | null) {
   const normalized = normalize(value);
   if (!normalized) return false;
-
   return rules.some(rule => normalized.includes(rule));
+}
+
+function getDeepWorkWindowEnd(session: { startedAt: Date; plannedMinutes: number }) {
+  return new Date(session.startedAt.getTime() + session.plannedMinutes * 60 * 1000);
+}
+
+function getActivityOverlapMs(
+  session: { startedAt: Date; plannedMinutes: number },
+  activity?: Pick<ActivityInput, "startTime" | "endTime"> | null
+) {
+  if (!activity) return 0;
+
+  const windowStart = session.startedAt.getTime();
+  const windowEnd = getDeepWorkWindowEnd(session).getTime();
+  const activityStart = activity.startTime.getTime();
+  const activityEnd = activity.endTime.getTime();
+
+  return Math.max(0, Math.min(activityEnd, windowEnd) - Math.max(activityStart, windowStart));
 }
 
 function interventionAction(enforcement: string) {
@@ -214,7 +114,7 @@ export function evaluateProtocol(session: any, activity: ActivityInput) {
   const blockedDomains = normalizeList(session.blockedDomains);
 
   const appBlocked = includesRule(blockedApps, activity.appName);
-  const domainBlocked = includesRule(blockedDomains, activity.domain);
+  const domainBlocked = includesRule(blockedDomains, activity.domain ?? activity.url);
 
   if (appBlocked || domainBlocked) {
     return {
@@ -224,15 +124,11 @@ export function evaluateProtocol(session: any, activity: ActivityInput) {
     };
   }
 
-  const hasAllowList =
-    allowedApps.length > 0 || allowedDomains.length > 0;
+  const hasAllowList = allowedApps.length > 0 || allowedDomains.length > 0;
 
   if (hasAllowList) {
     const appAllowed = includesRule(allowedApps, activity.appName);
-    const domainAllowed = includesRule(
-      allowedDomains,
-      activity.domain ?? activity.url
-    );
+    const domainAllowed = includesRule(allowedDomains, activity.domain ?? activity.url);
 
     if (!appAllowed && !domainAllowed) {
       return {
@@ -246,10 +142,7 @@ export function evaluateProtocol(session: any, activity: ActivityInput) {
   const category = activity.category ?? "unknown";
   const intent = activity.intent ?? "unknown";
 
-  if (
-    DISTRACTION_CATEGORIES.has(category) ||
-    DISTRACTION_INTENTS.has(intent)
-  ) {
+  if (DISTRACTION_CATEGORIES.has(category) || DISTRACTION_INTENTS.has(intent)) {
     return {
       allowed: false,
       severity: "warning",
@@ -278,17 +171,14 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
       userId: input.userId,
       status: "active"
     },
-    orderBy: {
-      startedAt: "desc"
-    }
+    orderBy: { startedAt: "desc" }
   });
 
-  // Auto-abandon stale session (> 2x planned time)
   if (existing) {
     const elapsedMinutes = Math.floor(
       (Date.now() - existing.startedAt.getTime()) / (60 * 1000)
     );
-    
+
     if (elapsedMinutes > existing.plannedMinutes * 2) {
       await prisma.deepWorkSession.update({
         where: { id: existing.id },
@@ -299,11 +189,11 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
       });
       console.log(`[DeepWork] Auto-abandoned stale session ${existing.id}`);
     } else {
-      return existing; // Return existing active session
+      return existing;
     }
   }
 
-  return prisma.deepWorkSession.create({
+  const session = await prisma.deepWorkSession.create({
     data: {
       userId: input.userId,
       goal: input.goal ?? (null as any),
@@ -316,7 +206,22 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
       blockedDomains: input.blockedDomains ?? ([] as any)
     }
   });
+
+  emitDeepWorkStarted(input.userId, {
+    id: session.id,
+    goal: session.goal,
+    plannedMinutes: session.plannedMinutes,
+    enforcement: session.enforcement,
+    startedAt: session.startedAt,
+    allowedApps: session.allowedApps,
+    allowedDomains: session.allowedDomains,
+    blockedApps: session.blockedApps,
+    blockedDomains: session.blockedDomains,
+  });
+
+  return session;
 }
+
 export async function getActiveDeepWorkSession(userId: string) {
   return prisma.deepWorkSession.findFirst({
     where: {
@@ -328,14 +233,13 @@ export async function getActiveDeepWorkSession(userId: string) {
     },
     include: {
       interventions: {
-        orderBy: {
-          detectedAt: "desc"
-        },
+        orderBy: { detectedAt: "desc" },
         take: 10
       }
     }
   });
 }
+
 export async function endDeepWorkSession(
   userId: string,
   id: string,
@@ -357,20 +261,54 @@ export async function endDeepWorkSession(
     throw new Error("Session already ended");
   }
 
-  // Write final log
   await writeSessionEndLog(
     id,
     status === "completed" ? "Session completed" : "Session abandoned"
   );
 
-  return prisma.deepWorkSession.update({
+  const updated = await prisma.deepWorkSession.update({
     where: { id },
     data: {
       status,
       endedAt: new Date()
     }
   });
+
+  emitDeepWorkEnded(userId, id, {
+    status,
+    endedAt: new Date(),
+  });
+
+  return updated;
 }
+
+export async function completeDeepWorkSessionByTimer(id: string) {
+  const session = await prisma.deepWorkSession.findUnique({
+    where: { id }
+  });
+
+  if (!session || session.status !== "active") return null;
+
+  await writeSessionEndLog(id, "Planned duration completed");
+
+  const endedAt = getDeepWorkWindowEnd(session);
+  const updated = await prisma.deepWorkSession.update({
+    where: { id },
+    data: {
+      status: "completed",
+      endedAt
+    }
+  });
+
+  emitDeepWorkEnded(session.userId, id, {
+    status: "completed",
+    endedAt,
+    reason: "planned_duration"
+  });
+
+  return updated;
+}
+
 async function writeSessionEndLog(sessionId: string, reason: string) {
   const lastLog = await prisma.deepWorkMinuteLog.findFirst({
     where: { deepWorkId: sessionId },
@@ -395,6 +333,7 @@ async function writeSessionEndLog(sessionId: string, reason: string) {
     }
   });
 }
+
 export async function getDeepWorkSessionHistory(userId: string) {
   const sessions = await prisma.deepWorkSession.findMany({
     where: { userId },
@@ -407,25 +346,22 @@ export async function getDeepWorkSessionHistory(userId: string) {
       },
       minuteLogs: {
         orderBy: { minuteIndex: "asc" },
-        // Only get last 10 minutes for sparkline preview
         take: -10
       }
     }
   });
 
   return sessions.map((session) => {
-    // Build sparkline data: last 10 minutes (or all if < 10)
     const sparklineMinutes = session.minuteLogs.slice(-10);
-    
-    const focusSparkline = sparklineMinutes.map((m) => 
+
+    const focusSparkline = sparklineMinutes.map((m) =>
       Number(m.focusScore.toFixed(1))
     );
-    
-    const productivitySparkline = sparklineMinutes.map((m) => 
+
+    const productivitySparkline = sparklineMinutes.map((m) =>
       Number(m.productivityScore.toFixed(1))
     );
 
-    // Distraction/idle flags for color coding
     const statusSparkline = sparklineMinutes.map((m) => {
       if (m.distractionFlag) return "distraction";
       if (m.idleFlag) return "idle";
@@ -451,16 +387,12 @@ export async function getDeepWorkSessionHistory(userId: string) {
       finalProductivityScore: Number(session.productivityScore.toFixed(2)),
       violationCount: session.violationCount,
       interruptionMs: session.interruptionMs,
-      
-      // Sparkline preview for dashboard
       sparkline: {
         focus: focusSparkline,
         productivity: productivitySparkline,
         status: statusSparkline,
         minutesCount: sparklineMinutes.length
       },
-      
-      // Top 5 interventions (existing)
       interventions: session.interventions.map((i) => ({
         id: i.id,
         appName: i.appName,
@@ -485,9 +417,25 @@ export async function resolveFocusIntervention(
   });
 }
 
+/**
+ * Evaluate a deep work activity and update session metrics.
+ *
+ * METRIC MODEL (all values start from 0 and build up proportionally):
+ *
+ *   focusScore = (productiveMs / totalMs) * targetFocus
+ *   productivityScore = (productiveMs / totalMs) * targetProductivity
+ *
+ * This ensures:
+ *   - All values start at 0
+ *   - Focus/productivity rise proportionally to productive time
+ *   - Distraction directly reduces focus/productivity by reducing the
+ *     productive ratio
+ *   - No exponential spikes — smooth proportional model
+ */
 export async function evaluateDeepWorkActivity(
   userId: string,
-  activity: ActivityInput
+  activity: ActivityInput,
+  previousActivity?: ActivityInput | null
 ) {
   const session = await prisma.deepWorkSession.findFirst({
     where: {
@@ -504,47 +452,83 @@ export async function evaluateDeepWorkActivity(
 
   if (!session) return null;
 
-  const duration = Math.max(0, activity.duration ?? 0);
+  const currentOverlapMs = getActivityOverlapMs(session, activity);
+  const previousOverlapMs = getActivityOverlapMs(session, previousActivity);
+  const duration = Math.max(0, currentOverlapMs - previousOverlapMs);
+
+  if (duration <= 0) {
+    await pushDeepWorkState(userId, session.id);
+    return null;
+  }
+
   const result = evaluateProtocol(session, activity);
   const idle = isIdleActivity(activity);
   const productive = !idle && result.allowed;
   const distraction = !idle && !result.allowed;
 
-  const currentTotal =
-    session.productiveMs + session.distractionMs + session.idleMs;
-  const nextProductiveMs =
-    session.productiveMs + (productive ? duration : 0);
-  const nextDistractionMs =
-    session.distractionMs + (distraction ? duration : 0);
-  const nextIdleMs =
-    session.idleMs + (idle ? duration : 0);
-  const nextTotal =
-    currentTotal + duration;
+  // Accumulate time buckets
+  const nextProductiveMs = session.productiveMs + (productive ? duration : 0);
+  const nextDistractionMs = session.distractionMs + (distraction ? duration : 0);
+  const nextIdleMs = session.idleMs + (idle ? duration : 0);
+  const totalMs = nextProductiveMs + nextDistractionMs + nextIdleMs;
 
-  const focusContribution = productive
-    ? getBaseFocus(activity) * 100
-    : 0;
-  const productivityContribution = productive
-    ? getActivityProductivityScore(activity)
-    : 0;
+  // Compute focus/productivity as weighted averages based on time ratios
+  // All values start from 0 and build up proportionally
+  let nextFocusScore = 0;
+  let nextProductivityScore = 0;
 
-  const nextFocusScore =
-    nextTotal > 0
-      ? (
-          session.focusScore * currentTotal +
-          focusContribution * duration
-        ) / nextTotal
-      : 0;
+  if (totalMs > 0) {
+    const productiveRatio = nextProductiveMs / totalMs;
 
-  const nextProductivityScore =
-    nextTotal > 0
-      ? (
-          session.productivityScore * currentTotal +
-          productivityContribution * duration
-        ) / nextTotal
-      : 0;
+    if (productive) {
+      // Productive activity: target is the activity's base focus/productivity
+      const targetFocus = getBaseFocus(activity) * 100;
+      const targetProd = getActivityProductivityScore(activity);
 
-  await prisma.deepWorkSession.update({
+      // Weighted: current accumulated score + new productive contribution
+      // This smoothly builds up focus as productive time accumulates
+      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
+      if (prevTotal > 0) {
+        // Blend previous score with new activity's contribution
+        const prevFocusWeight = prevTotal / totalMs;
+        const newFocusWeight = duration / totalMs;
+        nextFocusScore = (session.focusScore * prevFocusWeight) + (targetFocus * newFocusWeight);
+        nextProductivityScore = (session.productivityScore * prevFocusWeight) + (targetProd * newFocusWeight);
+      } else {
+        // First activity
+        nextFocusScore = targetFocus;
+        nextProductivityScore = targetProd;
+      }
+    } else if (distraction) {
+      // Distraction: focus/productivity drop proportionally to distraction ratio
+      // The more distraction time accumulates, the lower the scores
+      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
+      if (prevTotal > 0) {
+        // Blend: previous score diluted by new distraction time (which contributes 0)
+        const prevWeight = prevTotal / totalMs;
+        nextFocusScore = session.focusScore * prevWeight;
+        nextProductivityScore = session.productivityScore * prevWeight;
+      }
+      // If first activity is a distraction, scores stay at 0
+    } else if (idle) {
+      // Idle: maintain previous scores (idle doesn't help or hurt)
+      nextFocusScore = session.focusScore;
+      nextProductivityScore = session.productivityScore;
+    }
+  }
+
+  // Clamp to valid range
+  nextFocusScore = Math.max(0, Math.min(100, nextFocusScore));
+  nextProductivityScore = Math.max(0, Math.min(100, nextProductivityScore));
+
+  // Track if this is a NEW violation (not a continuation of same distraction)
+  const isNewViolation = distraction && (
+    session.distractionMs === 0 ||
+    (session.lastViolationAt &&
+      new Date().getTime() - new Date(session.lastViolationAt).getTime() > 5000)
+  );
+
+  const updatedSession = await prisma.deepWorkSession.update({
     where: { id: session.id },
     data: {
       productiveMs: nextProductiveMs,
@@ -553,15 +537,41 @@ export async function evaluateDeepWorkActivity(
       focusScore: nextFocusScore,
       productivityScore: nextProductivityScore,
       violationCount: {
-        increment: distraction ? 1 : 0
+        increment: isNewViolation ? 1 : 0
       },
       interruptionMs: {
         increment: distraction ? duration : 0
-      }
+      },
+      lastViolationAt: isNewViolation ? new Date() : undefined,
     }
   });
 
-  if (result.allowed) return null;
+  emitDeepWorkState(userId, session.id, {
+    elapsedMinutes: Math.floor(
+      (Date.now() - updatedSession.startedAt.getTime()) / (60 * 1000)
+    ),
+    remainingMinutes: Math.max(
+      0,
+      updatedSession.plannedMinutes -
+        Math.floor((Date.now() - updatedSession.startedAt.getTime()) / (60 * 1000))
+    ),
+    focusScore: Number(updatedSession.focusScore.toFixed(2)),
+    productivityScore: Number(updatedSession.productivityScore.toFixed(2)),
+    violationCount: updatedSession.violationCount,
+    productiveMs: updatedSession.productiveMs,
+    distractionMs: updatedSession.distractionMs,
+    idleMs: updatedSession.idleMs,
+    interruptionMs: updatedSession.interruptionMs,
+  });
+
+  if (result.allowed) {
+    emitInterventionCleared(userId, session.id, {
+      appName: activity.appName,
+      domain: activity.domain ?? null,
+      windowTitle: activity.windowTitle,
+    });
+    return null;
+  }
 
   const intervention = await prisma.focusIntervention.create({
     data: {
@@ -574,10 +584,263 @@ export async function evaluateDeepWorkActivity(
     }
   });
 
+  emitInterventionTriggered(userId, {
+    id: intervention.id,
+    deepWorkId: session.id,
+    appName: intervention.appName,
+    windowTitle: intervention.windowTitle,
+    domain: intervention.domain,
+    action: intervention.action,
+    reason: intervention.reason,
+    detectedAt: intervention.detectedAt,
+  });
+
   return {
     sessionId: session.id,
     intervention,
     enforcement: session.enforcement,
     message: result.reason
   };
+}
+
+export async function getDeepWorkSessionResult(sessionId: string, userId: string) {
+  const session = await prisma.deepWorkSession.findFirst({
+    where: {
+      id: sessionId,
+      userId
+    },
+    include: {
+      minuteLogs: {
+        orderBy: { minuteIndex: "asc" }
+      },
+      interventions: {
+        orderBy: { detectedAt: "asc" }
+      }
+    }
+  });
+
+  if (!session) return null;
+
+  const now = new Date();
+  const endedAt = session.endedAt ?? now;
+  const actualDurationMs = endedAt.getTime() - session.startedAt.getTime();
+  const actualMinutes = Math.floor(actualDurationMs / (60 * 1000));
+  const plannedMinutes = session.plannedMinutes;
+
+  // ─── ACCURATE TIME ALLOCATION ───
+  // Use the session's accumulated ms directly (these are the source of truth)
+  const productiveMs = session.productiveMs || 0;
+  const distractionMs = session.distractionMs || 0;
+  const idleMs = session.idleMs || 0;
+  const totalTrackedMs = productiveMs + distractionMs + idleMs;
+
+  const productiveMinutes = Math.round(productiveMs / 60000);
+  const distractionMinutes = Math.round(distractionMs / 60000);
+  const idleMinutes = Math.round(idleMs / 60000);
+  const totalTrackedMinutes = productiveMinutes + distractionMinutes + idleMinutes;
+
+  // ─── ACCURATE FOCUS / PRODUCTIVITY ───
+  // These are the final scores from the session (computed incrementally)
+  const finalFocusScore = Number(session.focusScore.toFixed(2));
+  const finalProductivityScore = Number(session.productivityScore.toFixed(2));
+
+  // ─── DERIVED METRICS ───
+  // Focus efficiency: what % of tracked time was productive
+  const focusEfficiency = totalTrackedMs > 0
+    ? Number(((productiveMs / totalTrackedMs) * 100).toFixed(2))
+    : 0;
+
+  // Distraction ratio: what % of tracked time was distraction
+  const distractionRatio = totalTrackedMs > 0
+    ? Number(((distractionMs / totalTrackedMs) * 100).toFixed(2))
+    : 0;
+
+  // Idle ratio
+  const idleRatio = totalTrackedMs > 0
+    ? Number(((idleMs / totalTrackedMs) * 100).toFixed(2))
+    : 0;
+
+  // Completion rate
+  const completionRate = plannedMinutes > 0
+    ? Math.min(100, (actualMinutes / plannedMinutes) * 100)
+    : 0;
+
+  // ─── PER-SECOND TIME SERIES ───
+  // Interpolate between minute-log data points to create smooth per-second data.
+  // This gives a much more detailed view of how focus/productivity evolved.
+  const minuteLogs = session.minuteLogs;
+  const timeSeries: Array<{
+    second: number;
+    timestamp: string;
+    focusScore: number;
+    productivityScore: number;
+    distraction: boolean;
+    idle: boolean;
+    appName: string | null;
+    category: string | null;
+  }> = [];
+
+  if (minuteLogs.length === 0) {
+    // No minute logs — use session start/end as a single data point
+    timeSeries.push({
+      second: 0,
+      timestamp: session.startedAt.toISOString(),
+      focusScore: Number(session.focusScore.toFixed(2)),
+      productivityScore: Number(session.productivityScore.toFixed(2)),
+      distraction: false,
+      idle: false,
+      appName: null,
+      category: null,
+    });
+  } else if (minuteLogs.length === 1) {
+    // Single minute log — just use it
+    const log = minuteLogs[0];
+    timeSeries.push({
+      second: 0,
+      timestamp: log.timestamp.toISOString(),
+      focusScore: Number(log.focusScore.toFixed(2)),
+      productivityScore: Number(log.productivityScore.toFixed(2)),
+      distraction: log.distractionFlag,
+      idle: log.idleFlag,
+      appName: log.appName,
+      category: log.category,
+    });
+  } else {
+    // Multiple minute logs — interpolate per-second between each pair
+    for (let i = 0; i < minuteLogs.length - 1; i++) {
+      const curr = minuteLogs[i];
+      const next = minuteLogs[i + 1];
+
+      const currSec = curr.minuteIndex * 60;
+      const nextSec = next.minuteIndex * 60;
+      const gapSec = nextSec - currSec;
+
+      const currFocus = curr.focusScore;
+      const nextFocus = next.focusScore;
+      const currProd = curr.productivityScore;
+      const nextProd = next.productivityScore;
+
+      for (let s = 0; s < gapSec; s++) {
+        const t = gapSec > 0 ? s / gapSec : 0;
+        const focus = currFocus + (nextFocus - currFocus) * t;
+        const prod = currProd + (nextProd - currProd) * t;
+
+        // Determine state: if either endpoint is distraction, mark as distraction
+        // (distractions are discrete events, not interpolated)
+        const isDistraction = curr.distractionFlag || next.distractionFlag;
+        const isIdle = !isDistraction && (curr.idleFlag || next.idleFlag);
+
+        timeSeries.push({
+          second: currSec + s,
+          timestamp: new Date(curr.timestamp.getTime() + s * 1000).toISOString(),
+          focusScore: Number(focus.toFixed(2)),
+          productivityScore: Number(prod.toFixed(2)),
+          distraction: isDistraction,
+          idle: isIdle,
+          appName: s === 0 ? curr.appName : null, // only first second gets the app name
+          category: s === 0 ? curr.category : null,
+        });
+      }
+    }
+
+    // Add the last minute log's data point
+    const last = minuteLogs[minuteLogs.length - 1];
+    timeSeries.push({
+      second: last.minuteIndex * 60,
+      timestamp: last.timestamp.toISOString(),
+      focusScore: Number(last.focusScore.toFixed(2)),
+      productivityScore: Number(last.productivityScore.toFixed(2)),
+      distraction: last.distractionFlag,
+      idle: last.idleFlag,
+      appName: last.appName,
+      category: last.category,
+    });
+  }
+
+  let recoveryCount = 0;
+  let recoveryTotalMinutes = 0;
+  for (let i = 1; i < timeSeries.length; i++) {
+    if (timeSeries[i - 1].distraction && !timeSeries[i].distraction) {
+      recoveryCount++;
+      let recoveryMinutes = 1;
+      for (let j = i + 1; j < timeSeries.length; j++) {
+        if (timeSeries[j].distraction) break;
+        recoveryMinutes++;
+      }
+      recoveryTotalMinutes += recoveryMinutes;
+    }
+  }
+  const avgRecoveryMinutes =
+    recoveryCount > 0 ? recoveryTotalMinutes / recoveryCount : 0;
+
+  return {
+    session: {
+      id: session.id,
+      goal: session.goal,
+      status: session.status,
+      plannedMinutes,
+      actualMinutes,
+      completionRate: Number(completionRate.toFixed(2)),
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      enforcement: session.enforcement
+    },
+    metrics: {
+      // Time allocation (from session accumulators — source of truth)
+      totalTrackedMinutes,
+      productiveMinutes,
+      distractionMinutes,
+      idleMinutes,
+
+      // Ratios
+      focusEfficiency,
+      distractionRatio,
+      idleRatio,
+
+      // Scores
+      finalFocusScore,
+      finalProductivityScore,
+      violationCount: session.violationCount || 0,
+      interruptionMs: session.interruptionMs || 0,
+
+      // Recovery
+      avgRecoveryMinutes: Number(avgRecoveryMinutes.toFixed(2)),
+    },
+    timeSeries,
+    interventions: session.interventions.map((i) => ({
+      id: i.id,
+      appName: i.appName,
+      windowTitle: i.windowTitle,
+      domain: i.domain,
+      action: i.action,
+      reason: i.reason,
+      detectedAt: i.detectedAt,
+      durationMs: i.durationMs
+    }))
+  };
+}
+
+export async function pushDeepWorkState(userId: string, sessionId: string) {
+  const session = await prisma.deepWorkSession.findUnique({
+    where: { id: sessionId },
+  });
+  if (!session || session.status !== "active") return;
+
+  const now = new Date();
+  const elapsedMinutes = Math.floor(
+    (now.getTime() - session.startedAt.getTime()) / (60 * 1000)
+  );
+  const remainingMinutes = Math.max(0, session.plannedMinutes - elapsedMinutes);
+
+  emitDeepWorkState(userId, sessionId, {
+    elapsedMinutes,
+    remainingMinutes,
+    focusScore: Number(session.focusScore.toFixed(2)),
+    productivityScore: Number(session.productivityScore.toFixed(2)),
+    violationCount: session.violationCount,
+    productiveMs: session.productiveMs,
+    distractionMs: session.distractionMs,
+    idleMs: session.idleMs,
+    interruptionMs: session.interruptionMs,
+  });
 }

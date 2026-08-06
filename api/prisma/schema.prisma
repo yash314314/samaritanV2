@@ -111,6 +111,7 @@ model DeepWorkSession {
   interventions   FocusIntervention[]
   minuteLogs      DeepWorkMinuteLog[]
   createdAt       DateTime @default(now())
+  lastViolationAt DateTime?
 }
 
 model FocusIntervention {

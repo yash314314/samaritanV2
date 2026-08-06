@@ -2,10 +2,14 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { recalculateSessionMetrics } from "./activityService"
 import { evaluateDeepWorkActivity } from "./deepWorkService";
-const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;  
-export async function getOrCreateActiveSession(userId: string) {
+import { classifyActivity } from "./contextClassifier";
+import { resolveActivityIcon } from "./iconResolver";
+import { emitActivityCreated, emitSessionMetricsUpdated } from "../websocket/broadcaster";
 
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;
+
+export async function getOrCreateActiveSession(userId: string) {
   const now = new Date();
 
   let session = await prisma.session.findFirst({
@@ -25,34 +29,24 @@ export async function getOrCreateActiveSession(userId: string) {
     orderBy: { startTime: "desc" }
   });
 
-  const sessionAge =
-    now.getTime() - new Date(session.startTime).getTime();
+  const sessionAge = now.getTime() - new Date(session.startTime).getTime();
+  const inactivity = lastActivity
+    ? now.getTime() - new Date(lastActivity.startTime).getTime()
+    : 0;
 
-  const inactivity =
-    lastActivity
-      ? now.getTime() - new Date(lastActivity.startTime).getTime()
-      : 0;
-
-  if (
-    sessionAge > MAX_SESSION_DURATION ||
-    inactivity > SESSION_TIMEOUT_MS
-  ) {
-
+  if (sessionAge > MAX_SESSION_DURATION || inactivity > SESSION_TIMEOUT_MS) {
     await prisma.session.update({
       where: { id: session.id },
       data: { endTime: now }
     });
-
-    return prisma.session.create({
-      data: { userId }
-    });
+    return prisma.session.create({ data: { userId } });
   }
 
   return session;
 }
-import { classifyActivity } from "./contextClassifier";
-import { resolveActivityIcon } from "./iconResolver";
+
 export async function createActivityFromTracker(data: {
+  id?: string
   userId: string
   app: string
   title: string
@@ -64,8 +58,10 @@ export async function createActivityFromTracker(data: {
   duration: number
   type: string
 }) {
-
-  const session = await getOrCreateActiveSession(data.userId)
+  const session = await getOrCreateActiveSession(data.userId);
+  const previousActivity = data.id
+    ? await prisma.activity.findUnique({ where: { id: data.id } })
+    : null;
 
   const classification = await classifyActivity(data.app, data.title);
   const icon = resolveActivityIcon({
@@ -73,42 +69,71 @@ export async function createActivityFromTracker(data: {
     url: data.url,
     domain: data.domain
   });
+
   const normalizedApp = data.app.toLowerCase();
+  const shouldPreferResolvedIcon =
+    normalizedApp.includes("brave") ||
+    normalizedApp.includes("edge") ||
+    normalizedApp.includes("chrome") ||
+    normalizedApp.includes("firefox") ||
+    normalizedApp.includes("whatsapp");
 
-const shouldPreferResolvedIcon =
-  normalizedApp.includes("brave") ||
-  normalizedApp.includes("edge") ||
-  normalizedApp.includes("chrome") ||
-  normalizedApp.includes("firefox") ||
-  normalizedApp.includes("whatsapp");
+  const finalIconUrl = shouldPreferResolvedIcon
+    ? icon.iconUrl ?? data.iconUrl ?? null
+    : data.iconUrl ?? icon.iconUrl ?? null;
 
-const finalIconUrl = shouldPreferResolvedIcon
-  ? icon.iconUrl ?? data.iconUrl ?? null
-  : data.iconUrl ?? icon.iconUrl ?? null;
-  const activity = await prisma.activity.create({
-    data: {
-      sessionId: session.id,
-      appName: data.app,
-      windowTitle: data.title,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      duration: data.duration,
-      type: data.type,
-      category: classification.category,
-      intent: classification.intent,
-      focusImpact: classification.focusImpact,
-      energyImpact: classification.energyImpact,
-      confidence: classification.confidence,
-      iconUrl: finalIconUrl,
-      domain: data.domain ?? icon.domain,
-      url: data.url ?? null
-    }
-  })
+  const activity = data.id
+    ? await prisma.activity.upsert({
+        where: { id: data.id },
+        update: {
+          endTime: data.endTime,
+          duration: data.duration
+        },
+        create: {
+          id: data.id,
+          sessionId: session.id,
+          appName: data.app,
+          windowTitle: data.title,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          duration: data.duration,
+          type: data.type,
+          category: classification.category,
+          intent: classification.intent,
+          focusImpact: classification.focusImpact,
+          energyImpact: classification.energyImpact,
+          confidence: classification.confidence,
+          iconUrl: finalIconUrl,
+          domain: data.domain ?? icon.domain,
+          url: data.url ?? null
+        }
+      })
+    : await prisma.activity.create({
+        data: {
+          sessionId: session.id,
+          appName: data.app,
+          windowTitle: data.title,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          duration: data.duration,
+          type: data.type,
+          category: classification.category,
+          intent: classification.intent,
+          focusImpact: classification.focusImpact,
+          energyImpact: classification.energyImpact,
+          confidence: classification.confidence,
+          iconUrl: finalIconUrl,
+          domain: data.domain ?? icon.domain,
+          url: data.url ?? null
+        }
+      });
 
-  await recalculateSessionMetrics(session.id)
+  await recalculateSessionMetrics(session.id);
+
   const focusIntervention = await evaluateDeepWorkActivity(
     data.userId,
-    activity
+    activity,
+    previousActivity
   );
 
   if (focusIntervention) {
@@ -120,6 +145,7 @@ const finalIconUrl = shouldPreferResolvedIcon
       message: focusIntervention.message
     });
   }
+
   console.log("[Activity Created]", {
     id: activity.id,
     sessionId: activity.sessionId,
@@ -129,8 +155,27 @@ const finalIconUrl = shouldPreferResolvedIcon
     type: activity.type
   });
 
+  // ─── WebSocket broadcast ───
+  emitActivityCreated(data.userId, activity);
+
+  const updatedSession = await prisma.session.findUnique({
+    where: { id: session.id },
+    select: {
+      focusScore: true,
+      productivityScore: true,
+      deepWorkScore: true,
+      burnoutScore: true,
+      entropyScore: true,
+      switchCount: true,
+      totalDuration: true,
+    }
+  });
+  if (updatedSession) {
+    emitSessionMetricsUpdated(data.userId, session.id, updatedSession);
+  }
+
   return {
     activity,
     focusIntervention
-  }
+  };
 }

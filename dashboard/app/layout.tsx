@@ -2,6 +2,8 @@ import "./globals.css";
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import { AppProvider } from "../context/AppContext";
+import { WsProvider } from "../components/WsProvider";
+import ElectronFocusBridge from "../components/ElectronFocusBridge";
 
 export default function RootLayout({
   children
@@ -12,15 +14,18 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AppProvider>
-          <div className="flex min-h-screen bg-[#0a0a0a] text-white h-screen">
-            <Sidebar />
+          <WsProvider>
+            <div className="flex min-h-screen bg-[#0a0a0a] text-white h-screen">
+              <ElectronFocusBridge />
+              <Sidebar />
 
-            <main className="flex-1 p-10 overflow-y-auto">
-              <TopBar />
-              {children}
-            </main>
+              <main className="flex-1 p-10 overflow-y-auto">
+                <TopBar />
+                {children}
+              </main>
 
-          </div>
+            </div>
+          </WsProvider>
         </AppProvider>
       </body>
     </html>
