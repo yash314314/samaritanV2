@@ -283,6 +283,7 @@ export async function getHeatmap(userId: string) {
           totalMs: 0,
           idleMs: 0,
           appDurations: {},
+          appCategoryDurations: {},
           categoryDurations: {},
           intentDurations: {},
         };
@@ -301,6 +302,9 @@ export async function getHeatmap(userId: string) {
       }
 
       bucket.appDurations[appName] = (bucket.appDurations[appName] || 0) + segmentMs;
+      if (!bucket.appCategoryDurations[appName]) bucket.appCategoryDurations[appName] = {};
+      bucket.appCategoryDurations[appName][category] =
+        (bucket.appCategoryDurations[appName][category] || 0) + segmentMs;
       bucket.categoryDurations[category] = (bucket.categoryDurations[category] || 0) + segmentMs;
       bucket.intentDurations[intent] = (bucket.intentDurations[intent] || 0) + segmentMs;
 
@@ -324,6 +328,19 @@ export async function getHeatmap(userId: string) {
         percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
       }));
 
+  const getTopApps = (
+    values: Record<string, number>,
+    categoriesByApp: Record<string, Record<string, number>>,
+    totalMs: number
+  ) => getTopEntries(values, totalMs).map((app) => {
+    const categories = getTopEntries(categoriesByApp[app.name] ?? {}, app.duration);
+    return {
+      ...app,
+      category: categories[0]?.name ?? "unknown",
+      categories,
+    };
+  });
+
   const finalHeatmap: Record<string, Record<number, any>> = {};
 
   Object.entries(heatmap).forEach(([date, hours]) => {
@@ -341,7 +358,7 @@ export async function getHeatmap(userId: string) {
         dominantApp: getDominantKey(data.appDurations),
         dominantCategory: getDominantKey(data.categoryDurations),
         dominantIntent: getDominantKey(data.intentDurations),
-        topApps: getTopEntries(data.appDurations, data.totalMs),
+        topApps: getTopApps(data.appDurations, data.appCategoryDurations, data.totalMs),
         categoryBreakdown: getTopEntries(data.categoryDurations, data.totalMs),
         intentBreakdown: getTopEntries(data.intentDurations, data.totalMs),
       };
@@ -414,6 +431,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
           totalMs: 0,
           idleMs: 0,
           appDurations: {},
+          appCategoryDurations: {},
           categoryDurations: {},
           intentDurations: {},
         };
@@ -433,6 +451,9 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
       }
 
       bucket.appDurations[appName] = (bucket.appDurations[appName] || 0) + segmentMs;
+      if (!bucket.appCategoryDurations[appName]) bucket.appCategoryDurations[appName] = {};
+      bucket.appCategoryDurations[appName][category] =
+        (bucket.appCategoryDurations[appName][category] || 0) + segmentMs;
       bucket.categoryDurations[category] = (bucket.categoryDurations[category] || 0) + segmentMs;
       bucket.intentDurations[intent] = (bucket.intentDurations[intent] || 0) + segmentMs;
 
@@ -455,6 +476,19 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
         minutes: Number((duration / 60000).toFixed(1)),
         percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
       }));
+
+  const getTopApps = (
+    values: Record<string, number>,
+    categoriesByApp: Record<string, Record<string, number>>,
+    totalMs: number
+  ) => getTopEntries(values, totalMs).map((app) => {
+    const categories = getTopEntries(categoriesByApp[app.name] ?? {}, app.duration);
+    return {
+      ...app,
+      category: categories[0]?.name ?? "unknown",
+      categories,
+    };
+  });
 
   const finalHeatmap: Record<string, Record<number, any>> = {};
 
@@ -485,7 +519,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
         dominantApp: getDominantKey(data.appDurations),
         dominantCategory: getDominantKey(data.categoryDurations),
         dominantIntent: getDominantKey(data.intentDurations),
-        topApps: getTopEntries(data.appDurations, data.totalMs),
+        topApps: getTopApps(data.appDurations, data.appCategoryDurations, data.totalMs),
         categoryBreakdown: getTopEntries(data.categoryDurations, data.totalMs),
         intentBreakdown: getTopEntries(data.intentDurations, data.totalMs),
       };

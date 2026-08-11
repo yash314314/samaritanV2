@@ -16,6 +16,8 @@ import {
   Layers3,
   ListChecks,
   Loader2,
+  Pin,
+  PinOff,
   Shield,
   Sparkles,
   Target,
@@ -102,7 +104,10 @@ function getLatestEntry(timeline: any[]) {
 }
 
 function getEntryFocus(entry: any) {
-  return score(entry?.focus ?? entry?.focusScore ?? entry?.averageFocusScore ?? entry?.score);
+  const direct = entry?.focus ?? entry?.focusScore ?? entry?.averageFocusScore ?? entry?.score;
+  if (direct !== null && direct !== undefined) return score(direct);
+  const impact = Number(entry?.focusImpact);
+  return Number.isFinite(impact) ? score(impact * 100) : 0;
 }
 
 function getEntryProductivity(entry: any) {
@@ -202,20 +207,34 @@ function summarizeCategories(timeline: any[]) {
     totals.set(category, [...(totals.get(category) ?? []), entry]);
   }
 
-  const total = [...totals.values()]
-    .flat()
-    .reduce((sum, entry) => sum + Number(entry?.duration ?? 0), 0);
-
-  return [...totals.entries()]
+  const groups = [...totals.entries()]
     .map(([name, entries]) => {
-      const summary = summarizeEntryGroup(entries);
+      const activities = entries
+        .flatMap((entry) => {
+          if (!Array.isArray(entry?.items) || entry.items.length === 0) return [entry];
+          return entry.items.map((item: any) => ({
+            ...item,
+            appName: entry.appName,
+            category: item.category ?? entry.category,
+            intent: item.intent ?? entry.intent,
+          }));
+        })
+        .sort((a, b) => new Date(b.end ?? b.start).getTime() - new Date(a.end ?? a.start).getTime());
+      const summary = summarizeEntryGroup(activities);
       return {
         name,
         ...summary,
         sessions: entries.sort((a, b) => Number(b?.duration ?? 0) - Number(a?.duration ?? 0)),
-        percent: total > 0 ? (summary.duration / total) * 100 : 0,
+        activities,
       };
-    })
+    });
+  const total = groups.reduce((sum, group) => sum + group.duration, 0);
+
+  return groups
+    .map((group) => ({
+      ...group,
+      percent: total > 0 ? (group.duration / total) * 100 : 0,
+    }))
     .sort((a, b) => b.duration - a.duration);
 }
 
@@ -332,6 +351,8 @@ export default function RizeHomeDashboard({
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+  const [lockedCategory, setLockedCategory] = useState<string | null>(null);
   const [selectedInterrupter, setSelectedInterrupter] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -807,44 +828,100 @@ export default function RizeHomeDashboard({
           </div>
 
           <div className="samaritan-card dashboard-scroll-panel col-span-12 p-4 xl:col-span-6">
-            <SectionTitle icon={Layers3} title="Category Allocation" sub="Hover a category for session detail" />
+            <SectionTitle icon={Layers3} title="Category Allocation" sub="Hover for activities; pin a category to scroll" />
             <div className="space-y-2">
-              {categories.slice(0, 6).map((category) => (
-                <div key={category.name} className="group rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
-                  <div className="mb-1 flex justify-between gap-3 text-xs">
-                    <span className="truncate text-zinc-300">{category.name}</span>
-                    <span className="shrink-0 text-zinc-500">{formatMs(category.duration)}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+              {categories.slice(0, 6).map((category) => {
+                const locked = lockedCategory === category.name;
+                const open = locked || hoveredCategory === category.name;
+
+                return (
+                  <div
+                    key={category.name}
+                    onMouseEnter={() => setHoveredCategory(category.name)}
+                    onMouseLeave={() => setHoveredCategory((current) => current === category.name ? null : current)}
+                    className={`rounded-lg p-3 ring-1 transition-colors ${
+                      locked
+                        ? "bg-purple-500/10 ring-purple-500/40"
+                        : "bg-zinc-950/70 ring-white/5"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate text-zinc-300">{category.name}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-zinc-500">{formatMs(category.duration)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setLockedCategory(locked ? null : category.name)}
+                          title={locked ? "Unlock activity list" : "Lock activity list open"}
+                          aria-label={locked ? `Unlock ${category.name} activities` : `Lock ${category.name} activities open`}
+                          className={`flex h-6 w-6 items-center justify-center rounded-md transition ${
+                            locked
+                              ? "bg-purple-500/20 text-purple-300"
+                              : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                          }`}
+                        >
+                          {locked ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-purple-500 transition-all duration-700"
+                        style={{ width: `${Math.max(2, category.percent)}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
+                      <span>{category.percent.toFixed(0)}% time</span>
+                      <span>Focus {category.focus.toFixed(0)}</span>
+                      <span>Prod {category.productivity.toFixed(0)}</span>
+                    </div>
+
                     <div
-                      className="h-full rounded-full bg-purple-500 transition-all duration-700"
-                      style={{ width: `${Math.max(2, category.percent)}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
-                    <span>{category.percent.toFixed(0)}% time</span>
-                    <span>Focus {category.focus.toFixed(0)}</span>
-                    <span>Prod {category.productivity.toFixed(0)}</span>
-                  </div>
-                  <div className="max-h-0 overflow-hidden transition-all duration-200 group-hover:mt-3 group-hover:max-h-44">
-                    <div className="space-y-1.5 border-t border-zinc-800 pt-2">
-                      {category.sessions.slice(0, 4).map((entry: any) => (
-                        <div key={entryKey(entry)} className="rounded-md bg-black/50 p-2 text-[11px]">
-                          <div className="flex justify-between gap-3">
-                            <span className="truncate text-zinc-300">{entry.appName ?? "Unknown"}</span>
-                            <span className="shrink-0 text-zinc-500">{formatMs(Number(entry.duration ?? 0))}</span>
+                      className={`grid transition-all duration-200 ease-out ${
+                        open ? "mt-3 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                      }`}
+                    >
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="border-t border-zinc-800 pt-2">
+                          <div className="mb-2 flex items-center justify-between text-[10px] text-zinc-600">
+                            <span>{category.activities.length} activities</span>
+                            <span>{locked ? "Pinned" : "Hover preview"}</span>
                           </div>
-                          <div className="mt-1 flex justify-between gap-3 text-zinc-600">
-                            <span>{formatTimeRange(entry)}</span>
-                            <span>F {getEntryFocus(entry).toFixed(0)} / P {getEntryProductivity(entry).toFixed(0)}</span>
+                          <div
+                            className="max-h-52 space-y-1.5 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]"
+                            onWheel={(event) => event.stopPropagation()}
+                          >
+                            {category.activities.map((activity: any, index: number) => (
+                              <div
+                                key={activity.id ?? `${activity.start}-${index}`}
+                                className="rounded-md bg-black/50 p-2 text-[11px] ring-1 ring-white/5"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="min-w-0 truncate font-medium text-zinc-300">
+                                    {activity.appName ?? "Unknown"}
+                                  </span>
+                                  <span className="shrink-0 tabular-nums text-zinc-500">
+                                    {formatMs(Number(activity.duration ?? 0))}
+                                  </span>
+                                </div>
+                                <div className="mt-1 truncate text-zinc-500">
+                                  {activity.title ?? "Untitled activity"}
+                                </div>
+                                <div className="mt-1.5 flex items-center justify-between gap-3 text-[10px] text-zinc-600">
+                                  <span className="truncate">{formatTimeRange(activity)}</span>
+                                  <span className="shrink-0 tabular-nums">
+                                    Focus {getEntryFocus(activity).toFixed(0)} / Prod {getEntryProductivity(activity).toFixed(0)}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          <div className="mt-1 truncate text-zinc-600">{getLatestTitle(entry)}</div>
                         </div>
-                      ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {categories.length === 0 && (
                 <div className="rounded-lg bg-zinc-950/60 p-6 text-center text-sm text-zinc-500">
                   No category data yet.

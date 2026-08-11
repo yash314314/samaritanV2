@@ -41,6 +41,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
+import AppCategoryTags from "../../components/AppCategoryTags";
 
 // ═══════════════════════════════════════════════════════════
 //  CONFIG
@@ -234,7 +235,14 @@ interface HeatmapBucket {
   dominantApp: string | null;
   dominantCategory: string | null;
   dominantIntent: string | null;
-  topApps: { name: string; duration: number; minutes: number; percentage: number }[];
+  topApps: {
+    name: string;
+    duration: number;
+    minutes: number;
+    percentage: number;
+    category?: string;
+    categories?: { name: string; duration: number; minutes: number; percentage: number }[];
+  }[];
   categoryBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
   intentBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
 }
@@ -487,11 +495,14 @@ const HeatmapTooltipCard = ({
           <p className="text-zinc-500 text-xs uppercase tracking-wider mb-2 font-medium">Top Apps</p>
           <div className="space-y-1.5">
             {bucket.topApps.slice(0, 5).map((app) => (
-              <div key={app.name} className="flex items-center gap-2 bg-zinc-900/60 rounded-lg p-1.5">
+              <div key={app.name} className="flex items-start gap-2 bg-zinc-900/60 rounded-lg p-1.5">
                 <div className="w-5 h-5 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
                   {app.name[0]}
                 </div>
-                <span className="text-zinc-200 text-xs flex-1 truncate">{app.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-zinc-200">{app.name}</div>
+                  <AppCategoryTags app={app} />
+                </div>
                 <span className="text-zinc-500 text-xs font-mono">{app.minutes}m</span>
               </div>
             ))}

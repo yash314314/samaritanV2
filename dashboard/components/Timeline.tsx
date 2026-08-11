@@ -3,19 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTimeline, calendarApi } from "../lib/api";
 import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
-
-const CATEGORY_COLORS: Record<string, string> = {
-  deep_work: "#8b5cf6",
-  research: "#533196",
-  communication: "#06b6d4",
-  productivity: "#22c55e",
-  media: "#f59e0b",
-  entertainment: "#ec4899",
-  development_tools: "#6366f1",
-  system: "#71717a",
-  idle: "#3f3f46",
-  unknown: "#94a3b8",
-};
+import { CATEGORY_COLORS } from "../lib/categoryColors";
 
 export default function Timeline({ userId, date }: any) {
 

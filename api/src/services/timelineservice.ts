@@ -1,5 +1,6 @@
 import { prisma } from "../prisma";
 import { getISTDayRange } from "../utils/time";
+import { getBaseFocus, getActivityProductivityScore } from "./metricEngine";
 
 
 export async function getTimeline(userId: string, date?: string, from?: string, to?: string) {
@@ -38,6 +39,9 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
   let currentSession: any = null;
 
   for (const activity of activities) {
+    const activityFocusScore = getBaseFocus(activity) * 100;
+    const activityProductivityScore = getActivityProductivityScore(activity);
+
     if (
       !currentSession ||
       currentSession.appName !== activity.appName ||
@@ -58,6 +62,8 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
         intent: activity.intent ?? "unknown",
         confidence: activity.confidence ?? 0,
         focusImpact: activity.focusImpact ?? 0.25,
+        focusScore: activityFocusScore,
+        productivityScore: activityProductivityScore,
         activityIds: [],
         items: [],
       };
@@ -76,6 +82,8 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
       intent: activity.intent ?? "unknown",
       confidence: activity.confidence ?? 0,
       focusImpact: activity.focusImpact ?? 0.25,
+      focusScore: activityFocusScore,
+      productivityScore: activityProductivityScore,
       start: activity.startTime,
       end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
       duration: activity.duration,
@@ -95,6 +103,18 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
           0
         ) / weightedDuration
       : activity.focusImpact ?? 0.25;
+    currentSession.focusScore = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.focusScore ?? 0) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activityFocusScore;
+    currentSession.productivityScore = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.productivityScore ?? 0) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activityProductivityScore;
   }
 
   if (currentSession) sessions.push(currentSession);

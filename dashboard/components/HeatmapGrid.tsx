@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import AppCategoryTags from "./AppCategoryTags";
 
 const TOOLTIP_WIDTH = 288;
 const TOOLTIP_HEIGHT = 260;
@@ -318,11 +319,12 @@ export default function HeatmapGrid({ data }: any) {
                         {tooltip.cell.topApps.map((app: any) => (
                           <div
                             key={app.name}
-                            className="flex justify-between gap-3"
+                            className="flex items-start justify-between gap-3"
                           >
-                            <span className="truncate text-zinc-400">
-                              {app.name}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-zinc-400">{app.name}</div>
+                              <AppCategoryTags app={app} />
+                            </div>
 
                             <span className="text-zinc-500 shrink-0">
                               {app.minutes}m

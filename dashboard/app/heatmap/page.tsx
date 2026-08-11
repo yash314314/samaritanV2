@@ -29,6 +29,7 @@ import {
 import { fetchHeatmap, fetchTimeline } from "../../lib/api";
 import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 import HeatmapInsights from "../../components/HeatmapInsights";
+import AppCategoryTags from "../../components/AppCategoryTags";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
@@ -49,7 +50,14 @@ interface HeatmapBucket {
   dominantApp: string | null;
   dominantCategory: string | null;
   dominantIntent: string | null;
-  topApps: { name: string; duration: number; minutes: number; percentage: number }[];
+  topApps: {
+    name: string;
+    duration: number;
+    minutes: number;
+    percentage: number;
+    category?: string;
+    categories?: { name: string; duration: number; minutes: number; percentage: number }[];
+  }[];
   categoryBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
   intentBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
 }
@@ -393,11 +401,14 @@ const HeatmapTooltipCard = ({
           <p className="text-zinc-500 text-xs uppercase tracking-wider mb-2 font-medium">Top Apps</p>
           <div className="space-y-1.5">
             {bucket.topApps.slice(0, 5).map((app) => (
-              <div key={app.name} className="flex items-center gap-2 bg-zinc-900/60 rounded-lg p-1.5">
+              <div key={app.name} className="flex items-start gap-2 bg-zinc-900/60 rounded-lg p-1.5">
                 <div className="w-5 h-5 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
                   {app.name[0]}
                 </div>
-                <span className="text-zinc-200 text-xs flex-1 truncate">{app.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-zinc-200">{app.name}</div>
+                  <AppCategoryTags app={app} />
+                </div>
                 <span className="text-zinc-500 text-xs font-mono">{app.minutes}m</span>
               </div>
             ))}
@@ -832,11 +843,14 @@ const HourDetailDrawer = ({
               <div className="space-y-2">
                 {bucket.topApps.map((app) => (
                   <div key={app.name} className="flex items-center justify-between p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
                       <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-400">
                         {app.name[0]}
                       </div>
-                      <span className="text-sm text-zinc-300">{app.name}</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-zinc-300">{app.name}</div>
+                        <AppCategoryTags app={app} limit={3} />
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-zinc-200">{app.minutes}m</p>
