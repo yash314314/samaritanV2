@@ -146,6 +146,21 @@ export const fetchTimeline = async (
   return res.json();
 };
 
+export type ActivityReview = {
+  activityIds: string[];
+  category: string;
+  intent: string;
+  focusImpact: number;
+  remember?: boolean;
+};
+
+export function reviewActivityEntries(userId: string, reviews: ActivityReview[]) {
+  return request("/activity/reviews", {
+    method: "POST",
+    body: JSON.stringify({ userId, reviews }),
+  });
+}
+
 export function fetchAnalytics(userId: string) {
   return request(`/analytics?userId=${userId}`);
 }

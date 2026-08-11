@@ -37,10 +37,11 @@ export default function TopBar() {
       flex
       items-center
       justify-between
-      mb-8
+      mb-4
       border-b
       border-zinc-800
-      pb-5
+      pb-3
+      shrink-0
     ">
       <div className="flex items-center gap-4">
         <button
@@ -51,7 +52,7 @@ export default function TopBar() {
           <ChevronLeft size={18} />
         </button>
 
-        <div className="text-lg font-semibold tracking-tight text-zinc-200">
+        <div className="text-base font-semibold tracking-tight text-zinc-200">
           {format(selectedDate, "MMMM d, yyyy")}
         </div>
 

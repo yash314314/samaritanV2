@@ -22,12 +22,15 @@ const router = Router();
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ EXISTING ROUTES Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 router.get("/daily", async (req, res) => {
-  const { userId } = req.query;
+  const { userId, date } = req.query;
   if (!userId || typeof userId !== "string") {
     return res.status(400).json({ error: "Missing userId" });
   }
   try {
-    const daily = await getDailyAnalytics(userId);
+    const daily = await getDailyAnalytics(
+      userId,
+      typeof date === "string" ? date : undefined
+    );
     const streak = await getDeepWorkStreak(userId);
     res.json({ ...daily, ...streak });
   } catch (error) {

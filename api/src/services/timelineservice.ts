@@ -56,23 +56,45 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
         duration: 0,
         category: activity.category ?? "unknown",
         intent: activity.intent ?? "unknown",
+        confidence: activity.confidence ?? 0,
+        focusImpact: activity.focusImpact ?? 0.25,
+        activityIds: [],
         items: [],
       };
     }
 
     currentSession.end = activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration);
     currentSession.duration = new Date(currentSession.end).getTime() - new Date(currentSession.start).getTime();
+    currentSession.activityIds.push(activity.id);
     currentSession.items.push({
+      id: activity.id,
       title: activity.windowTitle ?? activity.appName,
       iconUrl: activity.iconUrl,
       domain: activity.domain,
       url: activity.url,
       category: activity.category ?? "unknown",
       intent: activity.intent ?? "unknown",
+      confidence: activity.confidence ?? 0,
+      focusImpact: activity.focusImpact ?? 0.25,
       start: activity.startTime,
       end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
       duration: activity.duration,
     });
+
+    currentSession.confidence = Math.min(
+      currentSession.confidence,
+      activity.confidence ?? 0
+    );
+    const weightedDuration = currentSession.items.reduce(
+      (sum: number, item: any) => sum + Number(item.duration ?? 0),
+      0
+    );
+    currentSession.focusImpact = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.focusImpact ?? 0.25) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activity.focusImpact ?? 0.25;
   }
 
   if (currentSession) sessions.push(currentSession);

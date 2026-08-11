@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import LiveClock from "./LiveClock";
 import RecentActivity from "./RecentActivity";
 import { useCurrentActivity } from "../lib/useWs";
@@ -142,15 +143,26 @@ export default function MetricsPanel({
   const burnoutScore = formatScore(daily?.averageBurnoutScore);
   const entropyScore = formatScore(daily?.averageEntropyScore);
 
-  const recent = Array.isArray(timeline) ? timeline : [];
-  const currentActivity = recent[recent.length - 1];
   const liveActivity = useCurrentActivity();
-  const currentAppName = liveActivity?.appName ?? currentActivity?.appName;
-  const currentTitle =
-    liveActivity?.windowTitle ??
-    currentActivity?.items?.at(-1)?.title;
-  const hasLiveSignal = Boolean(liveActivity);
-  const activitySubtitle = currentTitle ?? "Waiting for signal";
+  const [signalClock, setSignalClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSignalClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const observedAt = liveActivity?.observedAt
+    ? new Date(liveActivity.observedAt).getTime()
+    : 0;
+  const hasLiveSignal = Boolean(
+    liveActivity &&
+    Number.isFinite(observedAt) &&
+    signalClock - observedAt <= 3000
+  );
+  const currentAppName = hasLiveSignal ? liveActivity?.appName : null;
+  const activitySubtitle = hasLiveSignal
+    ? liveActivity?.windowTitle || "Active window"
+    : "Waiting for live foreground activity";
 
   return (
     <div className="samaritan-card h-full min-h-0 overflow-hidden p-5">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   fetchDaily,
   fetchHeatmap,
@@ -10,21 +10,10 @@ import {
 
 import { useAppContext } from "../context/AppContext";
 import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
-
-import MetricsPanel from "../components/MetricsPanel";
-import HeatmapGrid from "../components/HeatmapGrid";
-import Timeline from "../components/Timeline";
-import FocusTrendChart from "@/components/FocusTrendChart";
+import RizeHomeDashboard from "@/components/RizeHomeDashboard";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
-
-// Memoize heavy children so unrelated state changes (e.g. the focus-trend
-// "loading" flag that toggles a couple of times a second during a refetch)
-// don't re-render the expensive charts/grid.
-const MemoMetricsPanel = memo(MetricsPanel);
-const MemoHeatmapGrid = memo(HeatmapGrid);
-const MemoFocusTrendChart = memo(FocusTrendChart);
-const MemoTimeline = memo(Timeline);
+const MemoRizeHomeDashboard = memo(RizeHomeDashboard);
 
 export default function Home() {
   const { selectedDate } = useAppContext();
@@ -41,12 +30,14 @@ export default function Home() {
   const [dailyFocusTrend, setDailyFocusTrend] = useState<any>(null);
   const [focusBucketMinutes, setFocusBucketMinutes] = useState(60);
   const [focusTrendLoading, setFocusTrendLoading] = useState(false);
+  const hasLoadedFocusTrendRef = useRef(false);
+  const focusTrendRequestIdRef = useRef(0);
 
   const loadDashboard = useCallback(async () => {
     const [dailyData, heatmapData, timelineData] = await Promise.all([
       fetchDaily(USER_ID, dateString),
       fetchHeatmap(USER_ID, dateString),
-      fetchTimeline(USER_ID, dateString)
+      fetchTimeline(USER_ID, undefined, undefined, dateString)
     ]);
 
     setDaily(dailyData);
@@ -56,7 +47,10 @@ export default function Home() {
   }, [dateString]);
 
   const loadFocusTrend = useCallback(async () => {
-    setFocusTrendLoading(true);
+    const requestId = ++focusTrendRequestIdRef.current;
+    if (!hasLoadedFocusTrendRef.current) {
+      setFocusTrendLoading(true);
+    }
     try {
       const trend = await fetchDailyFocusTrend(
         USER_ID,
@@ -64,9 +58,14 @@ export default function Home() {
         focusBucketMinutes
       );
 
-      setDailyFocusTrend(trend);
+      if (requestId === focusTrendRequestIdRef.current) {
+        setDailyFocusTrend(trend);
+        hasLoadedFocusTrendRef.current = true;
+      }
     } finally {
-      setFocusTrendLoading(false);
+      if (requestId === focusTrendRequestIdRef.current) {
+        setFocusTrendLoading(false);
+      }
     }
   }, [dateString, focusBucketMinutes]);
 
@@ -97,40 +96,16 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-6">
-
-      {/* TOP TIMELINE */}
-      <MemoTimeline
-        userId={USER_ID}
-        date={dateString}
-      />
-
-      {/* MAIN GRID */}
-      <div className="grid grid-cols-12 gap-6">
-
-        {/* LEFT COLUMN */}
-        <div className="col-span-3 space-y-6">
-
-                    <MemoMetricsPanel daily={daily} timeline={timeline} />
-
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div className="col-span-9 space-y-6 min-w-0">
-
-          <MemoFocusTrendChart
-            data={dailyFocusTrend || []}
-            bucketMinutes={focusBucketMinutes}
-            onBucketMinutesChange={setFocusBucketMinutes}
-            isLoading={focusTrendLoading}
-          />
-
-          <MemoHeatmapGrid data={heatmap} />
-
-        </div>
-
-      </div>
-
-    </div>
+    <MemoRizeHomeDashboard
+      userId={USER_ID}
+      date={dateString}
+      daily={daily}
+      heatmap={heatmap}
+      timeline={timeline || []}
+      focusTrend={dailyFocusTrend || []}
+      focusBucketMinutes={focusBucketMinutes}
+      onFocusBucketMinutesChange={setFocusBucketMinutes}
+      focusTrendLoading={focusTrendLoading}
+    />
   );
 }

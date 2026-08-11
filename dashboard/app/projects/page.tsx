@@ -90,31 +90,31 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+    <div className="dashboard-page text-zinc-100">
+      <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+        <div className="samaritan-card flex items-center justify-between p-4">
           <div>
-            <h1 className="text-2xl font-bold">Projects</h1>
+            <h1 className="text-xl font-bold">Projects</h1>
             <p className="text-sm text-zinc-500">Track time across your projects</p>
           </div>
           <button
             onClick={() => { setEditingProject(null); setForm({ name: "", icon: "", color: "#8b5cf6", weeklyHourGoal: 10 }); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+            className="flex items-center gap-2 rounded-lg bg-purple-500 px-3 py-2 text-sm text-white hover:bg-purple-600"
           >
             <Plus className="w-4 h-4" /> New Project
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="dashboard-scroll-panel grid auto-rows-min grid-cols-1 gap-3 pr-1 md:grid-cols-2 xl:grid-cols-4">
           {projects.map((project) => (
-            <div key={project.id} className="samaritan-card p-6">
-              <div className="flex items-start justify-between mb-4">
+            <div key={project.id} className="samaritan-card p-4">
+              <div className="mb-3 flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: project.color + "20", color: project.color }}>
                     {project.icon || "📁"}
                   </div>
                   <div>
-                    <h3 className="font-semibold">{project.name}</h3>
+                    <h3 className="line-clamp-1 font-semibold">{project.name}</h3>
                     <p className="text-xs text-zinc-500">{project.goals?.length || 0} goals</p>
                   </div>
                 </div>
@@ -127,7 +127,7 @@ export default function ProjectsPage() {
                   </button>
                 </div>
               </div>
-              <div className="space-y-2 mb-4">
+              <div className="mb-3 grid grid-cols-1 gap-1.5">
                 <div className="flex items-center gap-2 text-sm text-zinc-400">
                   <Target className="w-4 h-4" />
                   <span>{project.weeklyHourGoal}h/week goal</span>
@@ -141,7 +141,7 @@ export default function ProjectsPage() {
                   <span>{project._count?.events || 0} events</span>
                 </div>
               </div>
-              <button onClick={() => loadRules(project)} className="w-full px-3 py-2 text-sm border border-zinc-800 rounded-lg hover:bg-zinc-800 transition-colors">
+              <button onClick={() => loadRules(project)} className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-sm transition-colors hover:bg-zinc-800">
                 Manage Rules ({project.rules?.length || 0})
               </button>
             </div>

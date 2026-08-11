@@ -21,6 +21,22 @@ import {
     });
   }
 
+  export function emitActivityReviewed(userId: string, result: {
+    reviewedActivities: number;
+    reviewedEntries: number;
+    activityIds: string[];
+  }) {
+    broadcastToDashboards(userId, "activity:reviewed", result);
+  }
+
+  type CurrentActivityCursor = {
+    observedAtMs: number;
+    sourceSessionId: string | null;
+    sourceSequence: number | null;
+  };
+
+  const currentActivityCursors = new Map<string, CurrentActivityCursor>();
+
   export function emitCurrentActivity(userId: string, context: {
     app: string;
     title: string;
@@ -31,7 +47,47 @@ import {
     processPath?: string | null;
     type?: string;
     observedAt?: string;
+    sourceDeviceId?: string;
+    sourceSessionId?: string;
+    sourceSequence?: number;
   }) {
+    const parsedObservedAt = context.observedAt
+      ? new Date(context.observedAt).getTime()
+      : NaN;
+    const observedAtMs = Number.isFinite(parsedObservedAt)
+      ? parsedObservedAt
+      : Date.now();
+    const sourceSessionId = context.sourceSessionId ?? null;
+    const sourceSequence = Number.isFinite(context.sourceSequence)
+      ? Number(context.sourceSequence)
+      : null;
+    const previous = currentActivityCursors.get(userId);
+
+    if (previous) {
+      const sameSourceSession = Boolean(
+        sourceSessionId && sourceSessionId === previous.sourceSessionId
+      );
+
+      if (
+        sameSourceSession &&
+        sourceSequence !== null &&
+        previous.sourceSequence !== null &&
+        sourceSequence <= previous.sourceSequence
+      ) {
+        return;
+      }
+
+      if (observedAtMs < previous.observedAtMs) {
+        return;
+      }
+    }
+
+    currentActivityCursors.set(userId, {
+      observedAtMs,
+      sourceSessionId,
+      sourceSequence,
+    });
+
     broadcastToDashboards(userId, "activity:current", {
       appName: context.app,
       windowTitle: context.title,
@@ -41,7 +97,10 @@ import {
       processId: context.processId ?? null,
       processPath: context.processPath ?? null,
       type: context.type ?? "active",
-      observedAt: context.observedAt ?? new Date().toISOString(),
+      observedAt: new Date(observedAtMs).toISOString(),
+      sourceDeviceId: context.sourceDeviceId ?? null,
+      sourceSessionId,
+      sourceSequence,
     });
   }
   

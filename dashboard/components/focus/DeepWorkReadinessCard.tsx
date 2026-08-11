@@ -44,7 +44,7 @@ export default function DeepWorkReadinessCard({ data, onOpenConfig }: DeepWorkRe
 
   if (activeDeepWork) {
     return (
-      <div className="samaritan-card p-6 h-full overflow-hidden border-emerald-500/20">
+      <div className="samaritan-card h-full min-h-0 overflow-hidden border-emerald-500/20 p-4">
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
         <div className="flex justify-between items-start mb-4 relative">
           <div>
@@ -72,7 +72,7 @@ export default function DeepWorkReadinessCard({ data, onOpenConfig }: DeepWorkRe
   }
 
   return (
-    <div className={`samaritan-card p-6 h-full overflow-hidden ${level.border}`}>
+    <div className={`samaritan-card h-full min-h-0 overflow-hidden p-4 ${level.border}`}>
       {score >= 75 && (
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
       )}

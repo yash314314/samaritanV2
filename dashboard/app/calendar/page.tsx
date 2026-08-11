@@ -1,10 +1,26 @@
 "use client";
 
-import { useCallback, useState, useEffect } from "react";
-import { Bell, Briefcase, CheckCircle2, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth } from "date-fns";
-import { calendarApi, projectsApi } from "@/lib/api";
-import { useWsMessage } from "@/lib/ws";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Bell,
+  Briefcase,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Layers3,
+  MapPin,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { addMonths, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
+
+import { calendarApi, fetchHeatmap, fetchTimeline, projectsApi } from "@/lib/api";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
+import { useAppContext } from "@/context/AppContext";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
@@ -32,16 +48,120 @@ interface Project {
   color: string;
 }
 
+type DaySummary = {
+  trackedMs: number;
+  idleMinutes: number;
+  focus: number;
+  productivity: number;
+  dominantApp: string | null;
+  dominantCategory: string | null;
+  topApps: { name: string; duration: number; minutes?: number; percentage?: number }[];
+  categories: { name: string; duration: number; minutes?: number; percentage?: number }[];
+};
+
+function dateKey(day: Date) {
+  return format(day, "yyyy-MM-dd");
+}
+
+function inputDate(day: Date, hour: number) {
+  const next = new Date(day);
+  next.setHours(hour, 0, 0, 0);
+  return format(next, "yyyy-MM-dd'T'HH:mm");
+}
+
+function normalizeScore(value: any) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
+}
+
+function formatMs(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function mergeBreakdowns(items: any[], totalMs: number) {
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    if (!item?.name) continue;
+    totals.set(item.name, (totals.get(item.name) ?? 0) + Number(item.duration ?? 0));
+  }
+  return [...totals.entries()]
+    .map(([name, duration]) => ({
+      name,
+      duration,
+      minutes: Number((duration / 60000).toFixed(1)),
+      percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
+    }))
+    .sort((a, b) => b.duration - a.duration);
+}
+
+function summarizeDay(dayHeatmap: Record<string, any> | undefined): DaySummary {
+  const buckets = Object.values(dayHeatmap ?? {});
+  const trackedMs = buckets.reduce((sum, bucket: any) => sum + Number(bucket?.duration ?? 0), 0);
+  const idleMinutes = buckets.reduce((sum, bucket: any) => sum + Number(bucket?.idleMinutes ?? 0), 0);
+  const weightedFocus = buckets.reduce(
+    (sum, bucket: any) => sum + normalizeScore(bucket?.focus ?? bucket?.score) * Number(bucket?.duration ?? 0),
+    0
+  );
+  const weightedProductivity = buckets.reduce(
+    (sum, bucket: any) => sum + normalizeScore(bucket?.productivity ?? bucket?.score) * Number(bucket?.duration ?? 0),
+    0
+  );
+  const apps = mergeBreakdowns(buckets.flatMap((bucket: any) => bucket?.topApps ?? []), trackedMs);
+  const categories = mergeBreakdowns(buckets.flatMap((bucket: any) => bucket?.categoryBreakdown ?? []), trackedMs);
+
+  return {
+    trackedMs,
+    idleMinutes,
+    focus: trackedMs > 0 ? weightedFocus / trackedMs : 0,
+    productivity: trackedMs > 0 ? weightedProductivity / trackedMs : 0,
+    dominantApp: apps[0]?.name ?? null,
+    dominantCategory: categories[0]?.name ?? null,
+    topApps: apps,
+    categories,
+  };
+}
+
+function focusColor(summary: DaySummary) {
+  if (summary.trackedMs <= 0) return "#18181b";
+  if (summary.focus >= 75) return "#a855f7";
+  if (summary.focus >= 55) return "#7c3aed";
+  if (summary.focus >= 35) return "#4c1d95";
+  return "#27272a";
+}
+
+function getLatestTitle(entry: any) {
+  return entry?.items?.at?.(-1)?.title ?? entry?.items?.[0]?.title ?? "Untitled activity";
+}
+
+function StatTile({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div className="rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
+      <div className="text-[10px] uppercase text-zinc-600">{label}</div>
+      <div className="mt-1 truncate text-lg font-semibold text-zinc-100">{value}</div>
+      {sub && <div className="mt-1 truncate text-[11px] text-zinc-500">{sub}</div>}
+    </div>
+  );
+}
+
 export default function CalendarPage() {
+  const { setSelectedDate } = useAppContext();
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [monthHeatmap, setMonthHeatmap] = useState<Record<string, Record<string, any>>>({});
+  const [selectedTimeline, setSelectedTimeline] = useState<any[]>([]);
+  const [loadingReview, setLoadingReview] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: "",
-    startAt: "",
-    endAt: "",
+    startAt: inputDate(new Date(), 9),
+    endAt: inputDate(new Date(), 10),
     allDay: false,
     color: "#8b5cf6",
     description: "",
@@ -54,16 +174,40 @@ export default function CalendarPage() {
     projectId: "",
   });
 
-  const monthStart = startOfMonth(currentMonth);
-  const monthEnd = endOfMonth(currentMonth);
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  const { calendarFrom, calendarTo, days } = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const calendarStart = startOfWeek(monthStart);
+    const calendarEnd = endOfWeek(monthEnd);
+    const result: Date[] = [];
+    const cursor = new Date(calendarStart);
+    while (cursor <= calendarEnd) {
+      result.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return {
+      calendarFrom: dateKey(calendarStart),
+      calendarTo: dateKey(calendarEnd),
+      days: result,
+    };
+  }, [currentMonth]);
 
-  const resetForm = () => {
+  const selectedKey = dateKey(selectedDay);
+  const selectedEvents = useMemo(
+    () => events.filter((event) => dateKey(new Date(event.startAt)) === selectedKey),
+    [events, selectedKey]
+  );
+  const selectedSummary = useMemo(
+    () => summarizeDay(monthHeatmap[selectedKey]),
+    [monthHeatmap, selectedKey]
+  );
+
+  const resetForm = useCallback((day = selectedDay) => {
     setEditingId(null);
     setForm({
       title: "",
-      startAt: "",
-      endAt: "",
+      startAt: inputDate(day, 9),
+      endAt: inputDate(day, 10),
       allDay: false,
       color: "#8b5cf6",
       description: "",
@@ -75,28 +219,66 @@ export default function CalendarPage() {
       notes: "",
       projectId: "",
     });
-  };
+  }, [selectedDay]);
 
-  const loadEvents = useCallback(async () => {
-    const from = format(startOfMonth(currentMonth), "yyyy-MM-dd");
-    const to = format(endOfMonth(currentMonth), "yyyy-MM-dd");
-    const data = await calendarApi.list(USER_ID, from, to);
-    setEvents(data);
-  }, [currentMonth]);
+  const loadMonth = useCallback(async () => {
+    setLoadingReview(true);
+    try {
+      const [eventData, heatmapData] = await Promise.all([
+        calendarApi.list(USER_ID, calendarFrom, calendarTo),
+        fetchHeatmap(USER_ID, calendarFrom, calendarTo, "focus"),
+      ]);
+      setEvents(Array.isArray(eventData) ? eventData : []);
+      setMonthHeatmap(heatmapData ?? {});
+    } finally {
+      setLoadingReview(false);
+    }
+  }, [calendarFrom, calendarTo]);
+
+  const loadSelectedDay = useCallback(async () => {
+    const data = await fetchTimeline(USER_ID, undefined, undefined, selectedKey);
+    setSelectedTimeline(Array.isArray(data) ? data : []);
+  }, [selectedKey]);
 
   useEffect(() => {
-    loadEvents().catch(console.error);
+    loadMonth().catch(console.error);
     projectsApi.list(USER_ID).then((data) => setProjects(data)).catch(console.error);
-  }, [loadEvents]);
+  }, [loadMonth]);
 
-  useWsMessage("calendar:changed", () => {
-    loadEvents().catch(console.error);
-  });
+  useEffect(() => {
+    loadSelectedDay().catch(console.error);
+  }, [loadSelectedDay]);
+
+  useRealtimeRefresh(
+    () => Promise.all([loadMonth(), loadSelectedDay()]).then(() => undefined),
+    {
+      events: ["activity:new", "session:metrics", "analytics:daily", "calendar:changed", "deepwork:ended"],
+      debounceMs: 800,
+    }
+  );
+
+  function goMonth(direction: "prev" | "next") {
+    const next = direction === "prev" ? subMonths(currentMonth, 1) : addMonths(currentMonth, 1);
+    setCurrentMonth(next);
+    const nextSelected = startOfMonth(next);
+    setSelectedDay(nextSelected);
+    setSelectedDate(nextSelected);
+  }
+
+  function selectDay(day: Date) {
+    setSelectedDay(day);
+    setSelectedDate(day);
+  }
 
   const eventsForDay = (day: Date) => {
-    const dayStr = format(day, "yyyy-MM-dd");
-    return events.filter((e) => format(new Date(e.startAt), "yyyy-MM-dd") === dayStr);
+    const dayStr = dateKey(day);
+    return events.filter((event) => dateKey(new Date(event.startAt)) === dayStr);
   };
+
+  function openCreate(day = selectedDay) {
+    resetForm(day);
+    setShowModal(true);
+  }
 
   function openEdit(evt: CalendarEvent) {
     setEditingId(evt.id);
@@ -144,163 +326,365 @@ export default function CalendarPage() {
       }
       setShowModal(false);
       resetForm();
-      await loadEvents();
-    } catch (e) { console.error(e); }
+      await loadMonth();
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this event?")) return;
     try {
       await calendarApi.delete(id);
-      await loadEvents();
-    } catch (e) { console.error(e); }
+      await loadMonth();
+    } catch (error) {
+      console.error(error);
+    }
   }
 
+  const monthSummaries = days
+    .filter((day) => isSameMonth(day, currentMonth))
+    .map((day) => summarizeDay(monthHeatmap[dateKey(day)]));
+  const trackedDays = monthSummaries.filter((summary) => summary.trackedMs > 0);
+  const totalTrackedMs = trackedDays.reduce((sum, summary) => sum + summary.trackedMs, 0);
+  const monthFocus =
+    totalTrackedMs > 0
+      ? trackedDays.reduce((sum, summary) => sum + summary.focus * summary.trackedMs, 0) / totalTrackedMs
+      : 0;
+
   return (
-    <div className="min-h-screen bg-black text-zinc-100 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-zinc-800 rounded-lg">←</button>
-            <h1 className="text-2xl font-bold">{format(currentMonth, "MMMM yyyy")}</h1>
-            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-zinc-800 rounded-lg">→</button>
+    <div className="dashboard-page text-zinc-100">
+      <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+        <div className="samaritan-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-xs text-purple-300">
+                <Sparkles className="h-4 w-4" />
+                Calendar Review
+              </div>
+              <h1 className="text-xl font-semibold text-zinc-100">
+                {format(currentMonth, "MMMM yyyy")}
+              </h1>
+              <p className="mt-1 text-xs text-zinc-500">
+                Scheduled events, tracked time, focus quality, and daily drilldown in one place.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => goMonth("prev")}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                title="Previous month"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  setCurrentMonth(today);
+                  selectDay(today);
+                }}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 transition hover:text-zinc-100"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => goMonth("next")}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                title="Next month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => openCreate()}
+                className="ml-2 flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-600"
+              >
+                <Plus className="h-4 w-4" />
+                New Event
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => { resetForm(); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
-          >
-            <Plus className="w-4 h-4" /> New Event
-          </button>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <StatTile label="Month Focus" value={monthFocus.toFixed(0)} sub="activity weighted" />
+            <StatTile label="Tracked" value={formatMs(totalTrackedMs)} sub={`${trackedDays.length} active days`} />
+            <StatTile label="Events" value={events.length} sub="scheduled blocks" />
+            <StatTile label="Selected" value={format(selectedDay, "MMM d")} sub={format(selectedDay, "EEEE")} />
+          </div>
         </div>
 
-        <div className="samaritan-card p-6">
-          <div className="grid grid-cols-7 gap-4">
-            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-              <div key={d} className="text-center text-sm text-zinc-500 font-medium">{d}</div>
-            ))}
-            {days.map((day) => {
-              const dayEvents = eventsForDay(day);
-              return (
-                <div
-                  key={day.toISOString()}
-                  className={`min-h-[120px] p-2 rounded-lg border ${isSameMonth(day, currentMonth) ? "border-zinc-800 bg-zinc-950" : "border-zinc-900 bg-zinc-900/50"}`}
-                >
-                  <div className={`text-sm font-medium mb-1 ${isSameMonth(day, currentMonth) ? "text-zinc-300" : "text-zinc-600"}`}>
-                    {format(day, "d")}
-                  </div>
-                  <div className="space-y-1">
-                    {dayEvents.slice(0, 3).map((evt) => (
-                      <div key={evt.id} className="group/evt relative text-xs px-2 py-1 rounded" style={{ backgroundColor: evt.color || evt.project?.color || "#a855f7", color: "white" }}>
-                        <button onClick={() => openEdit(evt)} className="w-full text-left truncate pr-10">
-                          {evt.allDay ? "All day" : format(new Date(evt.startAt), "HH:mm")} {evt.title}
-                        </button>
-                        <span className="hidden group-hover/evt:flex absolute right-1 top-1/2 -translate-y-1/2 gap-1">
-                        <button
-                          onClick={() => openEdit(evt)}
-                          className="text-white/80 hover:text-white"
-                          title="Edit event"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(evt.id)}
-                          className="text-white/80 hover:text-white"
-                          title="Delete event"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                        </span>
-                      </div>
-                    ))}
-                    {dayEvents.length > 3 && <div className="text-xs text-zinc-500">+{dayEvents.length - 3} more</div>}
-                  </div>
+        <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="samaritan-card min-h-0 p-4">
+            <div className="mb-3 grid grid-cols-7 gap-1.5">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+                <div key={day} className="text-center text-xs font-medium text-zinc-500">
+                  {day}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            <div className="grid h-[calc(100%-2rem)] grid-cols-7 grid-rows-6 gap-1.5">
+              {days.map((day) => {
+                const key = dateKey(day);
+                const summary = summarizeDay(monthHeatmap[key]);
+                const dayEvents = eventsForDay(day);
+                const selected = isSameDay(day, selectedDay);
+                const inMonth = isSameMonth(day, currentMonth);
+
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => selectDay(day)}
+                    className={`group min-h-0 rounded-lg border p-1.5 text-left transition ${
+                      selected
+                        ? "border-purple-400 bg-purple-500/10"
+                        : inMonth
+                        ? "border-zinc-800 bg-zinc-950/80 hover:border-purple-500/30"
+                        : "border-zinc-900 bg-zinc-950/30 opacity-55"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className={`text-sm font-medium ${inMonth ? "text-zinc-200" : "text-zinc-600"}`}>
+                        {format(day, "d")}
+                      </span>
+                      {summary.trackedMs > 0 && (
+                        <span className="text-[10px] text-zinc-500">
+                          {summary.focus.toFixed(0)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mb-1.5 h-1 overflow-hidden rounded-full bg-zinc-900">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{
+                          width: summary.trackedMs > 0 ? `${Math.max(8, summary.focus)}%` : "0%",
+                          backgroundColor: focusColor(summary),
+                        }}
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      {dayEvents.slice(0, 2).map((event) => (
+                        <div
+                          key={event.id}
+                          className="truncate rounded px-1.5 py-0.5 text-[10px] font-medium text-white"
+                          style={{ backgroundColor: event.color || event.project?.color || "#8b5cf6" }}
+                        >
+                          {event.allDay ? "All day" : format(new Date(event.startAt), "HH:mm")} {event.title}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-1 flex items-center justify-between text-[10px] text-zinc-600">
+                      <span>{summary.trackedMs > 0 ? formatMs(summary.trackedMs) : "No tracking"}</span>
+                      {dayEvents.length > 2 && <span>+{dayEvents.length - 2}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          <aside className="grid min-h-0 grid-rows-[auto_minmax(0,0.8fr)_minmax(0,1fr)] gap-4">
+            <div className="samaritan-card p-4">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-purple-400" />
+                    <h2 className="text-sm font-semibold text-zinc-200">
+                      {format(selectedDay, "EEEE, MMM d")}
+                    </h2>
+                  </div>
+                  <p className="mt-1 text-[11px] text-zinc-500">Review schedule against actual tracked work.</p>
+                </div>
+                {loadingReview && <span className="text-[10px] text-purple-300">Syncing</span>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <StatTile label="Tracked" value={formatMs(selectedSummary.trackedMs)} />
+                <StatTile label="Focus" value={selectedSummary.focus.toFixed(0)} />
+                <StatTile label="Idle" value={`${selectedSummary.idleMinutes.toFixed(0)}m`} />
+                <StatTile label="Productivity" value={selectedSummary.productivity.toFixed(0)} />
+              </div>
+
+              <div className="mt-4 rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-zinc-300">
+                  <Layers3 className="h-3.5 w-3.5 text-purple-400" />
+                  Dominant Work
+                </div>
+                <div className="text-sm text-zinc-100">
+                  {selectedSummary.dominantCategory ?? "No tracked category"}
+                </div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  {selectedSummary.dominantApp ?? "No dominant app yet"}
+                </div>
+              </div>
+            </div>
+
+            <div className="samaritan-card flex min-h-0 flex-col p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-zinc-200">Scheduled</h2>
+                <button
+                  type="button"
+                  onClick={() => openCreate(selectedDay)}
+                  className="rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-[11px] text-purple-300 transition hover:bg-purple-500/20"
+                >
+                  Add
+                </button>
+              </div>
+
+              <div className="dashboard-scroll-panel space-y-2 pr-1">
+                {selectedEvents.map((event) => (
+                  <div key={event.id} className="rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-zinc-200">{event.title}</div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {event.allDay
+                            ? "All day"
+                            : `${format(new Date(event.startAt), "HH:mm")} - ${format(new Date(event.endAt), "HH:mm")}`}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button onClick={() => openEdit(event)} title="Edit event" className="text-zinc-500 hover:text-zinc-200">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete(event.id)} title="Delete event" className="text-zinc-500 hover:text-rose-300">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    {event.location && <div className="mt-2 text-[11px] text-zinc-600">{event.location}</div>}
+                  </div>
+                ))}
+                {selectedEvents.length === 0 && (
+                  <div className="rounded-lg bg-zinc-950/60 p-5 text-center text-sm text-zinc-500">
+                    No scheduled events.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="samaritan-card flex min-h-0 flex-col p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Clock3 className="h-4 w-4 text-purple-400" />
+                <h2 className="text-sm font-semibold text-zinc-200">Actual Timeline</h2>
+              </div>
+
+              <div className="dashboard-scroll-panel space-y-2 pr-1">
+                {selectedTimeline.slice().reverse().slice(0, 10).map((entry) => (
+                  <div key={`${entry.start}-${entry.appName}`} className="rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-zinc-200">{entry.appName}</div>
+                        <div className="mt-1 truncate text-xs text-zinc-500">{getLatestTitle(entry)}</div>
+                      </div>
+                      <div className="shrink-0 text-xs text-zinc-500">{formatMs(Number(entry.duration ?? 0))}</div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-600">
+                      <span>{entry.category ?? "unknown"}</span>
+                      <span>{entry.intent ?? "unknown"}</span>
+                    </div>
+                  </div>
+                ))}
+                {selectedTimeline.length === 0 && (
+                  <div className="rounded-lg bg-zinc-950/60 p-5 text-center text-sm text-zinc-500">
+                    No tracked activity for this day.
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
 
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <form onSubmit={handleSubmit} className="samaritan-card p-6 w-full max-w-md">
-              <h2 className="text-lg font-bold mb-4">{editingId ? "Edit Event" : "New Event"}</h2>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+            <form onSubmit={handleSubmit} className="samaritan-card max-h-[90vh] w-full max-w-md overflow-y-auto p-6">
+              <h2 className="mb-4 text-lg font-bold">{editingId ? "Edit Event" : "New Event"}</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Title</label>
-                  <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" required />
+                  <label className="mb-1 block text-sm text-zinc-400">Title</label>
+                  <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" required />
                 </div>
-                <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Start</label>
-                  <input type="datetime-local" value={form.startAt} onChange={(e) => setForm({ ...form, startAt: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" required />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-sm text-zinc-400">Start</label>
+                    <input type="datetime-local" value={form.startAt} onChange={(e) => setForm({ ...form, startAt: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" required />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-zinc-400">End</label>
+                    <input type="datetime-local" value={form.endAt} onChange={(e) => setForm({ ...form, endAt: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" required />
+                  </div>
                 </div>
+                <label className="flex items-center gap-2 text-sm text-zinc-300">
+                  <input type="checkbox" checked={form.allDay} onChange={(e) => setForm({ ...form, allDay: e.target.checked })} />
+                  All day
+                </label>
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">End</label>
-                  <input type="datetime-local" value={form.endAt} onChange={(e) => setForm({ ...form, endAt: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" required />
-                </div>
-                <div>
-                  <label className="block text-sm text-zinc-400 mb-1">All day</label>
-                  <input type="checkbox" checked={form.allDay} onChange={(e) => setForm({ ...form, allDay: e.target.checked })} className="w-5 h-5 bg-zinc-950 border border-zinc-800 rounded" />
-                </div>
-                <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Location</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Location</label>
                   <div className="relative">
-                    <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500" />
-                    <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2" />
+                    <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                    <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Project</label>
-                  <select value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                  <label className="mb-1 block text-sm text-zinc-400">Project</label>
+                  <select value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
                     <option value="">No project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Color</label>
-                  <input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} className="w-full h-10 bg-zinc-950 border border-zinc-800 rounded-lg" />
+                  <label className="mb-1 block text-sm text-zinc-400">Color</label>
+                  <input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm text-zinc-400 mb-1">Status</label>
-                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                    <label className="mb-1 block text-sm text-zinc-400">Status</label>
+                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
                       <option value="confirmed">Confirmed</option>
                       <option value="tentative">Tentative</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
-                  <label className="flex items-center gap-2 mt-6 text-sm text-zinc-300">
-                    <Briefcase className="w-4 h-4 text-zinc-500" />
+                  <label className="mt-6 flex items-center gap-2 text-sm text-zinc-300">
+                    <Briefcase className="h-4 w-4 text-zinc-500" />
                     <input type="checkbox" checked={form.busy} onChange={(e) => setForm({ ...form, busy: e.target.checked })} />
                     Busy
                   </label>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm text-zinc-400 mb-1">Reminder</label>
+                    <label className="mb-1 block text-sm text-zinc-400">Reminder</label>
                     <div className="relative">
-                      <Bell className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500" />
-                      <input type="number" value={form.reminderMinutes} onChange={(e) => setForm({ ...form, reminderMinutes: Number(e.target.value) })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2" />
+                      <Bell className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                      <input type="number" value={form.reminderMinutes} onChange={(e) => setForm({ ...form, reminderMinutes: Number(e.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-400 mb-1">Recurrence</label>
-                    <input placeholder="RRULE:FREQ=WEEKLY" value={form.recurrenceRule} onChange={(e) => setForm({ ...form, recurrenceRule: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" />
+                    <label className="mb-1 block text-sm text-zinc-400">Recurrence</label>
+                    <input placeholder="RRULE:FREQ=WEEKLY" value={form.recurrenceRule} onChange={(e) => setForm({ ...form, recurrenceRule: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Description</label>
-                  <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" rows={2} />
+                  <label className="mb-1 block text-sm text-zinc-400">Description</label>
+                  <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" rows={2} />
                 </div>
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">Notes</label>
-                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2" rows={3} />
+                  <label className="mb-1 block text-sm text-zinc-400">Notes</label>
+                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2" rows={3} />
                 </div>
               </div>
-              <div className="flex gap-3 mt-6">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-zinc-800 rounded-lg hover:bg-zinc-800">Cancel</button>
-                <button type="submit" className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"><CheckCircle2 className="inline w-4 h-4 mr-1" />{editingId ? "Save" : "Create"}</button>
+              <div className="mt-6 flex gap-3">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 transition hover:bg-zinc-800">Cancel</button>
+                <button type="submit" className="flex-1 rounded-lg bg-purple-500 px-4 py-2 text-white transition hover:bg-purple-600">
+                  <CheckCircle2 className="mr-1 inline h-4 w-4" />
+                  {editingId ? "Save" : "Create"}
+                </button>
               </div>
             </form>
           </div>

@@ -230,7 +230,7 @@ function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
 // ═══════════════════════════════════════════════════════════
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`samaritan-card ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
 );
 
 const SkeletonCell = () => <div className="h-6 rounded-sm bg-zinc-800 animate-pulse" />;
@@ -1084,17 +1084,17 @@ export default function HeatmapPage() {
   }, [timeline]);
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100">
+    <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
-      <div className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="samaritan-card z-40 mb-3 shrink-0">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+              <h1 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
                 <Zap className="w-6 h-6 text-purple-500" />
                 Temporal Heatmap
               </h1>
-              <p className="mt-0.5 text-sm text-zinc-500">Deep-dive into your hourly cognitive patterns</p>
+              <p className="mt-0.5 text-xs text-zinc-500">Deep-dive into your hourly cognitive patterns</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1151,7 +1151,7 @@ export default function HeatmapPage() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-zinc-800 pt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-2">
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Color by</span>
               <div className="flex bg-zinc-950 rounded-lg p-0.5 border border-zinc-800">
@@ -1197,22 +1197,22 @@ export default function HeatmapPage() {
       </div>
 
       {/* ═══ CONTENT ═══ */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="dashboard-scroll-panel mx-auto grid min-h-0 w-full max-w-7xl flex-1 grid-cols-12 gap-4 overflow-y-auto overflow-x-hidden px-4 py-1 pr-2 sm:px-5">
         {error && (
-          <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2">
+          <div className="col-span-12 flex items-center gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-400">
             <Activity className="w-4 h-4 flex-shrink-0" />
             {error}
           </div>
         )}
 
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
+        <Card className="dashboard-grid-card col-span-12 min-h-[430px] p-4">
+          <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
                 Activity Grid
               </h2>
-              <p className="text-sm text-zinc-500 mt-0.5">
+              <p className="mt-0.5 text-xs text-zinc-500">
                 {viewModeConfig[viewMode].desc} • {displayLabel}
                 {categoryFilter && ` • Filtered: ${categoryFilter}`}
               </p>
@@ -1237,13 +1237,13 @@ export default function HeatmapPage() {
           )}
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1">
-            {heatmap && !loading ? <HeatmapInsights data={heatmap} /> : <InsightsSkeleton />}
-          </div>
-          <div className="lg:col-span-2">
-            <Card className="p-6 h-full">
-              <h3 className="text-lg font-semibold text-zinc-100 mb-4 flex items-center gap-2">
+        <div className="col-span-12 min-h-0">
+          {heatmap && !loading ? <HeatmapInsights data={heatmap} /> : <InsightsSkeleton />}
+        </div>
+
+        <div className="col-span-12 min-h-[360px]">
+            <Card className="flex h-full min-h-0 flex-col p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-100">
                 <Clock className="w-5 h-5 text-zinc-500" />
                 Hourly Timeline
               </h3>
@@ -1252,7 +1252,7 @@ export default function HeatmapPage() {
                   {Array.from({ length: 4 }).map((_, i) => (<div key={i} className="h-20 bg-zinc-800 rounded-xl" />))}
                 </div>
               ) : groupedTimeline.length > 0 ? (
-                <div className="max-h-[600px] overflow-y-auto pr-2 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+                <div className="dashboard-scroll-panel space-y-4 pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
                   {groupedTimeline.map(({ date, hours }) => (
                     <div key={date} className="space-y-3">
                       <div className="flex items-center gap-2 sticky top-0 bg-zinc-900/95 py-1 z-10">
@@ -1367,7 +1367,6 @@ export default function HeatmapPage() {
                 <div className="flex items-center justify-center h-48 text-zinc-600 text-sm">No timeline data available for this range.</div>
               )}
             </Card>
-          </div>
         </div>
       </div>
 

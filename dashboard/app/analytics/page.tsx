@@ -293,7 +293,7 @@ interface TimelineSession {
 // ═══════════════════════════════════════════════════════════
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`samaritan-card ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
 );
 
 const StatCard = ({
@@ -967,22 +967,22 @@ export default function AnalyticsPage() {
   const isLoading = dashboardLoading || loading;
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100">
+    <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
-      <div className="bg-zinc-900 border-b border-zinc-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="samaritan-card mb-3 shrink-0">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+              <h1 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
                 <LayoutDashboard className="w-6 h-6 text-purple-500" />
                 Analytics
               </h1>
-              <p className="mt-0.5 text-sm text-zinc-500">Samaritan Intelligence Dashboard</p>
+              <p className="mt-0.5 text-xs text-zinc-500">Samaritan Intelligence Dashboard</p>
             </div>
             <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
           </div>
 
-          <div className="mt-5 flex gap-1 bg-zinc-950 p-1 rounded-lg w-fit border border-zinc-800">
+          <div className="mt-3 flex w-fit gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
             {(
               [
                 { id: "overview", label: "Overview", icon: BarChart3 },
@@ -1007,7 +1007,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="mx-auto min-h-0 w-full max-w-7xl flex-1 overflow-hidden px-4 py-1 sm:px-5">
         {/* ── Validation Warnings ── */}
         {validations.some((v) => !v.valid) && (
           <div className="mb-6 space-y-2">
@@ -1045,9 +1045,9 @@ export default function AnalyticsPage() {
                   OVERVIEW
                 ═══════════════════════════════════════════════════ */}
             {activeTab === "overview" && (
-              <div className="space-y-6">
+              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
                 {dashboard.assistant.suggestion && (
-                  <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-start gap-3">
+                  <div className="col-span-12 flex items-start gap-3 rounded-lg border border-purple-500/20 bg-purple-500/10 p-3">
                     <BrainCircuit className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="font-medium text-purple-300 text-sm">Samaritan Assistant</p>
@@ -1056,7 +1056,7 @@ export default function AnalyticsPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <StatCard
                     title="Productivity Score"
                     value={`${round0(dashboard.assistant.productivityScore)}%`}
@@ -1103,7 +1103,7 @@ export default function AnalyticsPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Card className="p-4 flex items-center gap-4">
                     <div className="p-2.5 bg-purple-500/10 rounded-lg">
                       <MousePointerClick className="w-5 h-5 text-purple-400" />
@@ -1139,10 +1139,10 @@ export default function AnalyticsPage() {
                   </Card>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <Card className="p-6">
+                <div className="col-span-12 grid min-h-0 grid-cols-1 gap-3">
+                  <Card className="dashboard-grid-card min-h-[300px] p-4">
                     <SectionTitle icon={TrendingUp} title="Weekly Growth Trend" />
-                    <ResponsiveContainer width="100%" height={280}>
+                    <ResponsiveContainer width="100%" height={260}>
                       <AreaChart data={growthChart}>
                         <defs>
                           <linearGradient id="colorFocus" x1="0" y1="0" x2="0" y2="1">
@@ -1175,9 +1175,9 @@ export default function AnalyticsPage() {
                     </ResponsiveContainer>
                   </Card>
 
-                  <Card className="p-6">
+                  <Card className="dashboard-grid-card min-h-[300px] p-4">
                     <SectionTitle icon={BrainCircuit} title="Intent Distribution" />
-                    <ResponsiveContainer width="100%" height={280}>
+                    <ResponsiveContainer width="100%" height={260}>
                       <BarChart data={intentChart} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
                         <XAxis type="number" stroke={chartAxisColor} fontSize={12} />
@@ -1197,8 +1197,8 @@ export default function AnalyticsPage() {
                   </Card>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <Card className="p-6">
+                <div className="col-span-12 grid min-h-0 grid-cols-1 gap-3 xl:grid-cols-2">
+                  <Card className="dashboard-scroll-panel p-4">
                     <SectionTitle icon={BarChart3} title="App Usage Today" />
                     <div className="space-y-3">
                       {appUsageChart.map((app) => (
@@ -1226,10 +1226,10 @@ export default function AnalyticsPage() {
                     </div>
                   </Card>
 
-                  <Card className="p-6">
+                  <Card className="dashboard-grid-card min-h-[270px] p-4">
                     <SectionTitle icon={PieChart} title="Productivity Breakdown" />
                     {categoryChart.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={250}>
+                      <ResponsiveContainer width="100%" height={230}>
                         <PieChart>
                           <Pie
                             data={categoryChart}
@@ -1260,9 +1260,9 @@ export default function AnalyticsPage() {
                   FOCUS
                 ═══════════════════════════════════════════════════ */}
             {activeTab === "focus" && (
-              <div className="space-y-6">
+              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
                 {dailySummary && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <Card className="p-4">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-purple-500/10 rounded-lg">
@@ -1299,9 +1299,9 @@ export default function AnalyticsPage() {
                   </div>
                 )}
 
-                <Card className="p-6">
+                <Card className="dashboard-grid-card col-span-12 min-h-[430px] p-4">
                   <SectionTitle icon={Activity} title="Hourly Focus Trend (IST)" />
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={380}>
                     <AreaChart data={focusTrend}>
                       <defs>
                         <linearGradient id="focusGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1330,8 +1330,8 @@ export default function AnalyticsPage() {
                   HEATMAP
                 ═══════════════════════════════════════════════════ */}
             {activeTab === "heatmap" && (
-              <div className="space-y-6">
-                <Card className="p-6">
+              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
+                <Card className="dashboard-grid-card col-span-12 min-h-[420px] p-4">
                   <SectionTitle icon={Thermometer} title="Activity Heatmap (IST Hours)" />
                   <p className="text-sm text-zinc-500 mb-4">
                     Raw productivity score by hour. Colors normalized to actual min/max range. Hover cells for detail.
@@ -1340,7 +1340,7 @@ export default function AnalyticsPage() {
                 </Card>
 
                 {/* ── Recent Hourly Breakdown — exact timeline logs grouped by IST hour ── */}
-                <Card className="p-6">
+                <Card className="dashboard-scroll-panel col-span-12 min-h-[320px] p-4">
                   <SectionTitle icon={Clock} title="Recent Hourly Breakdown" />
                   <p className="text-sm text-zinc-500 mb-4">
                     Timeline sessions grouped by hour with nested tracks, pages, and exact timestamps.

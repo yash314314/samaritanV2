@@ -147,34 +147,34 @@ export default function GoalsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+    <div className="dashboard-page text-zinc-100">
+      <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+        <div className="samaritan-card flex items-center justify-between p-4">
           <div>
-            <h1 className="text-2xl font-bold">Goals</h1>
+            <h1 className="text-xl font-bold">Goals</h1>
             <p className="text-sm text-zinc-500">Track your progress</p>
           </div>
           <button
             onClick={() => { resetForm(); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+            className="flex items-center gap-2 rounded-lg bg-purple-500 px-3 py-2 text-sm text-white hover:bg-purple-600"
           >
             <Plus className="w-4 h-4" /> New Goal
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="dashboard-scroll-panel grid auto-rows-min grid-cols-1 gap-3 pr-1 md:grid-cols-2 xl:grid-cols-4">
           {goals.map((goal) => {
             const progress = goal.progress ?? 0;
             const ratio = Math.min(100, Math.round((goal.progressRatio ?? (goal.target > 0 ? progress / goal.target : 0)) * 100));
             return (
-            <div key={goal.id} className="samaritan-card p-6">
-              <div className="flex items-start justify-between mb-4">
+            <div key={goal.id} className="samaritan-card p-4">
+              <div className="mb-3 flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-purple-500/10 rounded-lg">
                     <Target className="w-5 h-5 text-purple-400" />
                   </div>
                   <div>
-                    <h3 className="font-semibold">{goal.title}</h3>
+                    <h3 className="line-clamp-1 font-semibold">{goal.title}</h3>
                     <p className="text-xs text-zinc-500">{goal.period} · {goal.priority || "medium"} priority</p>
                   </div>
                 </div>
@@ -184,21 +184,19 @@ export default function GoalsPage() {
                   <button onClick={() => handleDelete(goal.id)} className="p-1 hover:text-rose-400 text-zinc-500" title="Delete"><Trash2 className="w-4 h-4" /></button>
                 </div>
               </div>
-              {goal.description && <p className="mb-4 text-sm text-zinc-400">{goal.description}</p>}
+              {goal.description && <p className="mb-3 line-clamp-2 text-xs text-zinc-400">{goal.description}</p>}
               <div className="flex items-end gap-2">
-                <div className="text-3xl font-bold">{Math.round(progress)}</div>
+                <div className="text-2xl font-bold">{Math.round(progress)}</div>
                 <div className="text-sm text-zinc-500 mb-1">/ {goal.target} {goalUnit(goal)}</div>
               </div>
-              <div className="mt-3 h-2 rounded-full bg-zinc-800 overflow-hidden">
+              <div className="mt-2 h-2 rounded-full bg-zinc-800 overflow-hidden">
                 <div className={`h-full ${ratio >= 100 ? "bg-emerald-400" : "bg-purple-500"}`} style={{ width: `${ratio}%` }} />
               </div>
               <div className="mt-2 flex justify-between text-xs text-zinc-500">
                 <span>{ratio}% complete</span>
                 <span>{goal.startDate?.slice(0, 10) || "auto"} to {goal.endDate?.slice(0, 10) || goal.period}</span>
               </div>
-              {goal.project && (
-                <div className="mt-3 text-xs text-zinc-400">Project: {goal.project.name}</div>
-              )}
+              {goal.project && <div className="mt-2 truncate text-xs text-zinc-400">Project: {goal.project.name}</div>}
             </div>
           );})}
         </div>

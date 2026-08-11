@@ -57,6 +57,9 @@ registerHandler(async (ws: WebSocket, msg: WsMessage, meta: ClientMeta) => {
         processPath?: string | null;
         observedAt?: string;
         type?: string;
+        sourceDeviceId?: string;
+        sourceSessionId?: string;
+        sourceSequence?: number;
       };
 
       if (!data?.app || !data?.title) return;
@@ -71,6 +74,9 @@ registerHandler(async (ws: WebSocket, msg: WsMessage, meta: ClientMeta) => {
         processPath: data.processPath,
         observedAt: data.observedAt,
         type: data.type,
+        sourceDeviceId: meta.deviceId ?? data.sourceDeviceId,
+        sourceSessionId: data.sourceSessionId,
+        sourceSequence: data.sourceSequence,
       });
     } catch (err) {
       console.error("[WS Handler] activity:current error:", err);

@@ -32,6 +32,7 @@ export interface WsConnectionState {
 class SamaritanWsClient {
   private ws: WebSocket | null = null;
   private listeners = new Map<string, Set<WsListener>>();
+  private latestMessages = new Map<string, WsMessage>();
   private stateListeners = new Set<(state: WsConnectionState) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -109,6 +110,15 @@ class SamaritanWsClient {
     const set = this.listeners.get(type)!;
     const wrapped = listener as WsListener;
     set.add(wrapped);
+
+    const latest = this.latestMessages.get(type);
+    if (latest) {
+      queueMicrotask(() => {
+        if (!set.has(wrapped)) return;
+        try { wrapped(latest); } catch (err) { console.error("[WS] Listener error:", err); }
+      });
+    }
+
     return () => set.delete(wrapped);
   }
 
@@ -146,6 +156,10 @@ class SamaritanWsClient {
   }
 
   private _dispatch(msg: WsMessage) {
+    if (msg.type === "activity:current") {
+      this.latestMessages.set(msg.type, msg);
+    }
+
     const set = this.listeners.get(msg.type);
     if (set) {
       set.forEach((listener) => {

@@ -18,7 +18,12 @@ function fromIST(istDate: Date): Date {
   return new Date(istDate.getTime() - IST_OFFSET_MS);
 }
 
-function getISTDayRange(date?: Date) {
+function getISTDayRange(date?: Date | string) {
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const start = new Date(`${date}T00:00:00+05:30`);
+    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+  }
+
   const base = date ? new Date(date) : new Date();
   const ist = toIST(base);
   ist.setUTCHours(0, 0, 0, 0);
@@ -34,73 +39,148 @@ function getISTDateKey(date: Date): string {
 
 // ─── Daily Analytics ────────────────────────────────────
 
-export async function getDailyAnalytics(userId: string) {
-  const { start, end } = getISTDayRange();
+export async function getDailyAnalytics(userId: string, date?: string) {
+  const { start, end } = getISTDayRange(date);
 
-  const sessions = await prisma.session.findMany({
-    where: {
-      userId,
-      startTime: { gte: start, lt: end },
-    },
-    include: { activities: true },
-  });
+  const [sessions, protectedWork] = await Promise.all([
+    prisma.session.findMany({
+      where: {
+        userId,
+        startTime: { gte: start, lt: end },
+      },
+      include: { activities: true },
+    }),
+    prisma.deepWorkSession.findMany({
+      where: {
+        userId,
+        startedAt: { gte: start, lt: end },
+      },
+      select: { startedAt: true, endedAt: true, plannedMinutes: true },
+    }),
+  ]);
 
   let totalSwitches = 0;
   let totalIdleMs = 0;
-  let totalFocusScore = 0;
-  let totalBurnout = 0;
-  let totalActiveSeconds = 0;
-  let totalDeepWorkSeconds = 0;
-  let deepWorkSessions = 0;
-  let totalEntropy = 0;
+  let totalActiveMs = 0;
+  let weightedFocus = 0;
+  let weightedBurnout = 0;
+  let weightedEntropy = 0;
+  let totalMetricWeight = 0;
 
   let productiveCount = 0;
   let distractingCount = 0;
   let neutralCount = 0;
   const appUsage: Record<string, number> = {};
 
+  const productiveCategories = new Set(["deep_work", "development_tools", "productivity", "research"]);
+  const distractingCategories = new Set(["media", "entertainment"]);
+
   sessions.forEach((session) => {
     totalSwitches += session.switchCount;
-    totalIdleMs += session.idleTime;
-    totalFocusScore += session.focusScore;
-    totalBurnout += session.burnoutScore ?? 0;
-    totalEntropy += session.entropyScore ?? 0;
-
-    if (session.isDeepWork) {
-      deepWorkSessions++;
-      if (session.endTime) {
-        const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-        totalDeepWorkSeconds += duration;
-      }
-    }
+    const sessionDuration = session.activities.reduce(
+      (sum, activity) => sum + Math.max(0, activity.duration ?? 0),
+      0
+    );
+    const metricWeight = Math.max(1, sessionDuration);
+    weightedFocus += session.focusScore * metricWeight;
+    weightedBurnout += (session.burnoutScore ?? 0) * metricWeight;
+    weightedEntropy += (session.entropyScore ?? 0) * metricWeight;
+    totalMetricWeight += metricWeight;
 
     session.activities.forEach((activity) => {
-      appUsage[activity.appName] = (appUsage[activity.appName] || 0) + 1;
-      if (activity.category === "productive") productiveCount++;
-      if (activity.category === "distracting") distractingCount++;
-      if (activity.category === "neutral") neutralCount++;
-    });
+      const duration = Math.max(0, activity.duration ?? 0);
+      const idle = isIdleActivity(activity);
+      appUsage[activity.appName] = (appUsage[activity.appName] || 0) + duration;
 
-    if (session.endTime) {
-      const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-      totalActiveSeconds += duration;
-    }
+      if (idle) totalIdleMs += duration;
+      else totalActiveMs += duration;
+
+      if (productiveCategories.has(activity.category ?? "")) productiveCount++;
+      else if (distractingCategories.has(activity.category ?? "")) distractingCount++;
+      else neutralCount++;
+    });
   });
 
   const totalSessions = sessions.length;
-  const averageFocus = totalSessions > 0 ? totalFocusScore / totalSessions : 0;
-  const averageBurnout = totalSessions > 0 ? totalBurnout / totalSessions : 0;
+  const averageFocus = totalMetricWeight > 0 ? weightedFocus / totalMetricWeight : 0;
+  const averageBurnout = totalMetricWeight > 0 ? weightedBurnout / totalMetricWeight : 0;
+  const averageEntropy = totalMetricWeight > 0 ? weightedEntropy / totalMetricWeight : 0;
+  const totalActiveSeconds = Math.round(totalActiveMs / 1000);
+  const totalIdleSeconds = Math.round(totalIdleMs / 1000);
+  const trackedSeconds = totalActiveSeconds + totalIdleSeconds;
+  const idleRatio = trackedSeconds > 0 ? totalIdleSeconds / trackedSeconds : 0;
+  const activeHours = totalActiveSeconds / 3600;
+  const switchesPerHour = activeHours > 0 ? totalSwitches / activeHours : 0;
+
+  const breakBalance = trackedSeconds < 15 * 60
+    ? 0
+    : idleRatio < 0.15
+      ? Math.min(100, (idleRatio / 0.15) * 100)
+      : idleRatio <= 0.3
+        ? 100
+        : Math.max(20, 100 - ((idleRatio - 0.3) / 0.5) * 80);
+  const strainReserve = Math.max(0, 100 - averageBurnout);
+  const stability = Math.max(0, 100 - averageEntropy);
+  const switchControl = Math.max(0, Math.min(100, 100 - ((switchesPerHour - 8) / 22) * 100));
+  const recoveryScore = trackedSeconds < 15 * 60
+    ? 0
+    : Math.max(0, Math.min(100,
+        strainReserve * 0.3 +
+        stability * 0.2 +
+        averageFocus * 0.2 +
+        breakBalance * 0.15 +
+        switchControl * 0.15
+      ));
+
+  const recoveryStatus = trackedSeconds < 15 * 60
+    ? "Building baseline"
+    : recoveryScore >= 75
+      ? "Ready"
+      : recoveryScore >= 55
+        ? "Balanced"
+        : recoveryScore >= 35
+          ? "Recovery due"
+          : "Overextended";
+
+  let recoveryAction = "Pace is sustainable. Keep the next block intentional.";
+  if (trackedSeconds < 15 * 60) recoveryAction = "Keep tracking to establish today's baseline.";
+  else if (averageBurnout >= 65) recoveryAction = "Take a 10-15 minute off-screen recovery break.";
+  else if (idleRatio < 0.08 && activeHours >= 1.5) recoveryAction = "Add a short recovery gap before the next work block.";
+  else if (averageEntropy >= 65 || switchesPerHour >= 24) recoveryAction = "Reduce switching and protect one single-context block.";
+  else if (averageFocus < 45) recoveryAction = "Reset around one clear task before adding more work.";
+
+  const now = new Date();
+  const totalDeepWorkSeconds = protectedWork.reduce((sum, session) => {
+    const effectiveEnd = session.endedAt ?? (now < end ? now : end);
+    return sum + Math.max(0, (effectiveEnd.getTime() - session.startedAt.getTime()) / 1000);
+  }, 0);
 
   return {
     totalSessions,
     totalSwitches,
-    totalIdleSeconds: Math.round(totalIdleMs / 1000),
+    totalIdleSeconds,
     totalActiveSeconds,
     averageFocusScore: Number(averageFocus.toFixed(2)),
     averageBurnoutScore: Number(averageBurnout.toFixed(2)),
     appUsage,
     productivityBreakdown: { productiveCount, distractingCount, neutralCount },
-    averageEntropyScore: totalSessions > 0 ? Number((totalEntropy / totalSessions).toFixed(2)) : 0,
+    averageEntropyScore: Number(averageEntropy.toFixed(2)),
+    deepWorkSessions: protectedWork.length,
+    totalDeepWorkSeconds: Math.round(totalDeepWorkSeconds),
+    recovery: {
+      score: Number(recoveryScore.toFixed(1)),
+      status: recoveryStatus,
+      action: recoveryAction,
+      continuouslyUpdated: true,
+      factors: {
+        breakBalance: Number(breakBalance.toFixed(1)),
+        strainReserve: Number(strainReserve.toFixed(1)),
+        stability: Number(stability.toFixed(1)),
+        switchControl: Number(switchControl.toFixed(1)),
+      },
+      idleRatio: Number((idleRatio * 100).toFixed(1)),
+      switchesPerHour: Number(switchesPerHour.toFixed(1)),
+    },
   };
 }
 

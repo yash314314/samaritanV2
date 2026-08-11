@@ -7,6 +7,7 @@ import { useWsAll } from "./ws";
 
 const DEFAULT_EVENTS = [
   "activity:new",
+  "activity:reviewed",
   "session:metrics",
   "analytics:daily",
   "deepwork:started",

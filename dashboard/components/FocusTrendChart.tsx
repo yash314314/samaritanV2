@@ -80,14 +80,22 @@ export default function FocusTrendChart({
   onBucketMinutesChange,
   isLoading = false,
 }: any) {
-  const chartData = Array.isArray(data)
-    ? data.map((d: any) => ({
+  const rawData = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+    ? data.data
+    : Array.isArray(data?.trend)
+    ? data.trend
+    : [];
+
+  const chartData = rawData
+    .map((d: any) => ({
         ...d,
         label: d.label || d.time || "Unknown",
         focus: clampScore(d.focus ?? d.averageFocus ?? d.focusScore),
-        duration: Number(d.duration ?? 0),
+        duration: Number(d.duration ?? d.trackedMs ?? d.activeMs ?? 0),
       }))
-    : [];
+    .filter((d: any) => d.label !== "Unknown" || d.duration > 0 || d.focus > 0);
 
   const activePoints = chartData.filter((point: any) => point.duration > 0);
   const weightedDuration = activePoints.reduce(
@@ -116,9 +124,9 @@ export default function FocusTrendChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="samaritan-card p-6">
+      <div className="samaritan-card flex min-h-[320px] w-full max-w-full flex-col overflow-hidden p-4">
         <h2 className="text-sm font-semibold text-zinc-200">Focus Trend</h2>
-        <div className="flex h-72 items-center justify-center text-sm text-zinc-500">
+        <div className="flex min-h-[240px] flex-1 items-center justify-center text-sm text-zinc-500">
           {isLoading ? "Loading..." : "No focus data yet"}
         </div>
       </div>
@@ -126,8 +134,8 @@ export default function FocusTrendChart({
   }
 
   return (
-    <div className="samaritan-card p-6">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+    <div className="samaritan-card flex min-h-[340px] w-full max-w-full flex-col overflow-hidden p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-zinc-200">Focus Trend</h2>
           <div className="mt-1 text-[11px] text-zinc-500">
@@ -156,7 +164,7 @@ export default function FocusTrendChart({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap gap-2">
         <SummaryChip label="Avg" value={averageFocus.toFixed(1)} tone="text-sky-300" />
         {peak && (
           <SummaryChip
@@ -169,12 +177,12 @@ export default function FocusTrendChart({
         <SummaryChip label="Low" value={lowBuckets} tone="text-rose-300" />
       </div>
 
-      <div className="relative overflow-x-auto">
+      <div className="relative w-full max-w-full overflow-x-auto">
         {isLoading && (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px animate-pulse bg-sky-400/70" />
         )}
-        <div className="h-72" style={{ width: chartWidth }}>
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-[240px] sm:h-[270px]" style={{ width: chartWidth }}>
+          <ResponsiveContainer key={`${bucketMinutes}-${chartData.length}`} width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
 
@@ -209,12 +217,12 @@ export default function FocusTrendChart({
                 strokeWidth={3}
                 dot={false}
                 activeDot={{ r: 6, fill: "#f3e8ff", stroke: "#a855f7", strokeWidth: 2 }}
-                isAnimationActive
+                isAnimationActive={chartData.length <= 300}
                 animationDuration={900}
                 animationEasing="ease-out"
               />
 
-              <Scatter dataKey="focus" isAnimationActive animationDuration={700}>
+              <Scatter dataKey="focus" isAnimationActive={chartData.length <= 300} animationDuration={700}>
                 {chartData.map((point: any, index: number) => (
                   <Cell
                     key={`focus-dot-${point.label}-${index}`}

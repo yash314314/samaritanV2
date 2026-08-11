@@ -154,6 +154,9 @@ export interface CurrentActivity {
   processPath: string | null;
   type: string;
   observedAt: string;
+  sourceDeviceId?: string | null;
+  sourceSessionId?: string | null;
+  sourceSequence?: number | null;
 }
 
 export function useCurrentActivity() {
@@ -161,6 +164,20 @@ export function useCurrentActivity() {
 
   useWsMessage("activity:current", (payload: CurrentActivity) => {
     setActivity((prev) => {
+      const sameSourceSession = Boolean(
+        prev?.sourceSessionId &&
+        payload.sourceSessionId === prev.sourceSessionId
+      );
+
+      if (
+        sameSourceSession &&
+        prev?.sourceSequence != null &&
+        payload.sourceSequence != null &&
+        payload.sourceSequence <= prev.sourceSequence
+      ) {
+        return prev;
+      }
+
       if (
         prev?.observedAt &&
         payload.observedAt &&

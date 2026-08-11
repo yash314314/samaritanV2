@@ -15,13 +15,13 @@ export default function RootLayout({
       <body>
         <AppProvider>
           <WsProvider>
-            <div className="flex min-h-screen bg-[#0a0a0a] text-white h-screen">
+            <div className="flex h-screen min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
               <ElectronFocusBridge />
               <Sidebar />
 
-              <main className="flex-1 p-10 overflow-y-auto">
+              <main className="flex min-w-0 flex-1 flex-col overflow-hidden p-4 lg:p-5">
                 <TopBar />
-                {children}
+                <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
               </main>
 
             </div>

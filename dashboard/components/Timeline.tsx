@@ -210,7 +210,7 @@ export default function Timeline({ userId, date }: any) {
   }
   return(
 
-    <div className="samaritan-card p-5">
+    <div className="samaritan-card flex w-full max-w-full flex-col overflow-hidden p-4">
 
       <h2 className="text-xs text-zinc-400 mb-3 uppercase">
         Timeline
@@ -218,7 +218,7 @@ export default function Timeline({ userId, date }: any) {
 
       <div
         ref={containerRef}
-        className="overflow-x-auto"
+        className="w-full max-w-full overflow-x-auto"
         onMouseMove={(e) => {
           tooltipPosRef.current = { x: e.clientX, y: e.clientY };
           scheduleTooltipMove();

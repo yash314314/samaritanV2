@@ -34,7 +34,7 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
   const recent = sessions.slice(0, 6);
 
   return (
-    <div className="samaritan-card p-6 h-full flex flex-col">
+    <div className="samaritan-card flex h-full min-h-0 flex-col p-4">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
@@ -49,7 +49,7 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
       {recent.length === 0 ? (
         <p className="text-xs text-zinc-600 flex-1 flex items-center justify-center">No sessions yet</p>
       ) : (
-        <ul className="space-y-2 flex-1 overflow-y-auto">
+        <ul className="dashboard-scroll-panel flex-1 space-y-2 pr-1">
           {recent.map((session) => (
             <li key={session.id}>
               <button

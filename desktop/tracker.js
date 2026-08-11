@@ -7,7 +7,7 @@ const { resolveBrowserContext } = require("./browserUrlResolver");
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 const idleThreshold = 120; // seconds
-const SAMPLE_INTERVAL = 2000; // 2 seconds
+const SAMPLE_INTERVAL = 500;
 
 /* ---------------- ICON CACHE ---------------- */
 
@@ -195,30 +195,29 @@ async function track() {
       return;
     }
 
+    const observedAt = new Date().toISOString();
     const newKey = contextKey(win);
 
     /* ---------- CONTEXT CHANGE ---------- */
 
     const path = win.owner?.path || null;
-
-    const icon = path
-      ? await getCachedIcon(path)
-      : null;
-      const browserContext = await resolveBrowserContext({
-        appName: win.owner?.name || "Unknown",
-        title: win.title || "Untitled"
-      });
-      const currentContext = {
-        key: newKey,
-        app: win.owner?.name || "Unknown",
-        title: win.title || "Untitled",
-        icon,
-        url: browserContext.url,
-        domain: browserContext.domain,
-        processId: win.owner?.processId || null,
-        path,
-        type: "active"
-      };
+    const cachedIcon = path ? iconCache.get(path) || null : null;
+    const browserContext = await resolveBrowserContext({
+      appName: win.owner?.name || "Unknown",
+      title: win.title || "Untitled"
+    });
+    const currentContext = {
+      key: newKey,
+      app: win.owner?.name || "Unknown",
+      title: win.title || "Untitled",
+      icon: cachedIcon,
+      url: browserContext.url,
+      domain: browserContext.domain,
+      processId: win.owner?.processId || null,
+      path,
+      type: "active",
+      observedAt
+    };
 
     streamCurrentActivity({
       app: currentContext.app,
@@ -228,7 +227,8 @@ async function track() {
       domain: currentContext.domain,
       processId: currentContext.processId,
       processPath: currentContext.path,
-      type: currentContext.type
+      type: currentContext.type,
+      observedAt: currentContext.observedAt
     });
 
     /* ---------- ENFORCE BLOCKING (pre-emptive kill) ---------- */
@@ -240,6 +240,12 @@ async function track() {
     if (lastContext && lastContext.key === newKey) {
       trackingRunning = false;
       return;
+    }
+
+    // Icon extraction can be relatively slow on the first encounter. The live
+    // state has already been streamed, so enrich only the persisted session.
+    if (!currentContext.icon && path) {
+      currentContext.icon = await getCachedIcon(path);
     }
 
     console.log(

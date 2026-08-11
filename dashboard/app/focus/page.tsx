@@ -297,15 +297,15 @@ export default function FocusPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+      <div className="samaritan-card flex items-center justify-between gap-4 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10">
-            <Timer className="h-6 w-6 text-purple-400" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10">
+            <Timer className="h-5 w-5 text-purple-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-zinc-100">Focus Protocol</h1>
-            <p className="text-sm text-zinc-500">
+            <h1 className="text-xl font-bold text-zinc-100">Focus Protocol</h1>
+            <p className="text-xs text-zinc-500">
               Configure, enforce, and review protected deep-work sessions
             </p>
           </div>
@@ -319,14 +319,14 @@ export default function FocusPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        <div className="xl:col-span-4">
+      <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="min-h-0 xl:col-span-4">
           <DeepWorkReadinessCard data={readiness} onOpenConfig={() => setConfigOpen(true)} />
         </div>
-        <div className="xl:col-span-4">
+        <div className="min-h-0 xl:col-span-4">
           <EnforcementGuide />
         </div>
-        <div className="xl:col-span-4">
+        <div className="min-h-0 xl:col-span-4">
           <DeepWorkHistoryCard sessions={history} onViewResult={setResultSessionId} />
         </div>
       </div>
@@ -385,12 +385,12 @@ function EnforcementGuide() {
   ];
 
   return (
-    <div className="samaritan-card h-full p-6">
+    <div className="samaritan-card flex h-full min-h-0 flex-col p-4">
       <div className="mb-4 flex items-center gap-2">
         <Shield className="h-4 w-4 text-rose-400" />
         <h2 className="text-sm font-semibold text-zinc-300">Enforcement Levels</h2>
       </div>
-      <div className="space-y-3">
+      <div className="dashboard-scroll-panel space-y-2 pr-1">
         {levels.map((level) => (
           <div key={level.value} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
             <div className="text-xs font-semibold text-zinc-200">{level.label}</div>

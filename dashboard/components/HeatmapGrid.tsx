@@ -107,12 +107,12 @@ export default function HeatmapGrid({ data }: any) {
 
   return (
     <div
-      className="samaritan-card p-6"
+      className="samaritan-card flex w-full max-w-full flex-col overflow-hidden p-4"
       onClick={() => {
         if (pinnedTooltip) closePinnedTooltip();
       }}
     >
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="mb-3 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300">
             Productivity Heatmap
@@ -138,7 +138,7 @@ export default function HeatmapGrid({ data }: any) {
         </div>
       </div>
 
-      <div className="relative overflow-x-auto">
+      <div className="relative w-full max-w-full overflow-x-auto">
         <div className="min-w-max">
           <div className="grid grid-cols-[90px_repeat(24,30px)] gap-2 mb-4 text-[11px] text-zinc-500">
             <div />

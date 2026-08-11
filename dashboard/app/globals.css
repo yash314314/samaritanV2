@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 :root {
   --bg-dark: #0B0B0F;
   --card-dark: #14141A;
@@ -13,11 +19,56 @@ body {
   background-color: var(--bg-dark);
   color: white;
   font-family: system-ui, sans-serif;
+  overflow: hidden;
 }
 
 @layer components {
+  .dashboard-page {
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    background: #000;
+  }
+
+  .dashboard-page :where(div, section, article, aside, header, footer, main, form) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dashboard-surface {
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+    max-width: 96rem;
+    margin: 0 auto;
+    overflow: hidden;
+  }
+
+  .dashboard-scroll-panel {
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .dashboard-grid-card {
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
   .samaritan-card {
     position: relative;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     border: 1px solid #27272a;
     border-radius: 0.75rem;
     background: #000;

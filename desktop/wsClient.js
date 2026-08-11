@@ -1,5 +1,6 @@
 const WebSocket = require("ws");
 const Store = require("electron-store");
+const crypto = require("crypto");
 
 const store = new Store();
 const WS_URL = "ws://localhost:4000/ws";
@@ -16,6 +17,8 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let messageQueue = [];
 let isConnected = false;
+let currentActivitySequence = 0;
+const sourceSessionId = crypto.randomUUID();
 
 const listeners = new Map();
 
@@ -182,8 +185,11 @@ function streamCurrentActivity(context) {
     type: "activity:current",
     payload: {
       userId: USER_ID,
+      sourceDeviceId: DEVICE_ID,
+      sourceSessionId,
+      sourceSequence: ++currentActivitySequence,
       ...context,
-      observedAt: new Date().toISOString()
+      observedAt: context.observedAt || new Date().toISOString()
     }
   }));
 
