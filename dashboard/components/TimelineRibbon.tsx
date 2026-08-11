@@ -17,9 +17,9 @@ export default function TimelineRibbon() {
   if (!data) return null
 
   return (
-    <div className="bg-white p-6 shadow rounded">
+    <div className="samaritan-card p-6">
 
-      <h2 className="mb-4">
+      <h2 className="mb-4 text-zinc-100">
         Activity Timeline
       </h2>
 
@@ -30,7 +30,7 @@ export default function TimelineRibbon() {
           <div
             key={i}
             style={{ width: `${a.duration/60000}px` }}
-            className="h-8 bg-blue-400 mr-1"
+            className="h-8 bg-purple-400 mr-1"
             title={`${a.appName} — ${a.intent}`}
           />
 

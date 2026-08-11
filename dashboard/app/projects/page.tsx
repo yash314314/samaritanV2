@@ -107,7 +107,7 @@ export default function ProjectsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map((project) => (
-            <div key={project.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-purple-500/30 transition-colors">
+            <div key={project.id} className="samaritan-card p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: project.color + "20", color: project.color }}>
@@ -155,7 +155,7 @@ export default function ProjectsPage() {
 
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <form onSubmit={handleSave} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
+            <form onSubmit={handleSave} className="samaritan-card p-6 w-full max-w-md">
               <h2 className="text-lg font-bold mb-4">{editingProject ? "Edit Project" : "New Project"}</h2>
               <div className="space-y-4">
                 <div>
@@ -185,7 +185,7 @@ export default function ProjectsPage() {
 
         {showRulesModal && selectedProject && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="samaritan-card p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">Rules for {selectedProject.name}</h2>
                 <button onClick={() => setShowRulesModal(false)} className="text-zinc-400 hover:text-white">✕</button>

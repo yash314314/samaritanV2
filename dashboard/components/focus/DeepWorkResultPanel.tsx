@@ -143,7 +143,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   if (!result) {
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-500">Session not found</div>
+        <div className="samaritan-card p-6 text-zinc-500">Session not found</div>
       </div>
     );
   }
@@ -214,7 +214,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
 
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative my-8 w-full max-w-4xl rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+      <div className="samaritan-card relative my-8 w-full max-w-4xl">
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur px-6 py-4">
           <div className="flex items-center gap-3">

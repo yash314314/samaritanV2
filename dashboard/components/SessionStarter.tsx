@@ -37,7 +37,7 @@ export function SessionStarter() {
   };
 
   return (
-    <div className="bg-zinc-900 rounded-2xl p-8 border border-zinc-800">
+    <div className="samaritan-card p-8">
       <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
         <Target className="w-6 h-6 text-blue-500" />
         Start Deep Work Session

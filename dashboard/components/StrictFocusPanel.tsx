@@ -123,14 +123,14 @@ export default function StrictFocusPanel({
 
   if (loading) {
     return (
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-sm text-zinc-500">
+      <div className="samaritan-card p-6 text-sm text-zinc-500">
         Loading focus protocol...
       </div>
     );
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+    <div className="samaritan-card p-6">
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300">

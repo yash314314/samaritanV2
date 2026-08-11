@@ -12,7 +12,7 @@ export function ActiveSession() {
 
   if (loading) {
     return (
-      <div className="bg-zinc-900 rounded-2xl p-8 border border-zinc-800 animate-pulse">
+      <div className="samaritan-card p-8 animate-pulse">
         <div className="h-8 bg-zinc-800 rounded w-1/3 mb-4" />
         <div className="h-24 bg-zinc-800 rounded" />
       </div>
@@ -55,7 +55,7 @@ export function ActiveSession() {
   };
 
   return (
-    <div className="bg-zinc-900 rounded-2xl p-8 border border-zinc-800">
+    <div className="samaritan-card p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="flex items-center gap-2 text-sm text-zinc-400 mb-1">

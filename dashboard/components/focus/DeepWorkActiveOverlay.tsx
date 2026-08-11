@@ -404,7 +404,7 @@ export default function DeepWorkActiveOverlay({
         )}
 
         {/* Time Breakdown Bars */}
-        <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
+        <div className="samaritan-card w-full max-w-2xl px-5 py-4 backdrop-blur-sm">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold text-zinc-400">Time Allocation</span>
             <span className="text-[10px] text-zinc-600">{totalTrackedMin}m tracked</span>
@@ -443,7 +443,7 @@ export default function DeepWorkActiveOverlay({
         </div>
 
         <div className="mt-3 grid w-full max-w-2xl grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
+          <div className="samaritan-card px-5 py-4 backdrop-blur-sm">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-semibold text-zinc-400">Minute Signal</span>
               <Activity className="h-4 w-4 text-zinc-600" />
@@ -451,7 +451,7 @@ export default function DeepWorkActiveOverlay({
             <SignalRail logs={signalLogs} />
           </div>
 
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
+          <div className="samaritan-card px-5 py-4 backdrop-blur-sm">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-semibold text-zinc-400">Protocol Rules</span>
               <span className="text-[10px] text-zinc-600">{protocolRules.length || 0} active</span>
@@ -506,7 +506,7 @@ export default function DeepWorkActiveOverlay({
       {/* Confirmation Modal */}
       {showConfirm && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="samaritan-card w-full max-w-sm p-6 animate-in zoom-in-95 duration-200">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800">
               {showConfirm === "complete" ? (
                 <CheckCircle2 className="h-6 w-6 text-emerald-400" />

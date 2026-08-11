@@ -167,7 +167,7 @@ export default function GoalsPage() {
             const progress = goal.progress ?? 0;
             const ratio = Math.min(100, Math.round((goal.progressRatio ?? (goal.target > 0 ? progress / goal.target : 0)) * 100));
             return (
-            <div key={goal.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div key={goal.id} className="samaritan-card p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-purple-500/10 rounded-lg">
@@ -205,7 +205,7 @@ export default function GoalsPage() {
 
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
+            <form onSubmit={handleSubmit} className="samaritan-card p-6 w-full max-w-md">
               <h2 className="text-lg font-bold mb-4">{editingId ? "Edit Goal" : "New Goal"}</h2>
               <div className="space-y-4">
                 <div>

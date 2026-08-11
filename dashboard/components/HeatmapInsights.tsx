@@ -186,7 +186,7 @@ function analyzeHeatmap(data: HeatmapResponse) {
 }
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm ${className}`}>{children}</div>
+  <div className={`samaritan-card ${className}`}>{children}</div>
 );
 
 export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {

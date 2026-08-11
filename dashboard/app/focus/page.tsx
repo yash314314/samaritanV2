@@ -385,7 +385,7 @@ function EnforcementGuide() {
   ];
 
   return (
-    <div className="h-full rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+    <div className="samaritan-card h-full p-6">
       <div className="mb-4 flex items-center gap-2">
         <Shield className="h-4 w-4 text-rose-400" />
         <h2 className="text-sm font-semibold text-zinc-300">Enforcement Levels</h2>

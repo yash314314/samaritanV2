@@ -173,7 +173,7 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <div className="samaritan-card p-6">
           <div className="grid grid-cols-7 gap-4">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
               <div key={d} className="text-center text-sm text-zinc-500 font-medium">{d}</div>
@@ -222,7 +222,7 @@ export default function CalendarPage() {
 
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
+            <form onSubmit={handleSubmit} className="samaritan-card p-6 w-full max-w-md">
               <h2 className="text-lg font-bold mb-4">{editingId ? "Edit Event" : "New Event"}</h2>
               <div className="space-y-4">
                 <div>

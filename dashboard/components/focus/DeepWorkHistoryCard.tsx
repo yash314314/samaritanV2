@@ -34,7 +34,7 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
   const recent = sessions.slice(0, 6);
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 h-full flex flex-col">
+    <div className="samaritan-card p-6 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">

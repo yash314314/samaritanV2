@@ -20,7 +20,7 @@ export default function DeepWorkExtensionPrompt({ plannedMinutes, actualMinutes,
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+      <div className="samaritan-card w-full max-w-md p-6">
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10">
           <AlertTriangle className="h-6 w-6 text-amber-400" />
         </div>
