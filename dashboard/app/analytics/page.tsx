@@ -17,11 +17,6 @@ import {
   ResponsiveContainer,
   Area,
   AreaChart,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
 } from "recharts";
 import {
   Clock,
@@ -43,7 +38,6 @@ import {
   Thermometer,
   LayoutDashboard,
   Focus,
-  Sparkles,
   ShieldAlert,
 } from "lucide-react";
 
@@ -264,14 +258,6 @@ interface FocusTrendBucket {
   end: string;
   duration: number;
   focus: number;
-}
-
-interface IntelligenceResponse {
-  driftScore: number;
-  entropyTrend: number;
-  peakHour: number | null;
-  peakFocusScore: number;
-  highPerformanceProbability: number;
 }
 
 interface DailySummary {
@@ -829,7 +815,7 @@ const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
 export default function AnalyticsPage() {
   const userId = USER_ID;
   const [timeRange, setTimeRange] = useState("Today");
-  const [activeTab, setActiveTab] = useState<"overview" | "focus" | "heatmap" | "intelligence">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "focus" | "heatmap">("overview");
 
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -839,7 +825,6 @@ export default function AnalyticsPage() {
   const [weekly, setWeekly] = useState<WeeklyAnalyticsItem[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapResponse>({});
   const [focusTrend, setFocusTrend] = useState<FocusTrendBucket[]>([]);
-  const [intelligence, setIntelligence] = useState<IntelligenceResponse | null>(null);
   const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
   const [timeline, setTimeline] = useState<TimelineSession[] | null>(null);
 
@@ -923,16 +908,6 @@ export default function AnalyticsPage() {
         fetcher<TimelineSession[]>(`${API_BASE}/analytics/timeline?userId=${userId}&date=${istToday}`)
           .then((d) => {
             if (!cancelled) setTimeline(d);
-          })
-          .catch(() => {})
-      );
-    }
-
-    if (activeTab === "intelligence") {
-      promises.push(
-        fetcher<IntelligenceResponse>(`${API_BASE}/analytics/intelligence?userId=${userId}`)
-          .then((d) => {
-            if (!cancelled) setIntelligence(d);
           })
           .catch(() => {})
       );
@@ -1025,7 +1000,6 @@ export default function AnalyticsPage() {
                 { id: "overview", label: "Overview", icon: BarChart3 },
                 { id: "focus", label: "Focus", icon: Focus },
                 { id: "heatmap", label: "Heatmap", icon: Thermometer },
-                { id: "intelligence", label: "Intelligence", icon: Sparkles },
               ] as const
             ).map((tab) => (
               <button
@@ -1401,143 +1375,6 @@ export default function AnalyticsPage() {
                   </p>
                   <HourlyBreakdown sessions={timeline ?? []} />
                 </Card>
-              </div>
-            )}
-
-            {/* ═══════════════════════════════════════════════════
-                  INTELLIGENCE
-                ═══════════════════════════════════════════════════ */}
-            {activeTab === "intelligence" && (
-              <div className="space-y-6">
-                {intelligence && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <StatCard
-                      title="Drift Score"
-                      value={`${round0(intelligence.driftScore)}%`}
-                      subtitle="Focus decline rate"
-                      icon={TrendingDown}
-                      color="rose"
-                    />
-                    <StatCard
-                      title="Entropy Trend"
-                      value={`${round0(intelligence.entropyTrend)}%`}
-                      subtitle="Chaos increase rate"
-                      icon={Activity}
-                      color="amber"
-                    />
-                    <StatCard
-                      title="Peak Hour"
-                      value={intelligence.peakHour !== null ? `${intelligence.peakHour}:00` : "—"}
-                      subtitle={`Peak focus: ${round0(intelligence.peakFocusScore)}%`}
-                      icon={Clock}
-                      color="purple"
-                    />
-                    <StatCard
-                      title="High Perf. Probability"
-                      value={`${round0(intelligence.highPerformanceProbability * 100)}%`}
-                      subtitle="Focus >75, Burnout <40"
-                      icon={CheckCircle2}
-                      color="emerald"
-                    />
-                  </div>
-                )}
-
-                <Card className="p-6">
-                  <SectionTitle icon={Sparkles} title="Cognitive Profile" />
-                  <div className="flex justify-center">
-                    <ResponsiveContainer width="100%" height={350}>
-                      <RadarChart
-                        data={[
-                          { metric: "Focus", value: clamp(dashboard.assistant.focusScore, 0, 100), fullMark: 100 },
-                          { metric: "Productivity", value: clamp(dashboard.assistant.productivityScore, 0, 100), fullMark: 100 },
-                          { metric: "Stability", value: clamp(dashboard.assistant.cognitiveStability, 0, 100), fullMark: 100 },
-                          { metric: "Energy", value: clamp(Math.max(0, dashboard.assistant.energyScore * 100), 0, 100), fullMark: 100 },
-                          { metric: "Deep Work", value: clamp(dashboard.assistant.deepWorkRatio, 0, 100), fullMark: 100 },
-                          { metric: "Comm Shield", value: clamp(100 - dashboard.assistant.communicationRatio, 0, 100), fullMark: 100 },
-                        ]}
-                      >
-                        <PolarGrid stroke="#27272a" />
-                        <PolarAngleAxis dataKey="metric" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
-                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "#52525b", fontSize: 10 }} />
-                        <Radar name="Today" dataKey="value" stroke="#a855f7" fill="#a855f7" fillOpacity={0.3} />
-                        <Tooltip contentStyle={chartTooltipStyle} />
-                      </RadarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <Card className="p-6">
-                    <SectionTitle icon={AlertTriangle} title="Burnout Analysis" />
-                    <div className="space-y-4">
-                      <div
-                        className={`p-4 rounded-lg border ${
-                          dashboard.burnout.burnoutRisk === "high"
-                            ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                            : dashboard.burnout.burnoutRisk === "moderate"
-                            ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                            : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">Risk Level</span>
-                          <span className="font-bold uppercase text-sm">{dashboard.burnout.burnoutRisk}</span>
-                        </div>
-                        <div className="mt-2 text-sm opacity-90">{dashboard.burnout.recommendation}</div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                          <p className="text-xs text-zinc-500">Burnout Score</p>
-                          <p className="text-lg font-bold text-zinc-100">{round0(dashboard.burnout.burnoutScore)}</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                          <p className="text-xs text-zinc-500">Entropy Load</p>
-                          <p className="text-lg font-bold text-zinc-100">{round0(dashboard.burnout.entropyLoad)}</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                          <p className="text-xs text-zinc-500">Avg Session</p>
-                          <p className="text-lg font-bold text-zinc-100">{dashboard.burnout.avgSessionMinutes}m</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                          <p className="text-xs text-zinc-500">Fragmentation</p>
-                          <p className="text-lg font-bold text-zinc-100">{round0(dashboard.assistant.fragmentationScore)}%</p>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card className="p-6">
-                    <SectionTitle icon={CheckCircle2} title="Daily Comparison" />
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-sm text-zinc-400">Today Focus</span>
-                        <span className="font-bold text-zinc-100">{round0(dashboard.comparison.todayFocusScore)}%</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-sm text-zinc-400">Yesterday Focus</span>
-                        <span className="font-bold text-zinc-100">{round0(dashboard.comparison.yesterdayFocusScore)}%</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-sm text-zinc-400">Change</span>
-                        <span
-                          className={`font-bold ${
-                            dashboard.comparison.change > 0
-                              ? "text-emerald-400"
-                              : dashboard.comparison.change < 0
-                              ? "text-rose-400"
-                              : "text-zinc-400"
-                          }`}
-                        >
-                          {dashboard.comparison.change > 0 ? "+" : ""}
-                          {round0(dashboard.comparison.change)}%
-                        </span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm text-purple-300">
-                        <span className="font-medium">Insight:</span> {dashboard.comparison.reason}
-                      </div>
-                    </div>
-                  </Card>
-                </div>
               </div>
             )}
           </>

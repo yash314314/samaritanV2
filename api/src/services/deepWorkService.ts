@@ -1,16 +1,17 @@
 import { prisma } from "../prisma";
 import {
-  getActivityProductivityScore,
-  getBaseFocus,
-  isIdleActivity
+  isIdleActivity,
+  updateSmoothMetricState
 } from "./metricEngine";
 import {
   emitDeepWorkStarted,
   emitDeepWorkEnded,
   emitDeepWorkState,
+  emitGoalProgress,
   emitInterventionCleared,
   emitInterventionTriggered,
 } from "../websocket/broadcaster";
+import { updateAndEmitGoalProgress } from "./goalProgressService";
 
 type StrictFocusInput = {
   userId: string;
@@ -58,6 +59,13 @@ const DISTRACTION_INTENTS = new Set([
   "video"
 ]);
 
+const ENFORCEMENT_LEVELS = new Set([
+  "observe",
+  "warn",
+  "require_reason",
+  "block"
+]);
+
 function normalize(value?: string | null) {
   return (value ?? "").toLowerCase().trim();
 }
@@ -97,6 +105,10 @@ function interventionAction(enforcement: string) {
   if (enforcement === "warn") return "warned";
   if (enforcement === "observe") return "observed";
   return "reason_required";
+}
+
+function normalizeEnforcement(enforcement?: string | null) {
+  return ENFORCEMENT_LEVELS.has(enforcement ?? "") ? enforcement! : "warn";
 }
 
 export function evaluateProtocol(session: any, activity: ActivityInput) {
@@ -199,7 +211,7 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
       goal: input.goal ?? (null as any),
       status: "active",
       plannedMinutes: Math.max(1, Math.floor(input.plannedMinutes)),
-      enforcement: input.enforcement ?? "require_reason",
+      enforcement: normalizeEnforcement(input.enforcement),
       allowedApps: input.allowedApps ?? [],
       allowedDomains: input.allowedDomains ?? [],
       blockedApps: input.blockedApps ?? ([] as any),
@@ -279,6 +291,9 @@ export async function endDeepWorkSession(
     endedAt: new Date(),
   });
 
+  const goals = await updateAndEmitGoalProgress(userId);
+  emitGoalProgress(userId, goals);
+
   return updated;
 }
 
@@ -305,6 +320,9 @@ export async function completeDeepWorkSessionByTimer(id: string) {
     endedAt,
     reason: "planned_duration"
   });
+
+  const goals = await updateAndEmitGoalProgress(session.userId);
+  emitGoalProgress(session.userId, goals);
 
   return updated;
 }
@@ -420,17 +438,16 @@ export async function resolveFocusIntervention(
 /**
  * Evaluate a deep work activity and update session metrics.
  *
- * METRIC MODEL (all values start from 0 and build up proportionally):
+ * METRIC MODEL (all values start from 0 and build through the smoothing engine):
  *
- *   focusScore = (productiveMs / totalMs) * targetFocus
- *   productivityScore = (productiveMs / totalMs) * targetProductivity
+ *   targetFocus = seeded focusImpact * 100
+ *   targetProductivity = seeded category / intent / focus weights
  *
  * This ensures:
  *   - All values start at 0
- *   - Focus/productivity rise proportionally to productive time
- *   - Distraction directly reduces focus/productivity by reducing the
- *     productive ratio
- *   - No exponential spikes — smooth proportional model
+ *   - Focus/productivity rise gradually toward each app's seeded weights
+ *   - Distraction and idle activity pull the running scores back down
+ *   - No instant jump to a neutral/default baseline
  */
 export async function evaluateDeepWorkActivity(
   userId: string,
@@ -470,56 +487,22 @@ export async function evaluateDeepWorkActivity(
   const nextProductiveMs = session.productiveMs + (productive ? duration : 0);
   const nextDistractionMs = session.distractionMs + (distraction ? duration : 0);
   const nextIdleMs = session.idleMs + (idle ? duration : 0);
-  const totalMs = nextProductiveMs + nextDistractionMs + nextIdleMs;
 
-  // Compute focus/productivity as weighted averages based on time ratios
-  // All values start from 0 and build up proportionally
-  let nextFocusScore = 0;
-  let nextProductivityScore = 0;
-
-  if (totalMs > 0) {
-    const productiveRatio = nextProductiveMs / totalMs;
-
-    if (productive) {
-      // Productive activity: target is the activity's base focus/productivity
-      const targetFocus = getBaseFocus(activity) * 100;
-      const targetProd = getActivityProductivityScore(activity);
-
-      // Weighted: current accumulated score + new productive contribution
-      // This smoothly builds up focus as productive time accumulates
-      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
-      if (prevTotal > 0) {
-        // Blend previous score with new activity's contribution
-        const prevFocusWeight = prevTotal / totalMs;
-        const newFocusWeight = duration / totalMs;
-        nextFocusScore = (session.focusScore * prevFocusWeight) + (targetFocus * newFocusWeight);
-        nextProductivityScore = (session.productivityScore * prevFocusWeight) + (targetProd * newFocusWeight);
-      } else {
-        // First activity
-        nextFocusScore = targetFocus;
-        nextProductivityScore = targetProd;
-      }
-    } else if (distraction) {
-      // Distraction: focus/productivity drop proportionally to distraction ratio
-      // The more distraction time accumulates, the lower the scores
-      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
-      if (prevTotal > 0) {
-        // Blend: previous score diluted by new distraction time (which contributes 0)
-        const prevWeight = prevTotal / totalMs;
-        nextFocusScore = session.focusScore * prevWeight;
-        nextProductivityScore = session.productivityScore * prevWeight;
-      }
-      // If first activity is a distraction, scores stay at 0
-    } else if (idle) {
-      // Idle: maintain previous scores (idle doesn't help or hurt)
-      nextFocusScore = session.focusScore;
-      nextProductivityScore = session.productivityScore;
-    }
-  }
-
-  // Clamp to valid range
-  nextFocusScore = Math.max(0, Math.min(100, nextFocusScore));
-  nextProductivityScore = Math.max(0, Math.min(100, nextProductivityScore));
+  const metricActivity = {
+    ...activity,
+    durationMs: duration,
+  };
+  const nextMetricState = updateSmoothMetricState(
+    {
+      focusScore: session.focusScore,
+      productivityScore: session.productivityScore,
+      deepWorkScore: 0,
+      burnoutScore: 0,
+    },
+    metricActivity
+  );
+  const nextFocusScore = nextMetricState.focusScore;
+  const nextProductivityScore = nextMetricState.productivityScore;
 
   // Track if this is a NEW violation (not a continuation of same distraction)
   const isNewViolation = distraction && (
@@ -685,8 +668,8 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
     timeSeries.push({
       second: 0,
       timestamp: session.startedAt.toISOString(),
-      focusScore: Number(session.focusScore.toFixed(2)),
-      productivityScore: Number(session.productivityScore.toFixed(2)),
+      focusScore: 0,
+      productivityScore: 0,
       distraction: false,
       idle: false,
       appName: null,

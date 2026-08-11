@@ -205,6 +205,15 @@ const colorScales: Record<ViewMode, string[]> = {
   ],
 };
 
+// Module-scope (stable reference) so it isn't reallocated on every render.
+const viewModeConfig: Record<ViewMode, { label: string; color: string; desc: string }> = {
+  score: { label: "Raw Score", color: "purple", desc: "Normalized productivity score" },
+  productivity: { label: "Productivity", color: "emerald", desc: "Productivity percentage" },
+  duration: { label: "Duration", color: "blue", desc: "Tracked hours per cell" },
+  focus: { label: "Focus", color: "cyan", desc: "Average focus impact" },
+  idle: { label: "Idle", color: "rose", desc: "Idle time ratio" },
+};
+
 function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
   switch (mode) {
     case "score": return bucket.score;
@@ -1059,14 +1068,6 @@ export default function HeatmapPage() {
           }),
       }));
   }, [timeline]);
-
-  const viewModeConfig = {
-    score: { label: "Raw Score", color: "purple", desc: "Normalized productivity score" },
-    productivity: { label: "Productivity", color: "emerald", desc: "Productivity percentage" },
-    duration: { label: "Duration", color: "blue", desc: "Tracked hours per cell" },
-    focus: { label: "Focus", color: "cyan", desc: "Average focus impact" },
-    idle: { label: "Idle", color: "rose", desc: "Idle time ratio" },
-  };
 
   return (
     <div className="min-h-screen bg-black text-zinc-100">

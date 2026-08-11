@@ -48,6 +48,10 @@ interface SessionData {
   distractionMs: number;
   idleMs: number;
   interruptionMs: number;
+  allowedApps?: string[];
+  allowedDomains?: string[];
+  blockedApps?: string[];
+  blockedDomains?: string[];
   recentInterventions?: Intervention[];
 }
 
@@ -230,13 +234,23 @@ export default function DeepWorkActiveOverlay({
 
   const enforcementColor = ENFORCEMENT_COLORS[currentSession.enforcement] || ENFORCEMENT_COLORS.observe;
   const EnforcementIcon = ENFORCEMENT_ICONS[currentSession.enforcement] || Eye;
+  const signalLogs = liveState?.sessionId === session.id ? liveState.minuteLogs.slice(-24) : [];
+  const protocolRules = [
+    ...(currentSession.allowedApps ?? []).map((name) => ({ type: "Allowed app", name, tone: "text-emerald-400" })),
+    ...(currentSession.allowedDomains ?? []).map((name) => ({ type: "Allowed domain", name, tone: "text-emerald-400" })),
+    ...(currentSession.blockedApps ?? []).map((name) => ({ type: "Blocked app", name, tone: "text-rose-400" })),
+    ...(currentSession.blockedDomains ?? []).map((name) => ({ type: "Blocked domain", name, tone: "text-rose-400" })),
+  ].slice(0, 8);
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-gradient-to-b from-zinc-950 via-black to-zinc-950">
-      {/* Animated background particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse animation-delay-2000" />
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black">
+      <div className="absolute inset-0 pointer-events-none opacity-40">
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(63,63,70,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(63,63,70,0.18)_1px,transparent_1px)] bg-[size:48px_48px]" />
+        <div className={`absolute left-0 top-0 h-0.5 w-full ${isOverdue ? "bg-rose-500/60" : "bg-emerald-400/50"} animate-pulse`} />
+        <div
+          className={`absolute inset-x-0 h-28 ${isOverdue ? "bg-rose-500/10" : "bg-emerald-500/10"} transition-all duration-1000`}
+          style={{ top: `${Math.min(88, Math.max(0, progress))}%` }}
+        />
       </div>
 
       {/* Violation Toast */}
@@ -293,6 +307,12 @@ export default function DeepWorkActiveOverlay({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowMetrics((value) => !value)}
+            className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 hover:text-zinc-200"
+          >
+            {showMetrics ? "Hide telemetry" : "Show telemetry"}
+          </button>
           <span className={`rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-wider ${enforcementColor}`}>
             {currentSession.enforcement}
           </span>
@@ -342,6 +362,7 @@ export default function DeepWorkActiveOverlay({
         </div>
 
         {/* Live Metrics Grid */}
+        {showMetrics && (
         <div className="grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4 mb-6">
           <MetricTile
             icon={<Brain className="h-4 w-4" />}
@@ -380,6 +401,7 @@ export default function DeepWorkActiveOverlay({
             border={currentSession.violationCount > 0 ? "border-rose-500/20" : "border-zinc-500/20"}
           />
         </div>
+        )}
 
         {/* Time Breakdown Bars */}
         <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
@@ -418,6 +440,37 @@ export default function DeepWorkActiveOverlay({
               Total interruption time: {formatDuration(currentSession.interruptionMs)}
             </div>
           )}
+        </div>
+
+        <div className="mt-3 grid w-full max-w-2xl grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-400">Minute Signal</span>
+              <Activity className="h-4 w-4 text-zinc-600" />
+            </div>
+            <SignalRail logs={signalLogs} />
+          </div>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 backdrop-blur-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-400">Protocol Rules</span>
+              <span className="text-[10px] text-zinc-600">{protocolRules.length || 0} active</span>
+            </div>
+            {protocolRules.length > 0 ? (
+              <div className="space-y-1.5">
+                {protocolRules.map((rule) => (
+                  <div key={`${rule.type}-${rule.name}`} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-zinc-500">{rule.type}</span>
+                    <span className={`${rule.tone} max-w-40 truncate font-medium`}>{rule.name}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs leading-relaxed text-zinc-500">
+                No explicit allow or block rules. Category and intent classification are enforcing this session.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -554,6 +607,42 @@ function TimeBar({
         />
       </div>
       <span className={`w-10 text-right text-[10px] font-bold ${textColor} tabular-nums`}>{pct}%</span>
+    </div>
+  );
+}
+
+function SignalRail({
+  logs,
+}: {
+  logs: LiveDeepWorkState["minuteLogs"];
+}) {
+  const cells = logs.length > 0 ? logs : Array.from({ length: 12 }, (_, index) => ({
+    minute: index,
+    focusScore: 0,
+    productivityScore: 0,
+    distraction: false,
+    idle: true,
+    appName: null,
+  }));
+
+  return (
+    <div className="flex h-12 items-end gap-1">
+      {cells.map((log, index) => {
+        const height = Math.max(12, Math.round((log.focusScore || 0) * 0.42));
+        const color = log.distraction
+          ? "bg-rose-400"
+          : log.idle
+            ? "bg-zinc-600"
+            : "bg-emerald-400";
+        return (
+          <div
+            key={`${log.minute}-${index}`}
+            title={log.appName || (log.idle ? "Idle" : "Focus")}
+            className={`flex-1 rounded-sm ${color} transition-all duration-700`}
+            style={{ height: `${height}px`, opacity: logs.length > 0 ? 1 : 0.35 }}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 const activeWin = require("active-win");
 const { handleEvent, closeSession } = require("./sessionEngine");
-const { killProcessByName } = require("./taskkill");
+const { killProcess } = require("./taskkill");
 const { powerMonitor, app } = require("electron");
 const { resolveBrowserContext } = require("./browserUrlResolver");
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -66,6 +66,54 @@ function setActiveDeepWorkRef(session) {
 
 function clearActiveDeepWorkRef() {
   activeDeepWorkRef = null;
+}
+
+function normalize(value) {
+  return String(value || "").toLowerCase().trim();
+}
+
+function includesRule(rules, value) {
+  const normalized = normalize(value);
+  if (!normalized) return false;
+  return (rules || []).some((rule) => {
+    const normalizedRule = normalize(rule);
+    return normalizedRule && normalized.includes(normalizedRule);
+  });
+}
+
+function shouldPreemptivelyBlock(context) {
+  if (!activeDeepWorkRef || activeDeepWorkRef.enforcement !== "block") return false;
+
+  const blockedApps = activeDeepWorkRef.blockedApps || [];
+  const blockedDomains = activeDeepWorkRef.blockedDomains || [];
+  const allowedApps = activeDeepWorkRef.allowedApps || [];
+  const allowedDomains = activeDeepWorkRef.allowedDomains || [];
+
+  if (includesRule(blockedApps, context.app)) return true;
+  if (includesRule(blockedDomains, context.domain || context.url)) return true;
+
+  const hasAllowList = allowedApps.length > 0 || allowedDomains.length > 0;
+  if (!hasAllowList) return false;
+
+  const appAllowed = includesRule(allowedApps, context.app);
+  const domainAllowed = includesRule(allowedDomains, context.domain || context.url);
+  return !appAllowed && !domainAllowed;
+}
+
+function enforceBlockIfNeeded(context) {
+  if (!shouldPreemptivelyBlock(context)) return;
+
+  const result = killProcess({
+    appName: context.app,
+    pid: context.processId,
+    path: context.path,
+  });
+
+  if (result.killed) {
+    console.log(`[Samaritan] Block enforcement terminated ${context.app}: ${result.reason}`);
+  } else {
+    console.log(`[Samaritan] Block enforcement could not terminate ${context.app}: ${result.reason}`);
+  }
 }
 async function enterIdle(reason, startedAt) {
   if (isIdle) return;
@@ -137,26 +185,6 @@ async function track() {
       await exitIdle("return");
     }
 
-    /* ---------- ENFORCE BLOCKING (pre-emptive kill) ---------- */
-
-    if (activeDeepWorkRef && activeDeepWorkRef.blockedApps && activeDeepWorkRef.blockedApps.length > 0) {
-      const currentAppName = lastContext?.app || null;
-      if (currentAppName) {
-        const normalizedCurrent = currentAppName.toLowerCase().trim();
-        const isBlocked = activeDeepWorkRef.blockedApps.some(
-          (ba) => normalizedCurrent.includes(ba.toLowerCase().trim())
-        );
-        if (isBlocked) {
-          const result = killProcessByName(currentAppName);
-          if (result.killed) {
-            console.log(`[Samaritan] Pre-emptively killed blocked app: ${currentAppName} (${result.reason})`);
-          } else {
-            console.log(`[Samaritan] Pre-emptive kill skipped for ${currentAppName}: ${result.reason}`);
-          }
-        }
-      }
-    }
-
     /* ---------- GET ACTIVE WINDOW ---------- */
 
     const win = await activeWin();
@@ -167,13 +195,6 @@ async function track() {
     }
 
     const newKey = contextKey(win);
-
-    /* ---------- NO CHANGE ---------- */
-
-    if (lastContext && lastContext.key === newKey) {
-      trackingRunning = false;
-      return;
-    }
 
     /* ---------- CONTEXT CHANGE ---------- */
 
@@ -197,6 +218,17 @@ async function track() {
         path,
         type: "active"
       };
+
+    /* ---------- ENFORCE BLOCKING (pre-emptive kill) ---------- */
+
+    enforceBlockIfNeeded(currentContext);
+
+    /* ---------- NO CHANGE ---------- */
+
+    if (lastContext && lastContext.key === newKey) {
+      trackingRunning = false;
+      return;
+    }
 
     console.log(
       "[Samaritan] Context shift detected.",

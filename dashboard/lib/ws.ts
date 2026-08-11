@@ -217,10 +217,18 @@ export function getWsClient(): SamaritanWsClient {
 
 /** Subscribe to a specific WS message type */
 export function useWsMessage<T>(type: string, handler: (payload: T) => void) {
+  // Keep the latest handler in a ref so the effect below only re-subscribes
+  // when the message *type* changes — NOT on every component render. Freshly-created
+  // inline handlers used to cause a churn of on/off resubscriptions on each state update.
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
   useEffect(() => {
     const client = getWsClient();
-    return client.on<T>(type, (msg) => handler(msg.payload));
-  }, [type, handler]);
+    return client.on<T>(type, (msg) => handlerRef.current(msg.payload));
+  }, [type]);
 }
 
 /** Subscribe to connection state */
@@ -252,8 +260,13 @@ export function useWsConnect(autoConnect = true) {
 
 /** Subscribe to all messages (wildcard) */
 export function useWsAll(handler: (msg: WsMessage) => void) {
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
   useEffect(() => {
     const client = getWsClient();
-    return client.on("*", handler);
-  }, [handler]);
+    return client.on("*", (msg) => handlerRef.current(msg));
+  }, []);
 }

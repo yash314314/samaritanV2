@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import {
+  getBaseFocus,
   getActivityProductivityScore,
   isIdleActivity
 } from "./metricEngine";
@@ -354,7 +355,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
     if (categoryFilter && activity.category !== categoryFilter) continue;
 
     const score = getActivityProductivityScore(activity);
-    const focusImpact = activity.focusImpact ?? 0.5;
+    const focusImpact = getBaseFocus(activity);
 
     let current = new Date(activity.startTime);
     const end =

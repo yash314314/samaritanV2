@@ -1,25 +1,9 @@
-/**
- * Kill processes matching a given app name.
- * On Windows this uses taskkill; on macOS/Linux it falls back to pkill.
- *
- * ⚠️ SAFETY GUARDS:
- * - Only kills from an explicit safelist of known app executables
- * - Rejects names containing shell metacharacters (injection prevention)
- * - Never kills system-critical processes
- * - Detailed logging of every attempt
- * - NO window-title fallback (prevents accidental kills)
- */
-
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const os = require("os");
 
 const isWindows = os.platform() === "win32";
 
-// ─── SAFELIST ──────────────────────────────────────────────────────────
-// Only these executables are allowed to be killed. This prevents accidental
-// termination of system or critical processes. Add new entries as needed.
 const ALLOWED_EXECUTABLES = new Set([
-  // Browsers
   "chrome.exe",
   "msedge.exe",
   "firefox.exe",
@@ -27,7 +11,6 @@ const ALLOWED_EXECUTABLES = new Set([
   "opera.exe",
   "vivaldi.exe",
 
-  // Communication / Social
   "discord.exe",
   "slack.exe",
   "telegram.exe",
@@ -39,7 +22,6 @@ const ALLOWED_EXECUTABLES = new Set([
   "microsoftteams.exe",
   "outlook.exe",
 
-  // Entertainment / Media
   "spotify.exe",
   "spotifree.exe",
   "itunes.exe",
@@ -48,126 +30,35 @@ const ALLOWED_EXECUTABLES = new Set([
   "obs64.exe",
   "obs32.exe",
 
-  // Gaming
   "steam.exe",
   "epicgameslauncher.exe",
   "battlenet.exe",
+  "battle.net.exe",
   "valorant.exe",
   "valorant-win64-shipping.exe",
   "leagueclient.exe",
   "leagueclientux.exe",
 
-  // Social Media Desktop Apps
   "twitter.exe",
   "x.exe",
   "instagram.exe",
   "facebook.exe",
   "messenger.exe",
 
-  // Tools / Utilities (non-critical)
   "notepad++.exe",
   "sublime_text.exe",
   "atom.exe",
-  "code.exe", // VS Code — included so it can be blocked during deep work
+  "code.exe",
+  "cursor.exe",
+  "windsurf.exe",
+  "notion.exe",
+  "figma.exe",
+  "postman.exe",
 ]);
 
-// ─── SHELL METACHARACTER CHECK ─────────────────────────────────────────
-// Reject names that could be used for command injection.
 const REJECT_PATTERN = /[;&|`$(){}[\]#~!<>\n\r]/;
 
-/**
- * Attempt to kill processes whose executable name matches `appName`.
- *
- * @param {string} appName  - The friendly app name (e.g. "Spotify", "Discord")
- * @returns {{ killed: boolean, exeName: string|null, reason: string }}
- */
-function killProcessByName(appName) {
-  // ── Input validation ─────────────────────────────────────────────
-  if (!appName || typeof appName !== "string") {
-    console.log(`[TaskKill] REJECTED: appName is ${typeof appName}`);
-    return { killed: false, exeName: null, reason: "Invalid input: appName is not a non-empty string" };
-  }
-
-  const trimmed = appName.trim();
-  if (trimmed.length === 0) {
-    console.log(`[TaskKill] REJECTED: empty appName`);
-    return { killed: false, exeName: null, reason: "Invalid input: empty appName" };
-  }
-
-  // ── Shell injection guard ────────────────────────────────────────
-  if (REJECT_PATTERN.test(trimmed)) {
-    console.log(`[TaskKill] REJECTED: appName "${trimmed}" contains shell metacharacters — possible injection attempt`);
-    return { killed: false, exeName: null, reason: `Security: appName contains shell metacharacters` };
-  }
-
-  // ── Resolve to executable name ───────────────────────────────────
-  const exeName = deriveExeName(trimmed);
-  if (!exeName) {
-    console.log(`[TaskKill] SKIPPED: "${trimmed}" resolves to null (web-based / no native app)`);
-    return { killed: false, exeName: null, reason: `No native executable for "${trimmed}" (web-based service)` };
-  }
-
-  // ── Safelist check ───────────────────────────────────────────────
-  if (!ALLOWED_EXECUTABLES.has(exeName)) {
-    console.log(`[TaskKill] BLOCKED: "${exeName}" is not in the safe-kill list.`);
-    console.log(`[TaskKill]   To allow killing ${exeName}, add it to ALLOWED_EXECUTABLES in taskkill.js`);
-    return { killed: false, exeName, reason: `"${exeName}" is not in the safe-kill allowlist` };
-  }
-
-  // ── Execute kill ─────────────────────────────────────────────────
-  const exeDisplay = isWindows ? exeName : exeName.replace(/\.exe$/i, "");
-
-  console.log(`[TaskKill] ATTEMPTING: kill ${exeDisplay} (requested as "${trimmed}")`);
-
-  try {
-    if (isWindows) {
-      // taskkill /F forces termination; /IM matches image name exactly
-      // This is safe because exeName is validated against the safelist
-      const cmd = `taskkill /F /IM "${exeName}"`;
-      const result = execSync(cmd, { timeout: 8000, encoding: "utf-8", shell: true });
-      const lines = result.trim().split(/\r?\n/).filter(Boolean);
-      const summary = lines.join(" | ");
-      console.log(`[TaskKill] SUCCESS: taskkill /F /IM "${exeName}"`);
-      if (summary) console.log(`[TaskKill]   Output: ${summary}`);
-      return { killed: true, exeName, reason: `Successfully terminated ${exeDisplay}` };
-    } else {
-      const cmd = `pkill -f -i "${exeDisplay}"`;
-      const result = execSync(cmd, { timeout: 8000, encoding: "utf-8" });
-      console.log(`[TaskKill] SUCCESS: pkill -f -i "${exeDisplay}"`);
-      if (result.trim()) console.log(`[TaskKill]   Output: ${result.trim()}`);
-      return { killed: true, exeName, reason: `Successfully terminated ${exeDisplay}` };
-    }
-  } catch (err) {
-    const stderr = err.stderr ? err.stderr.trim() : "";
-    const stdout = err.stdout ? err.stdout.trim() : "";
-    const exitCode = err.status !== undefined ? err.status : -1;
-
-    const isNotFoundError =
-      stderr.toLowerCase().includes("not found") ||
-      stdout.toLowerCase().includes("not found");
-
-    if (isNotFoundError) {
-      console.log(`[TaskKill] NO-PROCESS: ${exeDisplay} is not currently running`);
-    } else {
-      console.log(`[TaskKill] ERROR: Failed to kill ${exeDisplay} (exit=${exitCode})`);
-      if (stdout) console.log(`[TaskKill]   stdout: ${stdout}`);
-      if (stderr) console.log(`[TaskKill]   stderr: ${stderr}`);
-    }
-
-    return {
-      killed: false,
-      exeName,
-      reason: isNotFoundError
-        ? `${exeDisplay} is not currently running`
-        : `Failed to kill ${exeDisplay} (exit=${exitCode}): ${stderr || stdout || "unknown error"}`
-    };
-  }
-}
-
-// ─── EXECUTABLE NAME RESOLVER ──────────────────────────────────────────
-
 const EXE_MAP = {
-  // Browsers
   "chrome": "chrome.exe",
   "google chrome": "chrome.exe",
   "chromium": "chrome.exe",
@@ -180,7 +71,6 @@ const EXE_MAP = {
   "opera": "opera.exe",
   "vivaldi": "vivaldi.exe",
 
-  // Communication
   "discord": "discord.exe",
   "slack": "slack.exe",
   "telegram": "telegram.exe",
@@ -192,7 +82,6 @@ const EXE_MAP = {
   "outlook": "outlook.exe",
   "microsoft outlook": "outlook.exe",
 
-  // Media / Entertainment
   "spotify": "spotify.exe",
   "itunes": "itunes.exe",
   "apple music": "itunes.exe",
@@ -202,21 +91,21 @@ const EXE_MAP = {
   "obs studio": "obs64.exe",
   "obs": "obs64.exe",
 
-  // Gaming
   "steam": "steam.exe",
   "epic games": "epicgameslauncher.exe",
   "epic games launcher": "epicgameslauncher.exe",
-  "battle.net": "battlenet.exe",
+  "battle.net": "battle.net.exe",
+  "battlenet": "battlenet.exe",
   "valorant": "valorant.exe",
   "league of legends": "leagueclientux.exe",
   "league client": "leagueclientux.exe",
 
-  // Social
   "twitter": "twitter.exe",
   "x": "x.exe",
   "instagram": "instagram.exe",
+  "facebook": "facebook.exe",
+  "messenger": "messenger.exe",
 
-  // Tools
   "notepad++": "notepad++.exe",
   "sublime text": "sublime_text.exe",
   "atom": "atom.exe",
@@ -225,8 +114,10 @@ const EXE_MAP = {
   "vs code": "code.exe",
   "cursor": "cursor.exe",
   "windsurf": "windsurf.exe",
+  "notion": "notion.exe",
+  "figma": "figma.exe",
+  "postman": "postman.exe",
 
-  // Web-based (no native app to kill)
   "netflix": null,
   "youtube": null,
   "instagram.com": null,
@@ -234,32 +125,149 @@ const EXE_MAP = {
   "x.com": null,
   "reddit": null,
   "reddit.com": null,
-  "facebook": null,
   "facebook.com": null,
 };
 
-/**
- * Derive the executable name from a user-facing app name.
- *
- * @param {string} name - The raw app name (e.g. "Discord", "Visual Studio Code")
- * @returns {string|null} - The executable name (e.g. "Discord.exe") or null if it's web-based
- */
 function deriveExeName(name) {
-  const key = name.toLowerCase().trim();
-
-  // Direct map match
+  const key = String(name || "").toLowerCase().trim();
   if (EXE_MAP[key] !== undefined) return EXE_MAP[key];
 
-  // Partial match — check if any map key is contained in the input
   for (const [knownAlias, exe] of Object.entries(EXE_MAP)) {
     if (key.includes(knownAlias) || knownAlias.includes(key)) {
       return exe;
     }
   }
 
-  // No match found — refuse to guess
-  console.log(`[TaskKill] UNKNOWN: "${name}" does not match any known app — refusing to derive a generic executable name`);
+  if (/^[a-z0-9_.-]+\.exe$/i.test(key)) return key;
+  console.log(`[TaskKill] UNKNOWN: "${name}" does not match any known app; refusing to guess`);
   return null;
 }
 
-module.exports = { killProcessByName }; 
+function validateKillableApp(appName) {
+  if (!appName || typeof appName !== "string") {
+    return { ok: false, exeName: null, reason: "Invalid input: appName is not a non-empty string" };
+  }
+
+  const trimmed = appName.trim();
+  if (!trimmed) {
+    return { ok: false, exeName: null, reason: "Invalid input: empty appName" };
+  }
+
+  if (REJECT_PATTERN.test(trimmed)) {
+    return { ok: false, exeName: null, reason: "Security: appName contains shell metacharacters" };
+  }
+
+  const exeName = deriveExeName(trimmed);
+  if (!exeName) {
+    return { ok: false, exeName: null, reason: `No native executable for "${trimmed}"` };
+  }
+
+  if (!ALLOWED_EXECUTABLES.has(exeName)) {
+    return { ok: false, exeName, reason: `"${exeName}" is not in the safe-kill allowlist` };
+  }
+
+  return { ok: true, exeName, trimmed };
+}
+
+function resultFromError(prefix, exeName, err) {
+  const stderr = err.stderr ? String(err.stderr).trim() : "";
+  const stdout = err.stdout ? String(err.stdout).trim() : "";
+  const exitCode = err.status !== undefined ? err.status : -1;
+  const detail = stderr || stdout || err.message || "unknown error";
+  const notFound = detail.toLowerCase().includes("not found");
+
+  return {
+    killed: false,
+    exeName,
+    reason: notFound ? `${prefix} is not currently running` : `${prefix} failed (exit=${exitCode}): ${detail}`,
+  };
+}
+
+function killProcessByPid(appName, pid) {
+  const validation = validateKillableApp(appName);
+  if (!validation.ok) {
+    return { killed: false, exeName: validation.exeName, reason: validation.reason };
+  }
+
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) {
+    return { killed: false, exeName: validation.exeName, reason: "Invalid process id" };
+  }
+
+  if (numericPid === process.pid) {
+    return { killed: false, exeName: validation.exeName, reason: "Refusing to terminate Samaritan itself" };
+  }
+
+  try {
+    if (isWindows) {
+      const output = execFileSync("taskkill", ["/F", "/PID", String(numericPid), "/T"], {
+        timeout: 8000,
+        encoding: "utf-8",
+      });
+      const summary = output.trim().split(/\r?\n/).filter(Boolean).join(" | ");
+      console.log(`[TaskKill] SUCCESS: taskkill /F /PID ${numericPid} /T`);
+      if (summary) console.log(`[TaskKill]   Output: ${summary}`);
+    } else {
+      process.kill(numericPid, "SIGTERM");
+      console.log(`[TaskKill] SUCCESS: SIGTERM pid ${numericPid}`);
+    }
+
+    return {
+      killed: true,
+      exeName: validation.exeName,
+      reason: `Successfully terminated pid ${numericPid}`,
+    };
+  } catch (err) {
+    return resultFromError(`pid ${numericPid}`, validation.exeName, err);
+  }
+}
+
+function killProcessByName(appName) {
+  const validation = validateKillableApp(appName);
+  if (!validation.ok) {
+    return { killed: false, exeName: validation.exeName, reason: validation.reason };
+  }
+
+  const exeDisplay = isWindows ? validation.exeName : validation.exeName.replace(/\.exe$/i, "");
+  console.log(`[TaskKill] ATTEMPTING: kill ${exeDisplay} (requested as "${validation.trimmed}")`);
+
+  try {
+    if (isWindows) {
+      const output = execFileSync("taskkill", ["/F", "/IM", validation.exeName, "/T"], {
+        timeout: 8000,
+        encoding: "utf-8",
+      });
+      const summary = output.trim().split(/\r?\n/).filter(Boolean).join(" | ");
+      console.log(`[TaskKill] SUCCESS: taskkill /F /IM "${validation.exeName}" /T`);
+      if (summary) console.log(`[TaskKill]   Output: ${summary}`);
+    } else {
+      const output = execFileSync("pkill", ["-f", "-i", exeDisplay], {
+        timeout: 8000,
+        encoding: "utf-8",
+      });
+      console.log(`[TaskKill] SUCCESS: pkill -f -i "${exeDisplay}"`);
+      if (output.trim()) console.log(`[TaskKill]   Output: ${output.trim()}`);
+    }
+
+    return {
+      killed: true,
+      exeName: validation.exeName,
+      reason: `Successfully terminated ${exeDisplay}`,
+    };
+  } catch (err) {
+    return resultFromError(exeDisplay, validation.exeName, err);
+  }
+}
+
+function killProcess(target) {
+  const appName = target?.appName || target?.name;
+  if (target?.pid) {
+    const pidResult = killProcessByPid(appName, target.pid);
+    if (pidResult.killed) return pidResult;
+    console.log(`[TaskKill] PID kill skipped: ${pidResult.reason}. Falling back to image name.`);
+  }
+
+  return killProcessByName(appName);
+}
+
+module.exports = { killProcess, killProcessByName, killProcessByPid, deriveExeName };

@@ -8,6 +8,7 @@ interface DeepWorkSession {
   status: string;
   plannedMinutes: number;
   focusScore?: number;
+  finalFocusScore?: number;
   productivityScore?: number;
   startedAt: string;
   endedAt?: string | null;
@@ -69,8 +70,10 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
                 </div>
                 <div className="flex items-center gap-3 mt-1.5 text-[10px]">
                   <span className={`capitalize ${statusColor(session.status)}`}>{session.status}</span>
-                  {session.focusScore != null && (
-                    <span className="text-zinc-500 font-mono">Focus {Math.round(session.focusScore)}</span>
+                  {(session.finalFocusScore != null || session.focusScore != null) && (
+                    <span className="text-zinc-500 font-mono">
+                      Focus {Math.round(session.finalFocusScore ?? session.focusScore ?? 0)}
+                    </span>
                   )}
                 </div>
               </button>

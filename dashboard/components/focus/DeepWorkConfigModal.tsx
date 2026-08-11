@@ -70,11 +70,38 @@ const DOMAIN_CATALOG = [
 
 const DURATIONS = [25, 45, 60, 90, 120];
 
+const PROTOCOL_PRESETS = [
+  {
+    name: "Coding",
+    goal: "Ship focused engineering work",
+    allowedApps: ["Cursor", "VS Code", "Terminal", "Postman"],
+    allowedDomains: ["github.com", "stackoverflow.com"],
+    blockedApps: ["Discord", "Steam", "Spotify"],
+    blockedDomains: ["youtube.com", "reddit.com", "twitter.com", "x.com"],
+  },
+  {
+    name: "Research",
+    goal: "Read, analyze, and capture notes",
+    allowedApps: ["Chrome", "Obsidian", "Notion"],
+    allowedDomains: ["docs.google.com", "notion.so"],
+    blockedApps: ["Discord", "Steam"],
+    blockedDomains: ["youtube.com", "instagram.com", "netflix.com"],
+  },
+  {
+    name: "Writing",
+    goal: "Draft without context switching",
+    allowedApps: ["Obsidian", "Notion", "VS Code"],
+    allowedDomains: ["docs.google.com", "notion.so"],
+    blockedApps: ["Slack", "Discord", "WhatsApp", "Telegram"],
+    blockedDomains: ["reddit.com", "twitter.com", "x.com", "youtube.com"],
+  },
+];
+
 const ENFORCEMENT_LEVELS = [
   { value: "observe", label: "Observe", desc: "Log only, no blocking", color: "text-zinc-400", bg: "bg-zinc-500/10", border: "border-zinc-500/20" },
   { value: "warn", label: "Warn", desc: "Notification on violation", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-  { value: "require_reason", label: "Require Reason", desc: "Force justification", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" },
-  { value: "block", label: "Block", desc: "Kill blocked apps immediately", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+  { value: "require_reason", label: "Require Reason", desc: "Require justification, no app kill", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" },
+  { value: "block", label: "Block", desc: "Terminate violating apps", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
 ];
 
 interface Props {
@@ -121,6 +148,14 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
       setDomainInput(prev => ({ ...prev, block: "" }));
     }
   }, [domainInput, allowedDomains, blockedDomains]);
+
+  const applyPreset = useCallback((preset: typeof PROTOCOL_PRESETS[number]) => {
+    setGoal((current) => current || preset.goal);
+    setAllowedApps(preset.allowedApps);
+    setAllowedDomains(preset.allowedDomains);
+    setBlockedApps(preset.blockedApps);
+    setBlockedDomains(preset.blockedDomains);
+  }, []);
 
   const handleStart = () => {
     const finalDuration = duration || Number(customDuration) || 60;
@@ -201,6 +236,26 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                 />
                 <span className="text-xs text-zinc-600">min</span>
               </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Protocol Presets
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {PROTOCOL_PRESETS.map((preset) => (
+                <button
+                  key={preset.name}
+                  onClick={() => applyPreset(preset)}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-left text-xs text-zinc-300 transition-all hover:border-purple-500/40 hover:bg-purple-500/10"
+                >
+                  <span className="font-semibold">{preset.name}</span>
+                  <span className="mt-0.5 block text-[10px] text-zinc-600">
+                    {preset.allowedApps.length} allowed / {preset.blockedApps.length + preset.blockedDomains.length} blocked
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 

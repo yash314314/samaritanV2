@@ -2,7 +2,6 @@
 
 import LiveClock from "./LiveClock";
 import RecentActivity from "./RecentActivity";
-import PeakWindow from "./PeakWindow";
 
 function formatScore(value: any) {
   const n = Number(value ?? 0);
@@ -115,7 +114,7 @@ function StatLine({
   );
 }
 
-function deriveRead(daily: any, intelligence: any) {
+function deriveRead(daily: any) {
   const focus = formatScore(daily?.averageFocusScore);
   const burnout = formatScore(daily?.averageBurnoutScore);
   const entropy = formatScore(daily?.averageEntropyScore);
@@ -136,13 +135,12 @@ function deriveRead(daily: any, intelligence: any) {
     return "Low focus signal. Start with one constrained work block.";
   }
 
-  return intelligence?.suggestion ?? "Work pattern stable. Maintain structure.";
+  return "Work pattern stable. Maintain structure.";
 }
 
 export default function MetricsPanel({
   daily,
-  timeline,
-  intelligence
+  timeline
 }: any) {
   const focusScore = formatScore(daily?.averageFocusScore);
   const burnoutScore = formatScore(daily?.averageBurnoutScore);
@@ -156,11 +154,11 @@ export default function MetricsPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-zinc-100">
-            Samaritan
+                      Samaritan
           </h2>
 
           <div className="text-[11px] text-zinc-500">
-            Intelligence layer active
+            Focus tracker active
           </div>
         </div>
 
@@ -229,17 +227,15 @@ export default function MetricsPanel({
         />
       </div>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
         <p className="text-xs text-zinc-400 uppercase mb-2">
           Samaritan Read
         </p>
 
         <p className="text-xs leading-relaxed text-zinc-300">
-          {deriveRead(daily, intelligence)}
+          {deriveRead(daily)}
         </p>
       </div>
-
-      <PeakWindow data={intelligence} />
 
       <div className="min-h-0 flex-1">
         <p className="text-xs text-zinc-400 uppercase mb-2">

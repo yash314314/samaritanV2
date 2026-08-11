@@ -26,11 +26,11 @@ export async function classifyActivity(
   /* LAYER 3: FALLBACK */
 
   return {
-    category: "research",
-    intent: "reading",
-    focusImpact: 0.5,
+    category: "unknown",
+    intent: "unknown",
+    focusImpact: 0.25,
     energyImpact: 0,
-    confidence: 0.3
+    confidence: 0.2
   };
 
 }

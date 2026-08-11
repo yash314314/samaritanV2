@@ -58,7 +58,7 @@ export async function getAssistantInsights(userId: string) {
 
   const weightedFocus =
     activities.reduce(
-      (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+      (s,a)=>s+getBaseFocus(a)*a.duration,
       0
     ) / totalDuration;
 
@@ -240,7 +240,7 @@ export async function getDailyComparison(userId: string) {
 
     const weightedFocus =
       activities.reduce(
-        (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+        (s,a)=>s+getBaseFocus(a)*a.duration,
         0
       ) / totalDuration;
 
@@ -391,7 +391,7 @@ export async function getIntentHeatmap(userId:string){
     }
 
     map[intent].duration += a.duration;
-    map[intent].focus += (a.focusImpact ?? 0.5)*a.duration;
+    map[intent].focus += getBaseFocus(a)*a.duration;
 
   });
 
@@ -648,7 +648,7 @@ export async function getWeeklyInsights(userId: string) {
 
   const weightedFocus =
     activities.reduce(
-      (s, a) => s + (a.focusImpact ?? 0.5) * a.duration,
+      (s, a) => s + getBaseFocus(a) * a.duration,
       0
     ) / totalDuration;
 
@@ -663,7 +663,7 @@ export async function getWeeklyInsights(userId: string) {
       hourMap[hour] = { score: 0, duration: 0 };
     }
 
-    hourMap[hour].score += (a.focusImpact ?? 0.5) * a.duration;
+    hourMap[hour].score += getBaseFocus(a) * a.duration;
     hourMap[hour].duration += a.duration;
 
   });
@@ -800,7 +800,7 @@ export async function getDailySummary(userId: string, date: string) {
 
   const focusWeighted =
     activities.reduce(
-      (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+      (s,a)=>s+getBaseFocus(a)*a.duration,
       0
     ) / totalDuration;
 

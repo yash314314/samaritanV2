@@ -2,13 +2,13 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { getOrCreateActiveSession } from "./sessionService";
 import { classifyActivity } from "./contextClassifier";
+import { tagActivityToProject } from "./projectTagger";
 import { getISTDayRange } from "../utils/time";
 import {
   clamp,
   clamp01,
-  getBaseFocus,
-  getActivityProductivityScore,
-  isIdleActivity
+  isIdleActivity,
+  updateSmoothMetricState
 } from "./metricEngine";
 const IDLE_THRESHOLD_MS = 60 * 1000;
 
@@ -35,6 +35,10 @@ export async function handleActivity(
   const effectiveDuration = duration ?? 0;
   const effectiveType = type ?? "active";
 
+  // Auto-tag activity to project based on matching rules
+  const tagResult = await tagActivityToProject(userId, appName, null, windowTitle);
+  const projectId = tagResult.projectId;
+
   const activity = await prisma.activity.create({
     data: {
       sessionId: session.id,
@@ -48,7 +52,8 @@ export async function handleActivity(
       intent: classification.intent,
       focusImpact: classification.focusImpact,
       energyImpact: classification.energyImpact,
-      confidence: classification.confidence
+      confidence: classification.confidence,
+      projectId: projectId ?? null
     }
   });
 
@@ -103,33 +108,28 @@ export async function recalculateSessionMetrics(sessionId: string) {
 
   const idleDuration = totalDuration - activeDuration;
 
-  const weightedFocus =
-    normalizedActivities.reduce((sum, a) => {
-      const impact = isIdleActivity(a) ? 0 : getBaseFocus(a);
-      return sum + impact * a.durationMs;
-    }, 0) / totalDuration;
+  const smoothState = normalizedActivities.reduce(
+    (state, activity) => updateSmoothMetricState(state, activity),
+    {
+      focusScore: 0,
+      productivityScore: 0,
+      deepWorkScore: 0,
+      burnoutScore: 0
+    }
+  );
 
-  const focusScore = clamp(weightedFocus * 100);
+  const focusScore = smoothState.focusScore;
 
   const deepWorkDuration = activeActivities
     .filter(a => a.category === "deep_work")
     .reduce((sum, a) => sum + a.durationMs, 0);
 
-  const deepWorkScore =
-    activeDuration > 0
-      ? clamp((deepWorkDuration / activeDuration) * 100)
-      : 0;
+  const deepWorkScore = smoothState.deepWorkScore;
 
   const isDeepWork =
     deepWorkDuration >= 10 * 60 * 1000 || deepWorkScore >= 50;
 
-  const productivityScore = clamp(
-    normalizedActivities.reduce(
-      (sum, a) =>
-        sum + getActivityProductivityScore(a) * a.durationMs,
-      0
-    ) / totalDuration
-  );
+  const productivityScore = smoothState.productivityScore;
 
   let switchCount = 0;
   let previousContext: string | null = null;
@@ -184,12 +184,13 @@ export async function recalculateSessionMetrics(sessionId: string) {
   const switchFactor = clamp01(switchesPerHour / 20);
   const entropyFactor = entropyScore / 100;
 
-  const burnoutScore = clamp(
+  const behavioralBurnoutScore = clamp(
     durationFactor * 35 +
     switchFactor * 25 +
     entropyFactor * 20 +
     communicationRatio * 20
   );
+  const burnoutScore = clamp(Math.max(smoothState.burnoutScore, behavioralBurnoutScore));
 
   await prisma.session.update({
     where: { id: sessionId },

@@ -1,17 +1,31 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { fetchTimeline } from "../lib/api";
+import { fetchTimeline, calendarApi } from "../lib/api";
+
+const CATEGORY_COLORS: Record<string, string> = {
+  deep_work: "#8b5cf6",
+  research: "#533196",
+  communication: "#06b6d4",
+  productivity: "#22c55e",
+  media: "#f59e0b",
+  entertainment: "#ec4899",
+  development_tools: "#6366f1",
+  system: "#71717a",
+};
 
 export default function Timeline({ userId, date }: any) {
 
   const [data,setData] = useState<any[]>([]);
+  const [calendarEvents,setCalendarEvents] = useState<any[]>([]);
   const [tooltip,setTooltip] = useState<any>(null);
-  const [mouse,setMouse] = useState({x:0,y:0});
   const [zoom,setZoom] = useState(1);
 
   const zoomRef = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const tooltipElRef = useRef<HTMLDivElement | null>(null);
+  const tooltipPosRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
 
   const baseWidth = 1400;
 
@@ -19,6 +33,8 @@ export default function Timeline({ userId, date }: any) {
 
   useEffect(()=>{
     fetchTimeline(userId,date).then(setData);
+    // Fetch calendar events for the day to overlay on the timeline
+    calendarApi.overlay(userId, date, date).then(setCalendarEvents).catch(()=>setCalendarEvents([]));
   },[userId,date]);
 
   useEffect(()=>{
@@ -35,20 +51,30 @@ export default function Timeline({ userId, date }: any) {
 
   const totalRange = endMs - startMs;
 
-  /* ---------------- COLOR PALETTE ---------------- */
+  /* ---------------- TOOLTIP POSITIONING (ref-driven, no re-render) ---------------- */
 
-  const categoryColors:any = {
-
-    deep_work:"#8b5cf6",
-    research:"#533196",
-    communication:"#06b6d4",
-    productivity:"#22c55e",
-    media:"#f59e0b",
-    entertainment:"#ec4899",
-    development_tools:"#6366f1",
-    system:"#71717a"
-  
+  const updateTooltipPos = () => {
+    const el = tooltipElRef.current;
+    if (!el) return;
+    const { x, y } = tooltipPosRef.current;
+    el.style.left = `${Math.min(x + 14, window.innerWidth - 260)}px`;
+    el.style.top = `${Math.min(y + 14, window.innerHeight - 140)}px`;
   };
+
+  const scheduleTooltipMove = () => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      updateTooltipPos();
+    });
+  };
+
+  // Position the tooltip as soon as it mounts.
+  useEffect(() => {
+    if (tooltip) updateTooltipPos();
+  }, [tooltip]);
+
+  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
 
   /* ---------------- CURSOR ZOOM ---------------- */
 
@@ -169,10 +195,54 @@ export default function Timeline({ userId, date }: any) {
       <div
         ref={containerRef}
         className="overflow-x-auto"
-        onMouseMove={(e)=>setMouse({x:e.clientX,y:e.clientY})}
+        onMouseMove={(e) => {
+          tooltipPosRef.current = { x: e.clientX, y: e.clientY };
+          scheduleTooltipMove();
+        }}
       >
 
         <div style={{width:timelineWidth}} className="relative">
+
+          {/* CALENDAR OVERLAY LAYER */}
+
+          {calendarEvents.length > 0 && (
+            <div className="relative h-6 mb-1">
+              {calendarEvents.map((evt) => {
+                const start = new Date(evt.start).getTime();
+                const end = new Date(evt.end).getTime();
+
+                const startClamped = Math.max(start, startMs);
+                const endClamped = Math.min(end, endMs);
+
+                const left = ((startClamped - startMs) / totalRange) * 100;
+                const width = ((endClamped - startClamped) / totalRange) * 100;
+
+                const minBlockWidthPercent = (2 / timelineWidth) * 100;
+                const visibleWidth = Math.max(width, minBlockWidthPercent);
+
+                return (
+                  <div
+                    key={evt.id}
+                    onMouseEnter={() => setTooltip({ appName: "Calendar", items: [{ title: evt.title, duration: end - start }], category: "calendar", start: evt.start, end: evt.end, project: evt.project?.name })}
+                    onMouseLeave={() => setTooltip(null)}
+                    className="absolute h-full cursor-pointer rounded-sm flex items-center overflow-hidden"
+                    style={{
+                      left: `${left}%`,
+                      width: `${visibleWidth}%`,
+                      background: evt.color || "#8b5cf6",
+                      opacity: 0.7,
+                    }}
+                  >
+                    {zoom > 3 && visibleWidth > 3 && (
+                      <span className="text-[9px] text-white px-1 truncate font-medium">
+                        {evt.title}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* ACTIVITY LAYER */}
 
@@ -211,7 +281,7 @@ export default function Timeline({ userId, date }: any) {
                 const visibleWidth = Math.max(width, minBlockWidthPercent);
 
               const color =
-                categoryColors[a.category] ?? "#6b7280";
+                CATEGORY_COLORS[a.category] ?? "#6b7280";
 
               return(
 
@@ -271,7 +341,7 @@ export default function Timeline({ userId, date }: any) {
                     width: `${width}%`,
                     minWidth: width > 0 ? 1 : 0,
                     background:
-                      categoryColors[a.category] ?? "#6b7280"
+                      CATEGORY_COLORS[a.category] ?? "#6b7280"
                   }}
                 />
 
@@ -315,11 +385,9 @@ export default function Timeline({ userId, date }: any) {
       {tooltip && (
 
         <div
+          ref={tooltipElRef}
           className="fixed bg-zinc-900 border border-zinc-700 text-xs p-3 rounded shadow-xl w-60 z-[9999]"
-          style={{
-            left: Math.min(mouse.x + 14, window.innerWidth - 260),
-            top: Math.min(mouse.y + 14, window.innerHeight - 140)
-          }}
+          style={{ left: 0, top: 0 }}
         >
 
           <div className="font-semibold mb-2">
@@ -338,7 +406,9 @@ export default function Timeline({ userId, date }: any) {
 
           <div className="mt-2 pt-2 border-t border-zinc-700 text-zinc-500">
 
-            <div>Category: {tooltip.category}</div>
+            {tooltip.category && <div>Category: {tooltip.category}</div>}
+
+            {tooltip.project && <div>Project: {tooltip.project}</div>}
 
             <div>
               Start: {new Date(tooltip.start).toLocaleTimeString()}
@@ -358,7 +428,7 @@ export default function Timeline({ userId, date }: any) {
 
       <div className="flex flex-wrap gap-4 mt-4 text-xs text-zinc-400">
 
-        {Object.entries(categoryColors).map(([key,color])=>(
+        {Object.entries(CATEGORY_COLORS).map(([key,color])=>(
           <div key={key} className="flex items-center gap-2">
 
             <div

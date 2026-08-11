@@ -12,12 +12,17 @@ const { flushCurrentSession, handleFocusIntervention } = require("./sessionEngin
 
 const isDev = !app.isPackaged;
 const API_BASE = "http://localhost:4000";
+const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 let mainWindow;
 let activeDeepWork = null;
 let activeIntervention = null;
 
 function setActiveDeepWork(session) {
+  if (activeDeepWork?.id && activeDeepWork.id !== session.id) {
+    unsubscribeFromDeepWork(activeDeepWork.id);
+  }
+
   activeDeepWork = {
     id: session.id,
     goal: session.goal || null,
@@ -40,6 +45,22 @@ function setActiveDeepWork(session) {
     blockedApps: activeDeepWork.blockedApps,
     blockedDomains: activeDeepWork.blockedDomains
   });
+}
+
+async function hydrateActiveDeepWork() {
+  try {
+    const response = await fetch(`${API_BASE}/focus/active?userId=${USER_ID}`);
+    if (!response.ok) return;
+
+    const session = await response.json();
+    if (session?.id) {
+      setActiveDeepWork(session);
+    } else if (activeDeepWork) {
+      await clearActiveDeepWork(activeDeepWork.id);
+    }
+  } catch (err) {
+    console.warn("[DeepWork] Active session hydration failed:", err.message);
+  }
 }
 
 async function clearActiveDeepWork(sessionId, endedAt = null) {
@@ -159,6 +180,11 @@ app.whenReady().then(() => {
 
   // Connect WebSocket
   connectWs();
+  hydrateActiveDeepWork();
+
+  onWs("connection:established", () => {
+    hydrateActiveDeepWork();
+  });
 
   // Listen for deep work events from server via WS
   onWs("deepwork:started", (session) => {

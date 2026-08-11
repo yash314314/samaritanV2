@@ -11,6 +11,8 @@ export type ActivityMetricInput = {
   intent?: string | null;
   focusImpact?: number | null;
   confidence?: number | null;
+  duration?: number | null;
+  durationMs?: number | null;
 };
 
 const categoryFocusDefaults: Record<string, number> = {
@@ -34,7 +36,7 @@ const categoryProductivityDefaults: Record<string, number> = {
   media: 18,
   entertainment: 8,
   idle: 0,
-  unknown: 45
+  unknown: 20
 };
 
 const intentProductivityDefaults: Record<string, number> = {
@@ -64,8 +66,22 @@ const intentProductivityDefaults: Record<string, number> = {
   file_management: 28,
   media_processing: 26,
   idle: 0,
-  unknown: 45
+  unknown: 20
 };
+
+export type SmoothMetricState = {
+  focusScore: number;
+  productivityScore: number;
+  deepWorkScore: number;
+  burnoutScore: number;
+};
+
+const FOCUS_RISE_TAU_MS = 45 * 60 * 1000;
+const PRODUCTIVITY_RISE_TAU_MS = 60 * 60 * 1000;
+const DISTRACTION_DECAY_TAU_MS = 90 * 1000;
+const IDLE_DECAY_TAU_MS = 12 * 60 * 1000;
+const DEEP_WORK_RISE_TAU_MS = 15 * 60 * 1000;
+const BURNOUT_RISE_TAU_MS = 4 * 60 * 60 * 1000;
   
   export function isIdleActivity(a: ActivityMetricInput) {
     return (
@@ -80,7 +96,7 @@ export function getBaseFocus(a: ActivityMetricInput) {
     return clamp01(a.focusImpact);
   }
 
-  return categoryFocusDefaults[a.category ?? ""] ?? 0.5;
+  return categoryFocusDefaults[a.category ?? ""] ?? 0.25;
 }
 
 export function getActivityProductivityScore(a: ActivityMetricInput) {
@@ -108,5 +124,90 @@ export function getActivityProductivityScore(a: ActivityMetricInput) {
 
   const confidence = clamp01(a.confidence ?? 0.8);
 
-  return clamp(rawScore * confidence + 45 * (1 - confidence));
+  return clamp(rawScore * confidence + 20 * (1 - confidence));
+}
+
+function getDurationMs(activity: ActivityMetricInput) {
+  return Math.max(0, activity.durationMs ?? activity.duration ?? 0);
+}
+
+function approach(current: number, target: number, durationMs: number, tauMs: number) {
+  if (durationMs <= 0) return current;
+  const alpha = 1 - Math.exp(-durationMs / tauMs);
+  return current + (target - current) * alpha;
+}
+
+function decay(current: number, durationMs: number, tauMs: number) {
+  if (durationMs <= 0) return current;
+  return current * Math.exp(-durationMs / tauMs);
+}
+
+export function updateSmoothMetricState(
+  state: SmoothMetricState,
+  activity: ActivityMetricInput
+): SmoothMetricState {
+  const durationMs = getDurationMs(activity);
+  if (durationMs <= 0) return state;
+
+  let focusScore = state.focusScore;
+  let productivityScore = state.productivityScore;
+  let deepWorkScore = state.deepWorkScore;
+  let burnoutScore = state.burnoutScore;
+
+  if (isIdleActivity(activity)) {
+    focusScore = decay(focusScore, durationMs, IDLE_DECAY_TAU_MS);
+    productivityScore = decay(productivityScore, durationMs, IDLE_DECAY_TAU_MS);
+    deepWorkScore = decay(deepWorkScore, durationMs, IDLE_DECAY_TAU_MS);
+    burnoutScore = decay(burnoutScore, durationMs, BURNOUT_RISE_TAU_MS);
+    return {
+      focusScore: clamp(focusScore),
+      productivityScore: clamp(productivityScore),
+      deepWorkScore: clamp(deepWorkScore),
+      burnoutScore: clamp(burnoutScore),
+    };
+  }
+
+  const category = activity.category ?? "unknown";
+  const targetFocus = getBaseFocus(activity) * 100;
+  const targetProductivity = getActivityProductivityScore(activity);
+  const isProductive =
+    category === "deep_work" ||
+    category === "development_tools" ||
+    category === "productivity" ||
+    category === "research";
+  const isDistracting =
+    category === "entertainment" ||
+    category === "media" ||
+    (activity.intent ?? "").includes("social_media") ||
+    (activity.intent ?? "").includes("streaming") ||
+    activity.intent === "gaming";
+
+  if (isDistracting) {
+    focusScore = decay(focusScore, durationMs, DISTRACTION_DECAY_TAU_MS);
+    productivityScore = decay(productivityScore, durationMs, DISTRACTION_DECAY_TAU_MS);
+    deepWorkScore = decay(deepWorkScore, durationMs, DISTRACTION_DECAY_TAU_MS);
+    burnoutScore = approach(burnoutScore, 75, durationMs, BURNOUT_RISE_TAU_MS);
+  } else if (isProductive) {
+    focusScore = approach(focusScore, targetFocus, durationMs, FOCUS_RISE_TAU_MS);
+    productivityScore = approach(productivityScore, targetProductivity, durationMs, PRODUCTIVITY_RISE_TAU_MS);
+    deepWorkScore = approach(
+      deepWorkScore,
+      category === "deep_work" ? 100 : category === "development_tools" ? 70 : 45,
+      durationMs,
+      DEEP_WORK_RISE_TAU_MS
+    );
+    burnoutScore = approach(burnoutScore, 25, durationMs, BURNOUT_RISE_TAU_MS);
+  } else {
+    focusScore = approach(focusScore, targetFocus, durationMs, FOCUS_RISE_TAU_MS * 1.5);
+    productivityScore = approach(productivityScore, targetProductivity, durationMs, PRODUCTIVITY_RISE_TAU_MS * 1.5);
+    deepWorkScore = decay(deepWorkScore, durationMs, IDLE_DECAY_TAU_MS);
+    burnoutScore = approach(burnoutScore, 35, durationMs, BURNOUT_RISE_TAU_MS);
+  }
+
+  return {
+    focusScore: clamp(focusScore),
+    productivityScore: clamp(productivityScore),
+    deepWorkScore: clamp(deepWorkScore),
+    burnoutScore: clamp(burnoutScore),
+  };
 }

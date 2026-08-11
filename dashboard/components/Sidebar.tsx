@@ -6,16 +6,20 @@ import {
   LayoutDashboard,
   BarChart3,
   Flame,
-  Brain,
-  Timer
+  Timer,
+  Target,
+  Calendar as CalendarIcon,
+  Goal
 } from "lucide-react";
 
 const navItems = [
   { name: "Overview", path: "/", icon: LayoutDashboard },
   { name: "Analytics", path: "/analytics", icon: BarChart3 },
   { name: "Heatmap", path: "/heatmap", icon: Flame },
-  { name: "Intelligence", path: "/intelligence", icon: Brain },
-  { name: "Focus Protocol", path: "/focus", icon: Timer }
+  { name: "Focus Protocol", path: "/focus", icon: Timer },
+  { name: "Projects", path: "/projects", icon: Target },
+  { name: "Calendar", path: "/calendar", icon: CalendarIcon },
+  { name: "Goals", path: "/goals", icon: Goal }
 ];
 
 export default function Sidebar() {
@@ -26,13 +30,12 @@ export default function Sidebar() {
 
     <aside
       className="
-        group
+        relative
+        z-40
         h-screen
         min-h-screen
         w-16
-        hover:w-64
-        transition-all
-        duration-300
+        shrink-0
         bg-[#0c0c0c]
         border-r
         border-zinc-800
@@ -42,26 +45,20 @@ export default function Sidebar() {
     >
 
       {/* HEADER */}
-
-      <div className="h-16 flex items-center px-4 border-b border-zinc-800">
-
+      <div className="h-16 flex items-center justify-center border-b border-zinc-800">
         <span
           className="
-            text-zinc-200
-            font-semibold
-            text-lg
-            opacity-0
-            group-hover:opacity-100
-            transition
+            flex h-8 w-8 items-center justify-center rounded-lg
+            bg-purple-500/15 border border-purple-500/30
+            text-purple-300 font-semibold text-sm
           "
+          aria-hidden
         >
-          Samaritan
+          S
         </span>
-
       </div>
 
       {/* NAVIGATION */}
-
       <nav className="flex-1 px-2 py-6 space-y-2">
 
         {navItems.map((item) => {
@@ -74,14 +71,15 @@ export default function Sidebar() {
             <Link
               key={item.path}
               href={item.path}
-              className={`
+              className={`group/nav
+                relative
                 flex
                 items-center
-                gap-4
+                justify-center
                 px-3
                 py-3
                 rounded-lg
-                transition
+                transition-colors
                 ${
                   isActive
                     ? "bg-zinc-900 text-white"
@@ -91,7 +89,6 @@ export default function Sidebar() {
             >
 
               {/* ICON ALWAYS VISIBLE */}
-
               <Icon
                 size={20}
                 className={`shrink-0 ${
@@ -99,15 +96,27 @@ export default function Sidebar() {
                 }`}
               />
 
-              {/* LABEL */}
-
+              {/* FLOATING LABEL (only on hover - never reflows layout) */}
               <span
                 className="
+                  pointer-events-none
+                  absolute
+                  left-full
+                  ml-2
                   whitespace-nowrap
-                  opacity-0
-                  group-hover:opacity-100
-                  transition
+                  rounded-md
+                  border
+                  border-zinc-800
+                  bg-[#16161a]
+                  px-3
+                  py-1.5
                   text-sm
+                  text-zinc-200
+                  opacity-0
+                  shadow-xl
+                  transition-opacity
+                  duration-150
+                  group-hover/nav:opacity-100
                 "
               >
                 {item.name}
@@ -122,16 +131,8 @@ export default function Sidebar() {
       </nav>
 
       {/* FOOTER */}
-
-      <div className="p-4 border-t border-zinc-800 text-xs text-zinc-500">
-
-        <div className="opacity-0 group-hover:opacity-100 transition">
-          Samaritan v1.0
-          <div className="text-zinc-600">
-            Personal cognitive OS
-          </div>
-        </div>
-
+      <div className="p-3 border-t border-zinc-800 text-[10px] text-zinc-500 text-center">
+        v1.0
       </div>
 
     </aside>

@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Shield, Timer, Zap } from "lucide-react";
 
-import DeepWorkActiveOverlay from "@/components/intelligence/DeepWorkActiveOverlay";
-import DeepWorkConfigModal from "@/components/intelligence/DeepWorkConfigModal";
-import DeepWorkExtensionPrompt from "@/components/intelligence/DeepWorkExtensionPrompt";
-import DeepWorkHistoryCard from "@/components/intelligence/DeepWorkHistoryCard";
-import DeepWorkReadinessCard from "@/components/intelligence/DeepWorkReadinessCard";
-import DeepWorkResultPanel from "@/components/intelligence/DeepWorkResultPanel";
+import DeepWorkActiveOverlay from "@/components/focus/DeepWorkActiveOverlay";
+import DeepWorkConfigModal from "@/components/focus/DeepWorkConfigModal";
+import DeepWorkExtensionPrompt from "@/components/focus/DeepWorkExtensionPrompt";
+import DeepWorkHistoryCard from "@/components/focus/DeepWorkHistoryCard";
+import DeepWorkReadinessCard from "@/components/focus/DeepWorkReadinessCard";
+import DeepWorkResultPanel from "@/components/focus/DeepWorkResultPanel";
 import { focusApi } from "@/lib/api";
 import { getWsClient } from "@/lib/ws";
 import { useInterventionAlerts, useLiveDeepWork } from "@/lib/useWs";
@@ -40,12 +40,12 @@ function computeProtocolReadiness(activeSession: any, history: any[]) {
       (Date.now() - new Date(activeSession.startedAt).getTime()) / 60000
     );
     return {
-      score: 80,
+      score: 0,
       factors: {
-        timeOfDay: 75,
-        recentPattern: 80,
-        burnoutRisk: 80,
-        lastSessionQuality: 85,
+        timeOfDay: 0,
+        recentPattern: 0,
+        burnoutRisk: 0,
+        lastSessionQuality: 0,
       },
       recommendedDuration: activeSession.plannedMinutes || 60,
       bestWindow: null,
@@ -61,16 +61,18 @@ function computeProtocolReadiness(activeSession: any, history: any[]) {
   const recent = history.filter((session) => session.status !== "active").slice(0, 5);
   const completionRate = recent.length
     ? (recent.filter((session) => session.status === "completed").length / recent.length) * 100
-    : 60;
+    : 0;
   const avgFocus = recent.length
-    ? recent.reduce((sum, session) => sum + (session.finalFocusScore ?? session.focusScore ?? 60), 0) / recent.length
-    : 65;
+    ? recent.reduce((sum, session) => sum + (session.finalFocusScore ?? session.focusScore ?? 0), 0) / recent.length
+    : 0;
 
   const now = new Date();
   const hour = now.getHours();
   const timeOfDay = hour >= 9 && hour <= 11 ? 85 : hour >= 14 && hour <= 17 ? 75 : hour >= 7 && hour <= 21 ? 60 : 30;
   const recentPattern = Math.round((completionRate + avgFocus) / 2);
-  const score = Math.round((timeOfDay + recentPattern + 75 + avgFocus) / 4);
+  const score = recent.length
+    ? Math.round((timeOfDay + recentPattern + 75 + avgFocus) / 4)
+    : 0;
 
   const riskFactors: string[] = [];
   if (completionRate < 50 && recent.length >= 3) riskFactors.push("Recent sessions were often abandoned");
@@ -192,27 +194,54 @@ export default function FocusPage() {
   }, [activeSession?.id, load]);
 
   const handleStartConfig = async (config: ModalFocusConfig) => {
-    const payload: FocusConfig = {
-      ...config,
-      enforcement: normalizeEnforcement(config.enforcement),
-    };
-    const res = await focusApi.start(payload);
-    setPendingConfig(payload);
-    setActiveSession(res.data);
-    setConfigOpen(false);
-    await load();
+    try {
+      const payload: FocusConfig = {
+        ...config,
+        enforcement: normalizeEnforcement(config.enforcement),
+      };
+      const res = await focusApi.start(payload);
+      setPendingConfig(payload);
+      setActiveSession(res.data);
+      setConfigOpen(false);
+      await load();
+    } catch (err) {
+      console.error("Failed to start deep work session:", err);
+    }
   };
 
   const finishSession = async (id: string, status: "completed" | "abandoned") => {
-    await focusApi.end(id, status);
-    const res = await focusApi.getResult(id);
-    const session = res.data?.session || res.data;
-    const actualMin = session.endedAt
-      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000)
-      : 0;
+    // The session may have already auto-completed/expired on the backend
+    // (timer or external end). End it if possible, but never let that block the
+    // rest of the flow — otherwise the overlay can get stuck.
+    try {
+      await focusApi.end(id, status);
+    } catch (err) {
+      console.warn("Session end failed (may have already ended):", err);
+    }
 
     setActiveSession(null);
     await load();
+
+    // Fetch the result; fall back to the history item if the result endpoint
+    // isn't available (e.g. it was already cleaned up).
+    let session: any = null;
+    try {
+      const res = await focusApi.getResult(id);
+      session = res.data?.session || res.data || null;
+    } catch (err) {
+      console.warn("Session result unavailable, falling back to history:", err);
+      const ended = history.find((h) => h.id === id);
+      session = ended || null;
+    }
+
+    if (!session) {
+      setResultSessionId(id);
+      return;
+    }
+
+    const actualMin = session.endedAt
+      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000)
+      : 0;
 
     if (status === "abandoned" || actualMin < session.plannedMinutes * 0.8) {
       setExtensionPrompt({
@@ -227,29 +256,38 @@ export default function FocusPage() {
   };
 
   const handleExtend = async (extraMinutes: number) => {
-    const baseConfig = pendingConfig || {
-      goal: extensionPrompt?.goal || "Extended session",
-      enforcement: "warn",
-      allowedApps: [],
-      allowedDomains: [],
-      blockedApps: [],
-      blockedDomains: [],
-    };
+    try {
+      const baseConfig = pendingConfig || {
+        goal: extensionPrompt?.goal || "Extended session",
+        enforcement: "warn",
+        allowedApps: [],
+        allowedDomains: [],
+        blockedApps: [],
+        blockedDomains: [],
+      };
 
-    const res = await focusApi.start({
-      ...baseConfig,
-      goal: baseConfig.goal || extensionPrompt?.goal || "Extended session",
-      plannedMinutes: extraMinutes,
-    } as FocusConfig);
+      const res = await focusApi.start({
+        ...baseConfig,
+        goal: baseConfig.goal || extensionPrompt?.goal || "Extended session",
+        plannedMinutes: extraMinutes,
+      } as FocusConfig);
 
-    setActiveSession(res.data);
-    setExtensionPrompt(null);
-    await load();
+      setActiveSession(res.data);
+      setExtensionPrompt(null);
+      await load();
+    } catch (err) {
+      console.error("Failed to extend session:", err);
+    }
   };
 
   const readiness = computeProtocolReadiness(activeSession, history);
 
-  if (loading) {
+  const hasAnything = !!(activeSession || history.length > 0);
+
+  // Only block the very first paint before anything has loaded. Once some data
+  // exists we keep showing the last content while refreshes happen in the
+  // background (via websocket + the 15s status poll) — no more blank flashes.
+  if (loading && !hasAnything) {
     return (
       <div className="flex h-64 items-center justify-center gap-3 text-zinc-500">
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -342,8 +380,8 @@ function EnforcementGuide() {
   const levels = [
     { label: "Observe", value: "observe", detail: "Log distractions without interrupting you." },
     { label: "Warn", value: "warn", detail: "Show a warning notification and dashboard alert." },
-    { label: "Require Reason", value: "require_reason", detail: "Ask for justification and record the reason." },
-    { label: "Block", value: "block", detail: "Force a blocking overlay until compliant activity resumes." },
+    { label: "Require Reason", value: "require_reason", detail: "Ask for justification and record the reason without killing apps." },
+    { label: "Block", value: "block", detail: "Terminate violating apps after the desktop tracker confirms the active process." },
   ];
 
   return (

@@ -132,3 +132,25 @@ import {
   }) {
     broadcastToDashboards(userId, "analytics:burnout", alert);
   }
+
+  export function emitCalendarChanged(
+    userId: string,
+    action: "created" | "updated" | "deleted" | "imported",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `calendar:${action}`, payload);
+    broadcastToDashboards(userId, "calendar:changed", { action, ...payload });
+  }
+
+  export function emitGoalChanged(
+    userId: string,
+    action: "created" | "updated" | "deleted",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `goal:${action}`, payload);
+    broadcastToDashboards(userId, "goal:changed", { action, ...payload });
+  }
+
+  export function emitGoalProgress(userId: string, goals: any[]) {
+    broadcastToDashboards(userId, "goal:progress", { goals });
+  }

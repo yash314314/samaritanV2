@@ -4,7 +4,10 @@ import { recalculateSessionMetrics } from "./activityService"
 import { evaluateDeepWorkActivity } from "./deepWorkService";
 import { classifyActivity } from "./contextClassifier";
 import { resolveActivityIcon } from "./iconResolver";
+import { tagActivityToProject } from "./projectTagger";
 import { emitActivityCreated, emitSessionMetricsUpdated } from "../websocket/broadcaster";
+import { emitGoalProgress } from "../websocket/broadcaster";
+import { updateAndEmitGoalProgress } from "./goalProgressService";
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;
@@ -70,6 +73,15 @@ export async function createActivityFromTracker(data: {
     domain: data.domain
   });
 
+  // Auto-tag activity to project based on matching rules
+  const tagResult = await tagActivityToProject(
+    data.userId,
+    data.app,
+    data.domain ?? icon.domain ?? null,
+    data.title
+  );
+  const projectId = tagResult.projectId;
+
   const normalizedApp = data.app.toLowerCase();
   const shouldPreferResolvedIcon =
     normalizedApp.includes("brave") ||
@@ -87,7 +99,8 @@ export async function createActivityFromTracker(data: {
         where: { id: data.id },
         update: {
           endTime: data.endTime,
-          duration: data.duration
+          duration: data.duration,
+          projectId: projectId ?? undefined,
         },
         create: {
           id: data.id,
@@ -105,7 +118,8 @@ export async function createActivityFromTracker(data: {
           confidence: classification.confidence,
           iconUrl: finalIconUrl,
           domain: data.domain ?? icon.domain,
-          url: data.url ?? null
+          url: data.url ?? null,
+          projectId: projectId ?? null,
         }
       })
     : await prisma.activity.create({
@@ -124,7 +138,8 @@ export async function createActivityFromTracker(data: {
           confidence: classification.confidence,
           iconUrl: finalIconUrl,
           domain: data.domain ?? icon.domain,
-          url: data.url ?? null
+          url: data.url ?? null,
+          projectId: projectId ?? null,
         }
       });
 
@@ -173,6 +188,9 @@ export async function createActivityFromTracker(data: {
   if (updatedSession) {
     emitSessionMetricsUpdated(data.userId, session.id, updatedSession);
   }
+
+  const goals = await updateAndEmitGoalProgress(data.userId);
+  emitGoalProgress(data.userId, goals);
 
   return {
     activity,
