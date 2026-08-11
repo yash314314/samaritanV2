@@ -20,6 +20,30 @@ import {
       domain: activity.domain,
     });
   }
+
+  export function emitCurrentActivity(userId: string, context: {
+    app: string;
+    title: string;
+    iconUrl?: string | null;
+    url?: string | null;
+    domain?: string | null;
+    processId?: number | null;
+    processPath?: string | null;
+    type?: string;
+    observedAt?: string;
+  }) {
+    broadcastToDashboards(userId, "activity:current", {
+      appName: context.app,
+      windowTitle: context.title,
+      iconUrl: context.iconUrl ?? null,
+      url: context.url ?? null,
+      domain: context.domain ?? null,
+      processId: context.processId ?? null,
+      processPath: context.processPath ?? null,
+      type: context.type ?? "active",
+      observedAt: context.observedAt ?? new Date().toISOString(),
+    });
+  }
   
   export function emitSessionMetricsUpdated(userId: string, sessionId: string, metrics: {
     focusScore: number;

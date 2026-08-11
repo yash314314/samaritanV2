@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import {
   fetchDaily,
   fetchHeatmap,
@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 
 import { useAppContext } from "../context/AppContext";
+import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
 
 import MetricsPanel from "../components/MetricsPanel";
 import HeatmapGrid from "../components/HeatmapGrid";
@@ -33,7 +34,7 @@ export default function Home() {
     [selectedDate]
   );
 
-    const [daily, setDaily] = useState<any>(null);
+  const [daily, setDaily] = useState<any>(null);
   const [heatmap, setHeatmap] = useState<any>(null);
   const [timeline, setTimeline] = useState<any>(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
@@ -41,60 +42,51 @@ export default function Home() {
   const [focusBucketMinutes, setFocusBucketMinutes] = useState(60);
   const [focusTrendLoading, setFocusTrendLoading] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
+  const loadDashboard = useCallback(async () => {
+    const [dailyData, heatmapData, timelineData] = await Promise.all([
+      fetchDaily(USER_ID, dateString),
+      fetchHeatmap(USER_ID, dateString),
+      fetchTimeline(USER_ID, dateString)
+    ]);
 
-    async function load() {
-            const [dailyData, heatmapData, timelineData] = await Promise.all([
-        fetchDaily(USER_ID, dateString),
-        fetchHeatmap(USER_ID, dateString),
-        fetchTimeline(USER_ID, dateString)
-      ]);
-
-      if (!alive) return;
-
-      setDaily(dailyData);
-      setHeatmap(heatmapData);
-      setTimeline(timelineData);
-      setIsFirstLoad(false);
-    }
-
-    load();
-
-    return () => {
-      alive = false;
-    };
+    setDaily(dailyData);
+    setHeatmap(heatmapData);
+    setTimeline(timelineData);
+    setIsFirstLoad(false);
   }, [dateString]);
 
-  useEffect(() => {
-    let alive = true;
-
-    async function loadFocusTrend() {
-      setFocusTrendLoading(true);
-
+  const loadFocusTrend = useCallback(async () => {
+    setFocusTrendLoading(true);
+    try {
       const trend = await fetchDailyFocusTrend(
         USER_ID,
         dateString,
         focusBucketMinutes
       );
 
-      if (alive) {
-        setDailyFocusTrend(trend);
-        setFocusTrendLoading(false);
-      }
+      setDailyFocusTrend(trend);
+    } finally {
+      setFocusTrendLoading(false);
     }
-
-    loadFocusTrend();
-
-    return () => {
-      alive = false;
-    };
   }, [dateString, focusBucketMinutes]);
+
+  useEffect(() => {
+    loadDashboard().catch((err) => console.error("Dashboard fetch failed:", err));
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    loadFocusTrend().catch((err) => console.error("Focus trend fetch failed:", err));
+  }, [loadFocusTrend]);
+
+  useRealtimeRefresh(
+    () => Promise.all([loadDashboard(), loadFocusTrend()]).then(() => undefined),
+    { debounceMs: 750 }
+  );
 
   // Only block the whole view on the very first paint. On later date changes
   // we keep the previous data on screen and simply swap it in when ready —
   // this avoids unmounting/re-mounting every widget (and its chart) each time.
-    const nothingLoadedYet = !daily && !heatmap;
+  const nothingLoadedYet = !daily && !heatmap;
 
   if (isFirstLoad && nothingLoadedYet) {
     return (

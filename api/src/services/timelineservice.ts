@@ -41,6 +41,8 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
     if (
       !currentSession ||
       currentSession.appName !== activity.appName ||
+      currentSession.category !== (activity.category ?? "unknown") ||
+      currentSession.intent !== (activity.intent ?? "unknown") ||
       new Date(activity.startTime).getTime() - new Date(currentSession.end).getTime() > 60000 // 1 min gap = new session
     ) {
       if (currentSession) sessions.push(currentSession);
@@ -53,6 +55,7 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
         end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
         duration: 0,
         category: activity.category ?? "unknown",
+        intent: activity.intent ?? "unknown",
         items: [],
       };
     }
@@ -64,6 +67,8 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
       iconUrl: activity.iconUrl,
       domain: activity.domain,
       url: activity.url,
+      category: activity.category ?? "unknown",
+      intent: activity.intent ?? "unknown",
       start: activity.startTime,
       end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
       duration: activity.duration,

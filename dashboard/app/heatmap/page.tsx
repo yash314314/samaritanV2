@@ -27,6 +27,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { fetchHeatmap, fetchTimeline } from "../../lib/api";
+import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 import HeatmapInsights from "../../components/HeatmapInsights";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -980,6 +981,19 @@ export default function HeatmapPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(loadData, {
+    events: [
+      "activity:new",
+      "session:metrics",
+      "analytics:daily",
+      "calendar:changed",
+      "deepwork:started",
+      "deepwork:ended",
+      "deepwork:state",
+    ],
+    debounceMs: 750,
+  });
 
   const goPrev = () => { if (timeScale === "week") setWeekOffset((o) => o - 1); };
   const goNext = () => { if (timeScale === "week") setWeekOffset((o) => o + 1); };

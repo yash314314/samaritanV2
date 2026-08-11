@@ -66,12 +66,16 @@ export async function createActivityFromTracker(data: {
     ? await prisma.activity.findUnique({ where: { id: data.id } })
     : null;
 
-  const classification = await classifyActivity(data.app, data.title);
   const icon = resolveActivityIcon({
     appName: data.app,
     url: data.url,
     domain: data.domain
   });
+  const classification = await classifyActivity(
+    data.app,
+    data.title,
+    data.domain ?? icon.domain ?? data.url ?? null
+  );
 
   // Auto-tag activity to project based on matching rules
   const tagResult = await tagActivityToProject(

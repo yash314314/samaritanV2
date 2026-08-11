@@ -172,6 +172,24 @@ function streamActivity(activity) {
   return true;
 }
 
+/** Stream the current foreground context without persisting it as an activity. */
+function streamCurrentActivity(context) {
+  if (ws?.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  ws.send(JSON.stringify({
+    type: "activity:current",
+    payload: {
+      userId: USER_ID,
+      ...context,
+      observedAt: new Date().toISOString()
+    }
+  }));
+
+  return true;
+}
+
 /** Subscribe to deep work state changes */
 function subscribeToDeepWork(deepWorkId) {
   send("session:subscribe", { deepWorkId });
@@ -193,6 +211,7 @@ module.exports = {
   on,
   off,
   streamActivity,
+  streamCurrentActivity,
   subscribeToDeepWork,
   unsubscribeFromDeepWork,
   get isConnected() { return isConnected; },

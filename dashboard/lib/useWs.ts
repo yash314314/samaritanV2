@@ -144,6 +144,38 @@ export interface LiveActivity {
   domain: string | null;
 }
 
+export interface CurrentActivity {
+  appName: string;
+  windowTitle: string;
+  iconUrl: string | null;
+  url: string | null;
+  domain: string | null;
+  processId: number | null;
+  processPath: string | null;
+  type: string;
+  observedAt: string;
+}
+
+export function useCurrentActivity() {
+  const [activity, setActivity] = useState<CurrentActivity | null>(null);
+
+  useWsMessage("activity:current", (payload: CurrentActivity) => {
+    setActivity((prev) => {
+      if (
+        prev?.observedAt &&
+        payload.observedAt &&
+        new Date(payload.observedAt).getTime() < new Date(prev.observedAt).getTime()
+      ) {
+        return prev;
+      }
+
+      return payload;
+    });
+  });
+
+  return activity;
+}
+
 export function useLiveActivityFeed() {
   const [activities, setActivities] = useState<LiveActivity[]>([]);
 

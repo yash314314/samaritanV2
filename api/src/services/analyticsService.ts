@@ -154,50 +154,6 @@ export async function getDeepWorkStreak(userId: string) {
 
 // ─── Weekly Analytics ───────────────────────────────────
 
-export async function getWeeklyAnalytics(userId: string) {
-  const { start } = getISTDayRange();
-  const startDate = new Date(start);
-  startDate.setDate(startDate.getDate() - 6);
-
-  const sessions = await prisma.session.findMany({
-    where: { userId, startTime: { gte: startDate } },
-  });
-
-  const dailyMap: Record<string, any> = {};
-
-  sessions.forEach((session) => {
-    const dateKey = getISTDateKey(session.startTime);
-
-    if (!dailyMap[dateKey]) {
-      dailyMap[dateKey] = {
-        focusTotal: 0,
-        burnoutTotal: 0,
-        entropyTotal: 0,
-        deepWorkSeconds: 0,
-        sessionCount: 0,
-      };
-    }
-
-    dailyMap[dateKey].focusTotal += session.focusScore;
-    dailyMap[dateKey].burnoutTotal += session.burnoutScore ?? 0;
-    dailyMap[dateKey].entropyTotal += session.entropyScore ?? 0;
-    dailyMap[dateKey].sessionCount++;
-
-    if (session.isDeepWork && session.endTime) {
-      const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-      dailyMap[dateKey].deepWorkSeconds += duration;
-    }
-  });
-
-  return Object.entries(dailyMap).map(([date, data]) => ({
-    date,
-    averageFocus: data.focusTotal / data.sessionCount,
-    averageBurnout: data.burnoutTotal / data.sessionCount,
-    averageEntropy: data.entropyTotal / data.sessionCount,
-    deepWorkSeconds: data.deepWorkSeconds,
-  }));
-}
-
 // ─── Heatmap ────────────────────────────────────────────
 
 const HOUR_MS = 60 * 60 * 1000;

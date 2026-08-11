@@ -19,6 +19,10 @@ export const getUserId = () => USER_ID;
 const CACHE_TTL_MS = 15 * 1000;
 const responseCache = new Map<string, { at: number; data: unknown }>();
 
+export function clearApiCache() {
+  responseCache.clear();
+}
+
 function isCacheableGet(endpoint: string): boolean {
   // Never cache live session/status endpoints (their responses are time-sensitive).
   return !/(\/active|\/status)/.test(endpoint);

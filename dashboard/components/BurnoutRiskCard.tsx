@@ -38,7 +38,7 @@ export default function BurnoutRiskCard({data}:any){
 
   return(
 
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+    <div className="samaritan-card p-6">
 
       {/* HEADER */}
 

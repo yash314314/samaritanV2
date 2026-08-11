@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import { WsMessage, ClientMeta, registerHandler } from "./manager";
 import { createActivityFromTracker } from "../services/sessionService";
 import { startDeepWorkSession, endDeepWorkSession } from "../services/deepWorkService";
+import { emitCurrentActivity } from "./broadcaster";
 
 // Register handlers for client-sent messages
 
@@ -43,6 +44,38 @@ registerHandler(async (ws: WebSocket, msg: WsMessage, meta: ClientMeta) => {
   // NOTE: deepwork:start is DISABLED — use POST /focus/start HTTP endpoint instead.
   // The WebSocket handler was a duplicate trigger that caused confusion.
   // All deep work sessions must be started via the "New Session" button in the UI.
+
+  if (msg.type === "activity:current") {
+    try {
+      const data = msg.payload as {
+        app: string;
+        title: string;
+        iconUrl?: string | null;
+        domain?: string | null;
+        url?: string | null;
+        processId?: number | null;
+        processPath?: string | null;
+        observedAt?: string;
+        type?: string;
+      };
+
+      if (!data?.app || !data?.title) return;
+
+      emitCurrentActivity(meta.userId, {
+        app: data.app,
+        title: data.title,
+        iconUrl: data.iconUrl,
+        domain: data.domain,
+        url: data.url,
+        processId: data.processId,
+        processPath: data.processPath,
+        observedAt: data.observedAt,
+        type: data.type,
+      });
+    } catch (err) {
+      console.error("[WS Handler] activity:current error:", err);
+    }
+  }
 
   if (msg.type === "deepwork:end") {
     try {

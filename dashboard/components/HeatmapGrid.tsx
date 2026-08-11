@@ -107,7 +107,7 @@ export default function HeatmapGrid({ data }: any) {
 
   return (
     <div
-      className="bg-zinc-900 border border-zinc-800 rounded-xl p-6"
+      className="samaritan-card p-6"
       onClick={() => {
         if (pinnedTooltip) closePinnedTooltip();
       }}

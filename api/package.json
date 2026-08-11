@@ -7,6 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "seed:patterns": "ts-node src/scripts/seedPatterns.ts",
+    "reclassify:activities": "ts-node src/scripts/reclassifyActivities.ts",
     "simulate:deepwork": "ts-node src/scripts/simulateDeepWork.ts",
     "gaandfaad_daroga": "ts-node src/seed.ts"
   },

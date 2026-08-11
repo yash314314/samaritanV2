@@ -2,7 +2,8 @@ import { prisma } from "../prisma";
 
 export async function classifyActivity(
   appName: string,
-  title: string
+  title: string,
+  domainOrUrl?: string | null
 ) {
 
   /* LAYER 1: STATIC RULES */
@@ -13,7 +14,7 @@ export async function classifyActivity(
 
   /* LAYER 2: DOMAIN INTELLIGENCE */
 
-  const domain = extractDomain(title);
+  const domain = extractDomain([domainOrUrl, title].filter(Boolean).join(" "));
 
   if (domain) {
 
@@ -120,13 +121,16 @@ export async function findAppPattern(
   windowTitle: string
 ) {
 
-  const patterns = await prisma.appPattern.findMany({
-    where: { appName }
-  });
+  const patterns = await prisma.appPattern.findMany();
 
   if (!patterns.length) return null;
 
-  for (const pattern of patterns) {
+  const appAliases = getAppAliases(appName);
+  const sortedPatterns = patterns
+    .filter((pattern) => appAliases.has(normalizeAppName(pattern.appName)))
+    .sort((a, b) => specificityScore(b.titleRegex) - specificityScore(a.titleRegex));
+
+  for (const pattern of sortedPatterns) {
 
     try {
 
@@ -152,4 +156,48 @@ export async function findAppPattern(
 
   return null;
 
+}
+
+function normalizeAppName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\.exe$/i, "")
+    .replace(/\s+browser$/i, "")
+    .replace(/^microsoft\s+/, "")
+    .replace(/^google\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getAppAliases(appName: string) {
+  const normalized = normalizeAppName(appName);
+  const aliases = new Set([normalized]);
+
+  const aliasGroups = [
+    ["chrome", "google chrome", "chromium"],
+    ["msedge", "edge", "microsoft edge"],
+    ["brave", "brave browser"],
+    ["code", "vs code", "visual studio code", "microsoft visual studio code"],
+    ["cursor", "cursor editor"],
+    ["whatsapp", "whatsapp desktop"],
+    ["discord", "discord desktop"],
+    ["telegram", "telegram desktop"],
+    ["vlc", "vlc media player"],
+    ["explorer", "file explorer", "windows explorer"],
+    ["system idle", "idle"],
+    ["avast secure", "avast secure browser"],
+  ];
+
+  for (const group of aliasGroups) {
+    const normalizedGroup = group.map(normalizeAppName);
+    if (normalizedGroup.some((alias) => alias === normalized || normalized.includes(alias) || alias.includes(normalized))) {
+      normalizedGroup.forEach((alias) => aliases.add(alias));
+    }
+  }
+
+  return aliases;
+}
+
+function specificityScore(titleRegex: string) {
+  return titleRegex === ".*" ? 0 : titleRegex.length;
 }

@@ -4,8 +4,6 @@ import { prisma } from "../prisma";
 import { 
   getDailyAnalytics, 
   getDeepWorkStreak,
-  getWeeklyAnalytics, 
-  getHeatmap 
 } from "../services/analyticsService";
 
 import {
@@ -52,19 +50,6 @@ router.get("/daily-focus-trend", async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: "Daily focus trend failed" });
-  }
-});
-
-router.get("/weekly", async (req, res) => {
-  const { userId } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
-  try {
-    const weekly = await getWeeklyAnalytics(userId);
-    res.json(weekly);
-  } catch (error) {
-    res.status(500).json({ error: "Server error" });
   }
 });
 

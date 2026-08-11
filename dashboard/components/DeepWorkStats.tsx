@@ -30,7 +30,7 @@ export default function DeepWorkStats({ data }: any) {
     : 0;
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+    <div className="samaritan-card p-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-sm font-semibold text-zinc-300">Deep Work</h2>
         <span className="text-xs text-purple-400">{deepWorkSessions} sessions</span>

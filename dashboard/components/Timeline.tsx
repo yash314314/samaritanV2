@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTimeline, calendarApi } from "../lib/api";
+import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
 
 const CATEGORY_COLORS: Record<string, string> = {
   deep_work: "#8b5cf6",
@@ -12,6 +13,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   entertainment: "#ec4899",
   development_tools: "#6366f1",
   system: "#71717a",
+  idle: "#3f3f46",
+  unknown: "#94a3b8",
 };
 
 export default function Timeline({ userId, date }: any) {
@@ -31,11 +34,32 @@ export default function Timeline({ userId, date }: any) {
 
   /* ---------------- FETCH DATA ---------------- */
 
+  const loadTimeline = useCallback(async () => {
+    const [timelineData, overlayData] = await Promise.all([
+      fetchTimeline(userId, date),
+      calendarApi.overlay(userId, date, date).catch(() => []),
+    ]);
+
+    setData(Array.isArray(timelineData) ? timelineData : []);
+    setCalendarEvents(Array.isArray(overlayData) ? overlayData : []);
+  }, [userId, date]);
+
   useEffect(()=>{
-    fetchTimeline(userId,date).then(setData);
-    // Fetch calendar events for the day to overlay on the timeline
-    calendarApi.overlay(userId, date, date).then(setCalendarEvents).catch(()=>setCalendarEvents([]));
-  },[userId,date]);
+    loadTimeline().catch((err) => console.error("Timeline fetch failed:", err));
+  },[loadTimeline]);
+
+  useRealtimeRefresh(loadTimeline, {
+    events: [
+      "activity:new",
+      "session:metrics",
+      "analytics:daily",
+      "calendar:changed",
+      "deepwork:started",
+      "deepwork:ended",
+      "deepwork:state",
+    ],
+    debounceMs: 500,
+  });
 
   useEffect(()=>{
     zoomRef.current = zoom;
@@ -186,7 +210,7 @@ export default function Timeline({ userId, date }: any) {
   }
   return(
 
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+    <div className="samaritan-card p-5">
 
       <h2 className="text-xs text-zinc-400 mb-3 uppercase">
         Timeline

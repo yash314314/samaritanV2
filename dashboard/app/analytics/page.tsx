@@ -40,6 +40,7 @@ import {
   Focus,
   ShieldAlert,
 } from "lucide-react";
+import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 
 // ═══════════════════════════════════════════════════════════
 //  CONFIG
@@ -222,14 +223,6 @@ interface DailyAnalytics {
     neutralCount: number;
   };
   averageEntropyScore: number;
-}
-
-interface WeeklyAnalyticsItem {
-  date: string;
-  averageFocus: number;
-  averageBurnout: number;
-  averageEntropy: number;
-  deepWorkSeconds: number;
 }
 
 interface HeatmapBucket {
@@ -822,7 +815,6 @@ export default function AnalyticsPage() {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   const [daily, setDaily] = useState<DailyAnalytics | null>(null);
-  const [weekly, setWeekly] = useState<WeeklyAnalyticsItem[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapResponse>({});
   const [focusTrend, setFocusTrend] = useState<FocusTrendBucket[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
@@ -831,6 +823,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validations, setValidations] = useState<ValidationResult[]>([]);
+  const { refreshVersion } = useRealtimeRefresh(undefined, { debounceMs: 900 });
 
   // ── Fetch dashboard ──
   useEffect(() => {
@@ -852,7 +845,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, refreshVersion]);
 
   // ── Fetch tab data ──
   useEffect(() => {
@@ -875,11 +868,6 @@ export default function AnalyticsPage() {
               setValidations((prev) => [...prev, vActive, vIdle]);
               setDaily(d);
             }
-          })
-          .catch(() => {}),
-        fetcher<WeeklyAnalyticsItem[]>(`${API_BASE}/analytics/weekly?userId=${userId}`)
-          .then((d) => {
-            if (!cancelled) setWeekly(d);
           })
           .catch(() => {}),
         fetcher<FocusTrendBucket[]>(
@@ -920,7 +908,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userId]);
+  }, [activeTab, userId, refreshVersion]);
 
   // ── Derived chart data ──
   const appUsageChart = useMemo(() => {
@@ -1333,22 +1321,6 @@ export default function AnalyticsPage() {
                       />
                       <Area type="monotone" dataKey="focus" stroke="#a855f7" fill="url(#focusGrad)" strokeWidth={2} />
                     </AreaChart>
-                  </ResponsiveContainer>
-                </Card>
-
-                <Card className="p-6">
-                  <SectionTitle icon={BarChart3} title="Weekly Session Metrics" />
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={weekly}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                      <XAxis dataKey="date" stroke={chartAxisColor} fontSize={12} tickFormatter={(v) => v.slice(5)} />
-                      <YAxis stroke={chartAxisColor} fontSize={12} />
-                      <Tooltip contentStyle={chartTooltipStyle} />
-                      <Legend wrapperStyle={{ color: "#71717a" }} />
-                      <Bar dataKey="averageFocus" name="Avg Focus" fill="#a855f7" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="averageBurnout" name="Avg Burnout" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="averageEntropy" name="Avg Entropy" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
                   </ResponsiveContainer>
                 </Card>
               </div>

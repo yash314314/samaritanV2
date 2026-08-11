@@ -1,6 +1,7 @@
 const activeWin = require("active-win");
 const { handleEvent, closeSession } = require("./sessionEngine");
 const { killProcess } = require("./taskkill");
+const { streamCurrentActivity } = require("./wsClient");
 const { powerMonitor, app } = require("electron");
 const { resolveBrowserContext } = require("./browserUrlResolver");
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -218,6 +219,17 @@ async function track() {
         path,
         type: "active"
       };
+
+    streamCurrentActivity({
+      app: currentContext.app,
+      title: currentContext.title,
+      iconUrl: currentContext.icon,
+      url: currentContext.url,
+      domain: currentContext.domain,
+      processId: currentContext.processId,
+      processPath: currentContext.path,
+      type: currentContext.type
+    });
 
     /* ---------- ENFORCE BLOCKING (pre-emptive kill) ---------- */
 
