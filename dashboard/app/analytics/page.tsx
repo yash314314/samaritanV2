@@ -31,7 +31,6 @@ import {
   BrainCircuit,
   Flame,
   AlertTriangle,
-  CheckCircle2,
   Timer,
   MousePointerClick,
   BarChart3,
@@ -177,7 +176,11 @@ interface DailyComparison {
 interface GrowthPoint {
   date: string;
   focus: number;
+  productivity: number;
   entropy: number;
+  trackedMinutes: number;
+  deepWorkMinutes: number;
+  switches: number;
 }
 
 interface IntentHeatmapItem {
@@ -222,8 +225,20 @@ interface DailyAnalytics {
     productiveCount: number;
     distractingCount: number;
     neutralCount: number;
+    productiveDurationMs?: number;
+    distractingDurationMs?: number;
+    neutralDurationMs?: number;
   };
   averageEntropyScore: number;
+  deepWorkSessions?: number;
+  totalDeepWorkSeconds?: number;
+  recovery?: {
+    score: number;
+    status: string;
+    action: string;
+    idleRatio: number;
+    switchesPerHour: number;
+  };
 }
 
 interface HeatmapBucket {
@@ -303,64 +318,6 @@ interface TimelineSession {
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
 );
-
-const StatCard = ({
-  title,
-  value,
-  subtitle,
-  icon: Icon,
-  trend,
-  trendValue,
-  color = "purple",
-}: {
-  title: string;
-  value: string | number;
-  subtitle: string;
-  icon: React.ElementType;
-  trend?: "up" | "down" | "stable";
-  trendValue?: string;
-  color?: "purple" | "emerald" | "amber" | "rose";
-}) => {
-  const colorMap = {
-    purple: "bg-purple-500/10 text-purple-400",
-    emerald: "bg-emerald-500/10 text-emerald-400",
-    amber: "bg-amber-500/10 text-amber-400",
-    rose: "bg-rose-500/10 text-rose-400",
-  };
-
-  return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-zinc-400">{title}</p>
-          <h3 className="text-2xl font-bold text-zinc-100">{value}</h3>
-          <p className="text-xs text-zinc-500">{subtitle}</p>
-        </div>
-        <div className={`p-2.5 rounded-lg ${colorMap[color]}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-      </div>
-      {trend && (
-        <div className="mt-4 flex items-center gap-2">
-          {trend === "up" ? (
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
-          ) : trend === "down" ? (
-            <TrendingDown className="w-4 h-4 text-rose-400" />
-          ) : (
-            <Minus className="w-4 h-4 text-zinc-500" />
-          )}
-          <span
-            className={`text-sm font-medium ${
-              trend === "up" ? "text-emerald-400" : trend === "down" ? "text-rose-400" : "text-zinc-500"
-            }`}
-          >
-            {trendValue}
-          </span>
-        </div>
-      )}
-    </Card>
-  );
-};
 
 const TimeRangeSelector = ({
   value,
@@ -834,6 +791,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validations, setValidations] = useState<ValidationResult[]>([]);
+  const [animateGrowth, setAnimateGrowth] = useState(true);
   const { refreshVersion } = useRealtimeRefresh(undefined, { debounceMs: 900 });
 
   // ── Fetch dashboard ──
@@ -871,7 +829,7 @@ export default function AnalyticsPage() {
 
     if (activeTab === "overview" || activeTab === "focus") {
       promises.push(
-        fetcher<DailyAnalytics>(`${API_BASE}/analytics/daily?userId=${userId}`)
+        fetcher<DailyAnalytics>(`${API_BASE}/analytics/daily?userId=${userId}&date=${istToday}`)
           .then((d) => {
             if (!cancelled) {
               const vActive = validateDuration(d.totalActiveSeconds, "Active time");
@@ -926,43 +884,110 @@ export default function AnalyticsPage() {
     if (!daily?.appUsage) return [];
     const total = Object.values(daily.appUsage).reduce((a, b) => a + b, 0);
     return Object.entries(daily.appUsage)
-      .map(([name, count]) => ({
+      .map(([name, durationMs]) => ({
         name,
-        count,
-        percentage: total > 0 ? round0((count / total) * 100) : 0,
+        durationMs,
+        percentage: total > 0 ? round0((durationMs / total) * 100) : 0,
       }))
-      .sort((a, b) => b.count - a.count)
+      .sort((a, b) => b.durationMs - a.durationMs)
       .slice(0, 8);
   }, [daily]);
 
   const categoryChart = useMemo(() => {
     if (!daily?.productivityBreakdown) return [];
-    const { productiveCount, distractingCount, neutralCount } = daily.productivityBreakdown;
-    const total = productiveCount + distractingCount + neutralCount;
+    const {
+      productiveCount,
+      distractingCount,
+      neutralCount,
+      productiveDurationMs,
+      distractingDurationMs,
+      neutralDurationMs,
+    } = daily.productivityBreakdown;
+    const productive = productiveDurationMs ?? productiveCount;
+    const distracting = distractingDurationMs ?? distractingCount;
+    const neutral = neutralDurationMs ?? neutralCount;
+    const total = productive + distracting + neutral;
     if (total === 0) return [];
     return [
-      { name: "Productive", value: round0((productiveCount / total) * 100), color: "#a855f7" },
-      { name: "Distracting", value: round0((distractingCount / total) * 100), color: "#7c3aed" },
-      { name: "Neutral", value: round0((neutralCount / total) * 100), color: "#52525b" },
+      {
+        name: "Productive",
+        value: round0((productive / total) * 100),
+        durationMs: productiveDurationMs ?? 0,
+        color: "#a855f7",
+      },
+      {
+        name: "Distracting",
+        value: round0((distracting / total) * 100),
+        durationMs: distractingDurationMs ?? 0,
+        color: "#e11d48",
+      },
+      {
+        name: "Neutral",
+        value: round0((neutral / total) * 100),
+        durationMs: neutralDurationMs ?? 0,
+        color: "#52525b",
+      },
     ];
   }, [daily]);
+
+  const productiveAllocation = categoryChart.find((entry) => entry.name === "Productive");
+  const distractingAllocation = categoryChart.find((entry) => entry.name === "Distracting");
+  const productiveShare = productiveAllocation?.value ?? 0;
+  const distractingShare = distractingAllocation?.value ?? 0;
+  const productivityBalance = productiveShare - distractingShare;
+  const productivityRatio = distractingShare > 0
+    ? productiveShare / distractingShare
+    : productiveShare > 0
+      ? null
+      : 0;
+  const productivityStatus = productiveShare >= 75
+    ? "Strong"
+    : productiveShare >= 55
+      ? "Balanced"
+      : productiveShare >= 35
+        ? "Mixed"
+        : "Distracted";
 
   const growthChart = useMemo(() => {
     if (!dashboard?.growth) return [];
     return dashboard.growth.map((g) => ({
-      date: g.date.slice(5),
+      date: g.date,
+      label: new Date(`${g.date}T00:00:00`).toLocaleDateString("en-IN", {
+        weekday: "short",
+        day: "numeric",
+      }),
       focus: round0(g.focus),
+      productivity: round0(g.productivity),
       entropy: round0(g.entropy),
+      trackedMinutes: round1(g.trackedMinutes),
+      deepWorkMinutes: round1(g.deepWorkMinutes),
+      switches: g.switches,
     }));
   }, [dashboard]);
 
+  const weeklyTrackedMinutes = growthChart.reduce((sum, point) => sum + point.trackedMinutes, 0);
+  const activeGrowthDays = growthChart.filter((point) => point.trackedMinutes > 0);
+  const averageWeeklyProductivity = activeGrowthDays.length > 0
+    ? activeGrowthDays.reduce((sum, point) => sum + point.productivity, 0) / activeGrowthDays.length
+    : 0;
+
+  useEffect(() => {
+    if (growthChart.length === 0 || !animateGrowth) return;
+    const timer = window.setTimeout(() => setAnimateGrowth(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [growthChart.length, animateGrowth]);
+
   const intentChart = useMemo(() => {
     if (!dashboard?.intents) return [];
-    return dashboard.intents.map((i) => ({
-      intent: i.intent,
-      percentage: round0(i.percentage),
-      avgFocus: round0(i.avgFocus),
-    }));
+    return dashboard.intents
+      .map((i) => ({
+        intent: i.intent.replace(/_/g, " "),
+        percentage: round0(i.percentage),
+        avgFocus: round0(i.avgFocus),
+      }))
+      .filter((intent) => intent.percentage > 0)
+      .sort((a, b) => b.percentage - a.percentage)
+      .slice(0, 8);
   }, [dashboard]);
 
   // ── Chart theme ──
@@ -981,7 +1006,7 @@ export default function AnalyticsPage() {
     <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
       <div className="samaritan-card mb-3 shrink-0">
-        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5">
+        <div className="w-full px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
@@ -1018,7 +1043,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="mx-auto min-h-0 w-full max-w-7xl flex-1 overflow-hidden px-4 py-1 sm:px-5">
+      <div className="min-h-0 w-full flex-1 overflow-hidden px-4 py-1 sm:px-5">
         {/* ── Validation Warnings ── */}
         {validations.some((v) => !v.valid) && (
           <div className="mb-6 space-y-2">
@@ -1056,105 +1081,172 @@ export default function AnalyticsPage() {
                   OVERVIEW
                 ═══════════════════════════════════════════════════ */}
             {activeTab === "overview" && (
-              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
-                {dashboard.assistant.suggestion && (
-                  <div className="col-span-12 flex items-start gap-3 rounded-lg border border-purple-500/20 bg-purple-500/10 p-3">
-                    <BrainCircuit className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-purple-300 text-sm">Samaritan Assistant</p>
-                      <p className="text-purple-400/80 text-sm mt-0.5">{dashboard.assistant.suggestion}</p>
+              <div className="dashboard-scroll-panel grid h-full min-h-0 auto-rows-max grid-cols-12 content-start gap-3 pr-1">
+                <Card className="col-span-12 w-full p-0">
+                  <div className="grid min-w-0 gap-4 border-b border-zinc-800 px-4 py-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.6fr)] lg:px-5">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="rounded-lg bg-purple-500/10 p-2.5 text-purple-400">
+                        <BrainCircuit className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <h2 className="text-sm font-semibold text-zinc-100">Performance Intelligence</h2>
+                          <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-purple-300">
+                            Live today + 7 days
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm leading-5 text-zinc-400">
+                          {dashboard.assistant.suggestion || "Keep building a steady rhythm and protect your strongest focus window."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex min-w-0 items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
+                      {dashboard.comparison.change > 0 ? (
+                        <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                      ) : dashboard.comparison.change < 0 ? (
+                        <TrendingDown className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
+                      ) : (
+                        <Minus className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-zinc-300">
+                          {dashboard.comparison.change > 0 ? "+" : ""}{round1(dashboard.comparison.change)} focus points vs yesterday
+                        </p>
+                        <p className="mt-0.5 text-xs leading-4 text-zinc-500">{dashboard.comparison.reason}</p>
+                      </div>
                     </div>
                   </div>
-                )}
 
-                <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <StatCard
-                    title="Productivity Score"
-                    value={`${round0(dashboard.assistant.productivityScore)}%`}
-                    subtitle="Weighted by focus impact"
-                    icon={Target}
-                    color="emerald"
-                    trend={
-                      dashboard.comparison.change > 0
-                        ? "up"
-                        : dashboard.comparison.change < 0
-                        ? "down"
-                        : "stable"
-                    }
-                    trendValue={`${dashboard.comparison.change > 0 ? "+" : ""}${round0(
-                      dashboard.comparison.change
-                    )} vs yesterday`}
-                  />
-                  <StatCard
-                    title="Focus Score"
-                    value={`${round0(dashboard.assistant.focusScore)}%`}
-                    subtitle="Cognitive load weighted"
-                    icon={Focus}
-                    color="purple"
-                  />
-                  <StatCard
-                    title="Deep Work Streak"
-                    value={`${dashboard.streak.currentDeepWorkStreak} days`}
-                    subtitle={`Best: ${dashboard.streak.longestDeepWorkStreak} days`}
-                    icon={Flame}
-                    color="amber"
-                  />
-                  <StatCard
-                    title="Burnout Risk"
-                    value={dashboard.burnout.burnoutRisk}
-                    subtitle={dashboard.burnout.recommendation}
-                    icon={AlertTriangle}
-                    color={
-                      dashboard.burnout.burnoutRisk === "high"
-                        ? "rose"
-                        : dashboard.burnout.burnoutRisk === "moderate"
-                        ? "amber"
-                        : "emerald"
-                    }
-                  />
-                </div>
+                  <div className="grid min-w-0 grid-cols-2 border-b border-zinc-800 sm:grid-cols-4 xl:grid-cols-8">
+                    {[
+                      {
+                        label: "Productivity",
+                        value: `${round0(dashboard.assistant.productivityScore)}%`,
+                        detail: "Weighted impact",
+                        icon: Target,
+                        tone: "text-emerald-400",
+                        score: dashboard.assistant.productivityScore,
+                      },
+                      {
+                        label: "Focus",
+                        value: `${round0(dashboard.assistant.focusScore)}%`,
+                        detail: "Cognitive quality",
+                        icon: Focus,
+                        tone: "text-purple-400",
+                        score: dashboard.assistant.focusScore,
+                      },
+                      {
+                        label: "Active Time",
+                        value: daily ? formatShortDuration(daily.totalActiveSeconds) : "—",
+                        detail: `${daily?.totalSessions ?? 0} sessions`,
+                        icon: Clock,
+                        tone: "text-sky-400",
+                      },
+                      {
+                        label: "Idle Time",
+                        value: daily ? formatShortDuration(daily.totalIdleSeconds) : "—",
+                        detail: `${round0(daily?.recovery?.idleRatio ?? 0)}% recovery share`,
+                        icon: Timer,
+                        tone: "text-rose-400",
+                      },
+                      {
+                        label: "Switches",
+                        value: `${daily?.totalSwitches ?? 0}`,
+                        detail: `${round1(daily?.recovery?.switchesPerHour ?? dashboard.assistant.switchingRate)} per hour`,
+                        icon: MousePointerClick,
+                        tone: "text-fuchsia-400",
+                      },
+                      {
+                        label: "Stability",
+                        value: `${round0(dashboard.assistant.cognitiveStability)}%`,
+                        detail: `${round0(dashboard.assistant.fragmentationScore)} fragmentation`,
+                        icon: Activity,
+                        tone: "text-cyan-400",
+                        score: dashboard.assistant.cognitiveStability,
+                      },
+                      {
+                        label: "Deep Work Streak",
+                        value: `${dashboard.streak.currentDeepWorkStreak}d`,
+                        detail: `Best ${dashboard.streak.longestDeepWorkStreak}d`,
+                        icon: Flame,
+                        tone: "text-amber-400",
+                      },
+                      {
+                        label: "Burnout Risk",
+                        value: dashboard.burnout.burnoutRisk,
+                        detail: `${round0(dashboard.burnout.burnoutScore)} risk score`,
+                        icon: AlertTriangle,
+                        tone:
+                          dashboard.burnout.burnoutRisk === "high"
+                            ? "text-rose-400"
+                            : dashboard.burnout.burnoutRisk === "moderate"
+                            ? "text-amber-400"
+                            : "text-emerald-400",
+                      },
+                    ].map((metric, index) => (
+                      <div
+                        key={metric.label}
+                        className={`min-w-0 px-3 py-3.5 sm:px-4 ${index > 0 ? "border-l border-zinc-800" : ""}`}
+                      >
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <metric.icon className={`h-3.5 w-3.5 shrink-0 ${metric.tone}`} />
+                          <p className="truncate text-[11px] font-medium uppercase text-zinc-500">{metric.label}</p>
+                        </div>
+                        <p className={`mt-2 truncate text-xl font-semibold capitalize text-zinc-100 ${metric.label === "Burnout Risk" ? metric.tone : ""}`}>
+                          {metric.value}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-zinc-500">{metric.detail}</p>
+                        {metric.score !== undefined && (
+                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-800">
+                            <div
+                              className="h-full rounded-full bg-purple-500 transition-[width] duration-700 ease-out"
+                              style={{ width: `${clamp(metric.score, 0, 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
 
-                <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Card className="p-4 flex items-center gap-4">
-                    <div className="p-2.5 bg-purple-500/10 rounded-lg">
-                      <MousePointerClick className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-zinc-500">Context Switches</p>
-                      <p className="text-lg font-semibold text-zinc-100">{daily?.totalSwitches ?? 0}</p>
-                    </div>
-                  </Card>
-                  <Card className="p-4 flex items-center gap-4">
-                    <div className="p-2.5 bg-zinc-800 rounded-lg">
-                      <Clock className="w-5 h-5 text-zinc-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-zinc-500">Active Time</p>
-                      <p className="text-lg font-semibold text-zinc-100">
-                        {daily ? formatShortDuration(daily.totalActiveSeconds) : "—"}
-                      </p>
-                      <ValidationBadge result={validateDuration(daily?.totalActiveSeconds ?? 0, "Active")} />
-                    </div>
-                  </Card>
-                  <Card className="p-4 flex items-center gap-4">
-                    <div className="p-2.5 bg-rose-500/10 rounded-lg">
-                      <Timer className="w-5 h-5 text-rose-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-zinc-500">Idle Time</p>
-                      <p className="text-lg font-semibold text-zinc-100">
-                        {daily ? formatShortDuration(daily.totalIdleSeconds) : "—"}
-                      </p>
-                      <ValidationBadge result={validateDuration(daily?.totalIdleSeconds ?? 0, "Idle")} />
-                    </div>
-                  </Card>
-                </div>
+                  <div className="grid min-w-0 grid-cols-2 divide-x divide-y divide-zinc-800 sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
+                    {[
+                      ["7-day focus", `${round0(dashboard.weekly.weeklyFocusScore)}%`],
+                      ["7-day productivity", `${round0(averageWeeklyProductivity)}%`],
+                      ["Deep work share", `${round0(dashboard.weekly.weeklyDeepWorkRatio)}%`],
+                      ["Communication", `${round0(dashboard.weekly.weeklyCommunicationRatio)}%`],
+                      ["Peak hour", dashboard.weekly.peakProductiveHour === null ? "—" : `${dashboard.weekly.peakProductiveHour.toString().padStart(2, "0")}:00`],
+                      ["Tracked this week", formatShortDuration(weeklyTrackedMinutes * 60)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="min-w-0 px-4 py-3">
+                        <p className="truncate text-[11px] uppercase text-zinc-600">{label}</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-zinc-300">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
 
-                <div className="col-span-12 grid min-h-0 grid-cols-1 gap-3">
-                  <Card className="dashboard-grid-card min-h-[300px] p-4">
-                    <SectionTitle icon={TrendingUp} title="Weekly Growth Trend" />
-                    <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart data={growthChart}>
+                  <Card className="col-span-12 isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <SectionTitle icon={TrendingUp} title="Weekly Growth Trend" />
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className="rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-purple-300">
+                          Focus {round0(dashboard.weekly.weeklyFocusScore)}%
+                        </span>
+                        <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                          Productivity {round0(averageWeeklyProductivity)}%
+                        </span>
+                      </div>
+                    </div>
+                    {growthChart.length > 0 ? (
+                      <div className="relative h-[270px] min-h-[270px] w-full min-w-0 flex-1 overflow-hidden">
+                        <LineChart
+                          key={`growth-${growthChart.map((point) => point.date).join("-")}`}
+                          responsive
+                          data={growthChart}
+                          margin={{ top: 8, right: 16, left: -12, bottom: 0 }}
+                          style={{ width: "100%", height: "100%" }}
+                        >
                         <defs>
                           <linearGradient id="colorFocus" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35} />
@@ -1162,108 +1254,226 @@ export default function AnalyticsPage() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                        <XAxis dataKey="date" stroke={chartAxisColor} fontSize={12} />
-                        <YAxis domain={[0, 100]} stroke={chartAxisColor} fontSize={12} />
-                        <Tooltip contentStyle={chartTooltipStyle} />
+                        <XAxis dataKey="label" stroke={chartAxisColor} fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis domain={[0, 100]} stroke={chartAxisColor} fontSize={11} tickLine={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={chartTooltipStyle}
+                          formatter={(value, name) => {
+                            const numericValue = typeof value === "number" ? value : Number(value ?? 0);
+                            return [`${round0(numericValue)}%`, String(name)];
+                          }}
+                        />
                         <Legend wrapperStyle={{ color: "#71717a" }} />
-                        <Area
+                        <Line
                           type="monotone"
                           dataKey="focus"
-                          name="Focus Score"
+                          name="Focus"
                           stroke="#a855f7"
-                          fill="url(#colorFocus)"
-                          strokeWidth={2}
+                          strokeWidth={3}
+                          dot={{ r: 3, fill: "#a855f7", stroke: "#09090b", strokeWidth: 2 }}
+                          activeDot={{ r: 6, fill: "#f3e8ff", stroke: "#a855f7", strokeWidth: 2 }}
+                          connectNulls
+                          isAnimationActive={animateGrowth}
+                          animationDuration={900}
+                          animationEasing="ease-out"
                         />
                         <Line
                           type="monotone"
-                          dataKey="entropy"
-                          name="Entropy"
-                          stroke="#3b82f6"
+                          dataKey="productivity"
+                          name="Productivity"
+                          stroke="#34d399"
                           strokeWidth={2}
-                          dot={false}
+                          strokeDasharray="5 5"
+                          dot={{ r: 2, fill: "#34d399" }}
+                          connectNulls
+                          isAnimationActive={animateGrowth}
+                          animationDuration={1050}
+                          animationEasing="ease-out"
                         />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                        </LineChart>
+                      </div>
+                    ) : (
+                      <div className="flex min-h-[270px] flex-1 items-center justify-center text-sm text-zinc-500">
+                        No weekly growth data yet
+                      </div>
+                    )}
                   </Card>
 
-                  <Card className="dashboard-grid-card min-h-[300px] p-4">
-                    <SectionTitle icon={BrainCircuit} title="Intent Distribution" />
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={intentChart} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                        <XAxis type="number" stroke={chartAxisColor} fontSize={12} />
-                        <YAxis
-                          dataKey="intent"
-                          type="category"
-                          stroke={chartAxisColor}
-                          fontSize={12}
-                          width={80}
-                        />
-                        <Tooltip contentStyle={chartTooltipStyle} />
-                        <Legend wrapperStyle={{ color: "#71717a" }} />
-                        <Bar dataKey="percentage" name="Time %" fill="#a855f7" radius={[0, 4, 4, 0]} />
-                        <Bar dataKey="avgFocus" name="Avg Focus" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </Card>
-                </div>
+                  <div className="col-span-12 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
+                    <Card className="isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
+                      <SectionTitle icon={BrainCircuit} title="Intent Distribution" />
+                      {intentChart.length > 0 ? (
+                        <div className="relative min-h-0 w-full flex-1 overflow-hidden">
+                          <BarChart
+                            responsive
+                            data={intentChart}
+                            layout="vertical"
+                            margin={{ top: 0, right: 16, left: 10, bottom: 0 }}
+                            style={{ width: "100%", height: "100%" }}
+                          >
+                          <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                          <XAxis type="number" domain={[0, 100]} stroke={chartAxisColor} fontSize={11} />
+                          <YAxis
+                            dataKey="intent"
+                            type="category"
+                            stroke={chartAxisColor}
+                            fontSize={11}
+                            width={100}
+                            tickLine={false}
+                          />
+                          <Tooltip
+                            contentStyle={chartTooltipStyle}
+                            cursor={{ fill: "#a855f7", fillOpacity: 0.1 }}
+                            formatter={(value, name) => [`${round0(Number(value ?? 0))}%`, String(name)]}
+                          />
+                          <Legend wrapperStyle={{ color: "#71717a" }} />
+                          <Bar
+                            dataKey="percentage"
+                            name="Time"
+                            fill="#a855f7"
+                            radius={[0, 4, 4, 0]}
+                            maxBarSize={16}
+                            isAnimationActive={false}
+                          />
+                          <Bar
+                            dataKey="avgFocus"
+                            name="Avg Focus"
+                            fill="#3b82f6"
+                            radius={[0, 4, 4, 0]}
+                            maxBarSize={16}
+                            isAnimationActive={false}
+                          />
+                          </BarChart>
+                        </div>
+                      ) : (
+                        <EmptyState message="No intent data available" />
+                      )}
+                    </Card>
 
-                <div className="col-span-12 grid min-h-0 grid-cols-1 gap-3 xl:grid-cols-2">
-                  <Card className="dashboard-scroll-panel p-4">
-                    <SectionTitle icon={BarChart3} title="App Usage Today" />
-                    <div className="space-y-3">
-                      {appUsageChart.map((app) => (
-                        <div key={app.name} className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-400">
-                            {app.name[0]}
+                    <Card className="isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
+                      <SectionTitle icon={BarChart3} title="App Usage Today" />
+                      <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-3 pr-2">
+                        {appUsageChart.map((app) => (
+                          <div key={app.name} className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-800 text-xs font-bold text-zinc-400">
+                              {app.name[0]}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex min-w-0 items-center justify-between gap-3">
+                                <span className="truncate text-sm font-medium text-zinc-300">{app.name}</span>
+                                <span className="shrink-0 text-xs text-zinc-500">
+                                  {formatShortDuration(app.durationMs / 1000)} ({app.percentage}%)
+                                </span>
+                              </div>
+                              <div className="h-2 w-full rounded-full bg-zinc-800">
+                                <div
+                                  className="h-2 rounded-full bg-purple-500 transition-all"
+                                  style={{ width: `${app.percentage}%` }}
+                                />
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-sm font-medium text-zinc-300">{app.name}</span>
-                              <span className="text-xs text-zinc-500">
-                                {app.count} activities ({app.percentage}%)
-                              </span>
-                            </div>
-                            <div className="w-full bg-zinc-800 rounded-full h-2">
-                              <div
-                                className="bg-purple-500 h-2 rounded-full transition-all"
-                                style={{ width: `${app.percentage}%` }}
-                              />
-                            </div>
+                        ))}
+                        {appUsageChart.length === 0 && <EmptyState message="No app usage data" />}
+                      </div>
+                    </Card>
+
+                  <Card className="isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <SectionTitle icon={PieChart} title="Productivity Breakdown" />
+                      <span
+                        className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase ${
+                          productiveShare >= 55
+                            ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                            : productiveShare >= 35
+                              ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                              : "border-rose-500/20 bg-rose-500/10 text-rose-300"
+                        }`}
+                      >
+                        {productivityStatus}
+                      </span>
+                    </div>
+                    {categoryChart.length > 0 ? (
+                      <div className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 overflow-hidden">
+                        <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_minmax(112px,0.75fr)] gap-3 overflow-hidden">
+                        <div className="relative min-h-0 min-w-0 overflow-hidden">
+                          <PieChart
+                            responsive
+                            style={{ width: "100%", height: "100%" }}
+                          >
+                            <Pie
+                              data={categoryChart}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius="50%"
+                              outerRadius="76%"
+                              paddingAngle={4}
+                              dataKey="value"
+                              stroke="#09090b"
+                              strokeWidth={2}
+                              isAnimationActive={false}
+                            >
+                              {categoryChart.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              contentStyle={chartTooltipStyle}
+                              formatter={(value, name) => [`${round0(Number(value ?? 0))}%`, String(name)]}
+                            />
+                          </PieChart>
+                          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-2xl font-semibold text-zinc-100">{productiveShare}%</span>
+                            <span className="text-[10px] uppercase text-zinc-500">productive</span>
                           </div>
                         </div>
-                      ))}
-                      {appUsageChart.length === 0 && <EmptyState message="No app usage data" />}
-                    </div>
-                  </Card>
-
-                  <Card className="dashboard-grid-card min-h-[270px] p-4">
-                    <SectionTitle icon={PieChart} title="Productivity Breakdown" />
-                    {categoryChart.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={230}>
-                        <PieChart>
-                          <Pie
-                            data={categoryChart}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={90}
-                            paddingAngle={4}
-                            dataKey="value"
-                          >
-                            {categoryChart.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <Tooltip contentStyle={chartTooltipStyle} />
-                          <Legend wrapperStyle={{ color: "#71717a" }} />
-                        </PieChart>
-                      </ResponsiveContainer>
+                        <div className="flex min-w-0 flex-col justify-center gap-2.5 border-l border-zinc-800 pl-3">
+                          <p className="text-[10px] font-medium uppercase text-zinc-500">Active allocation</p>
+                          {categoryChart.map((entry) => (
+                            <div key={entry.name} className="min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span
+                                    className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                                    style={{ backgroundColor: entry.color }}
+                                  />
+                                  <span className="truncate text-[11px] text-zinc-400">{entry.name}</span>
+                                </div>
+                                <span className="shrink-0 text-xs font-semibold text-zinc-200">{entry.value}%</span>
+                              </div>
+                              <p className="mt-0.5 pl-[18px] text-[11px] text-zinc-600">
+                                {formatShortDuration(entry.durationMs / 1000)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                        </div>
+                        <div className="grid grid-cols-3 divide-x divide-zinc-800 border-t border-zinc-800 pt-3">
+                          <div className="min-w-0 pr-2">
+                            <p className="truncate text-[9px] uppercase text-zinc-600">Active time</p>
+                            <p className="mt-1 truncate text-xs font-semibold text-zinc-300">
+                              {formatShortDuration(daily?.totalActiveSeconds ?? 0)}
+                            </p>
+                          </div>
+                          <div className="min-w-0 px-2">
+                            <p className="truncate text-[9px] uppercase text-zinc-600">Net balance</p>
+                            <p className={`mt-1 truncate text-xs font-semibold ${productivityBalance >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {productivityBalance > 0 ? "+" : ""}{productivityBalance} pts
+                            </p>
+                          </div>
+                          <div className="min-w-0 pl-2">
+                            <p className="truncate text-[9px] uppercase text-zinc-600">P:D ratio</p>
+                            <p className="mt-1 truncate text-xs font-semibold text-zinc-300">
+                              {productivityRatio === null ? "No distraction" : `${round1(productivityRatio)}x`}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       <EmptyState message="No category data available" />
                     )}
                   </Card>
-                </div>
+                  </div>
               </div>
             )}
 

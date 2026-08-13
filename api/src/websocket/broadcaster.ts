@@ -225,6 +225,38 @@ import {
     broadcastToDashboards(userId, "calendar:changed", { action, ...payload });
   }
 
+  export function emitCalendarSessionChanged(
+    userId: string,
+    action: "started" | "updated" | "review-required" | "ended",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `calendar:session.${action}`, payload);
+    broadcastToDesktop(userId, `calendar:session.${action}`, payload);
+  }
+
+  export function emitCalendarReminderDue(userId: string, payload: any) {
+    broadcastToDashboards(userId, "calendar:reminder.due", payload);
+    broadcastToDesktop(userId, "calendar:reminder.due", payload);
+  }
+
+  export function emitCalendarReminderChanged(
+    userId: string,
+    action: "snoozed" | "dismissed",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `calendar:reminder.${action}`, payload);
+    broadcastToDesktop(userId, `calendar:reminder.${action}`, payload);
+  }
+
+  export function emitCalendarFocusChanged(
+    userId: string,
+    action: "activated" | "skipped" | "completed",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `calendar:focus.${action}`, payload);
+    broadcastToDesktop(userId, `calendar:focus.${action}`, payload);
+  }
+
   export function emitGoalChanged(
     userId: string,
     action: "created" | "updated" | "deleted",

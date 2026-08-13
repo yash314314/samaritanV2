@@ -70,6 +70,9 @@ export async function getDailyAnalytics(userId: string, date?: string) {
   let productiveCount = 0;
   let distractingCount = 0;
   let neutralCount = 0;
+  let productiveDurationMs = 0;
+  let distractingDurationMs = 0;
+  let neutralDurationMs = 0;
   const appUsage: Record<string, number> = {};
 
   const productiveCategories = new Set(["deep_work", "development_tools", "productivity", "research"]);
@@ -90,14 +93,23 @@ export async function getDailyAnalytics(userId: string, date?: string) {
     session.activities.forEach((activity) => {
       const duration = Math.max(0, activity.duration ?? 0);
       const idle = isIdleActivity(activity);
-      appUsage[activity.appName] = (appUsage[activity.appName] || 0) + duration;
 
       if (idle) totalIdleMs += duration;
-      else totalActiveMs += duration;
+      else {
+        totalActiveMs += duration;
+        appUsage[activity.appName] = (appUsage[activity.appName] || 0) + duration;
 
-      if (productiveCategories.has(activity.category ?? "")) productiveCount++;
-      else if (distractingCategories.has(activity.category ?? "")) distractingCount++;
-      else neutralCount++;
+        if (productiveCategories.has(activity.category ?? "")) {
+          productiveCount++;
+          productiveDurationMs += duration;
+        } else if (distractingCategories.has(activity.category ?? "")) {
+          distractingCount++;
+          distractingDurationMs += duration;
+        } else {
+          neutralCount++;
+          neutralDurationMs += duration;
+        }
+      }
     });
   });
 
@@ -163,7 +175,14 @@ export async function getDailyAnalytics(userId: string, date?: string) {
     averageFocusScore: Number(averageFocus.toFixed(2)),
     averageBurnoutScore: Number(averageBurnout.toFixed(2)),
     appUsage,
-    productivityBreakdown: { productiveCount, distractingCount, neutralCount },
+    productivityBreakdown: {
+      productiveCount,
+      distractingCount,
+      neutralCount,
+      productiveDurationMs,
+      distractingDurationMs,
+      neutralDurationMs,
+    },
     averageEntropyScore: Number(averageEntropy.toFixed(2)),
     deepWorkSessions: protectedWork.length,
     totalDeepWorkSeconds: Math.round(totalDeepWorkSeconds),

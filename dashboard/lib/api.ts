@@ -247,7 +247,16 @@ export const calendarApi = {
     reminderMinutes?: number | null;
     projectId?: string;
     deepWorkId?: string;
+    focusAutoStart?: boolean;
+    focusEnforcement?: "observe" | "warn" | "require_reason" | "block";
+    focusAllowedApps?: string[];
+    focusAllowedDomains?: string[];
+    focusBlockedApps?: string[];
+    focusBlockedDomains?: string[];
     notes?: string;
+    attendeeCount?: number;
+    attendeeStatus?: string;
+    eventType?: string;
   }) =>
     request("/api/calendar", {
       method: "POST",
@@ -258,9 +267,88 @@ export const calendarApi = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-  delete: (id: string) =>
-    request(`/api/calendar/${id}`, {
+  delete: (id: string, scope?: "occurrence" | "series") =>
+    request(`/api/calendar/${id}${scope ? `?${new URLSearchParams({ scope })}` : ""}`, {
       method: "DELETE",
+    }),
+  sessions: (userId: string, from?: string, to?: string, status?: string) => {
+    const params = new URLSearchParams({ userId });
+    if (from) params.append("from", from);
+    if (to) params.append("to", to);
+    if (status) params.append("status", status);
+    return request(`/api/calendar/sessions?${params}`);
+  },
+  reviewSession: (id: string, userId: string, action: "confirm" | "reject" | "missed") =>
+    request(`/api/calendar/sessions/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ userId, action }),
+    }),
+  reviewSessions: (sessionIds: string[], userId: string, action: "confirm" | "reject" | "missed") =>
+    request("/api/calendar/sessions/review/bulk", {
+      method: "POST",
+      body: JSON.stringify({ userId, sessionIds, action }),
+    }),
+  updateSession: (id: string, data: {
+    userId: string;
+    title?: string;
+    type?: "meeting" | "focus" | "break";
+    status?: "confirmed" | "tentative" | "missed" | "rejected";
+    actualStart?: string | null;
+    actualEnd?: string | null;
+    projectId?: string | null;
+  }) => request(`/api/calendar/sessions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  }),
+  sessionSummary: (userId: string, from: string, to: string) =>
+    request(`/api/calendar/sessions/summary?${new URLSearchParams({ userId, from, to })}`),
+  meetingInsights: (userId: string, from: string, to: string) =>
+    request(`/api/calendar/sessions/insights?${new URLSearchParams({ userId, from, to })}`),
+  intelligence: (userId: string, from: string, to: string) =>
+    request(`/api/calendar/intelligence?${new URLSearchParams({ userId, from, to })}`),
+  startManualSession: (data: { userId: string; type: string; title?: string; projectId?: string }) =>
+    request("/api/calendar/sessions/manual/start", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  logManualSession: (data: {
+    userId: string;
+    type: string;
+    title?: string;
+    startAt: string;
+    endAt: string;
+    projectId?: string;
+  }) =>
+    request("/api/calendar/sessions/manual/log", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  endManualSession: (id: string, userId: string) =>
+    request(`/api/calendar/sessions/${id}/end`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }),
+  deleteManualSession: (id: string, userId: string) =>
+    request(`/api/calendar/sessions/${id}?${new URLSearchParams({ userId })}`, { method: "DELETE" }),
+  trackingSettings: (userId: string) =>
+    request(`/api/calendar/tracking/settings?${new URLSearchParams({ userId })}`),
+  updateTrackingSettings: (userId: string, data: object) =>
+    request("/api/calendar/tracking/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ userId, ...data }),
+    }),
+  reconcile: () => request("/api/calendar/tracking/reconcile", { method: "POST" }),
+  reminders: (userId: string) =>
+    request(`/api/calendar/reminders?${new URLSearchParams({ userId })}`),
+  snoozeReminder: (id: string, userId: string, minutes = 10) =>
+    request(`/api/calendar/reminders/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ userId, minutes }),
+    }),
+  dismissReminder: (id: string, userId: string) =>
+    request(`/api/calendar/reminders/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
     }),
 };
 

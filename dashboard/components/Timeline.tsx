@@ -24,7 +24,7 @@ export default function Timeline({ userId, date }: any) {
 
   const loadTimeline = useCallback(async () => {
     const [timelineData, overlayData] = await Promise.all([
-      fetchTimeline(userId, date),
+      fetchTimeline(userId, undefined, undefined, date),
       calendarApi.overlay(userId, date, date).catch(() => []),
     ]);
 
@@ -56,12 +56,25 @@ export default function Timeline({ userId, date }: any) {
   /* ---------------- TIME CALCULATIONS ---------------- */
 
   const dayStart = new Date(date + "T00:00:00");
-  const dayEnd = new Date(date + "T23:59:59.999");
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
 
   const startMs = dayStart.getTime();
   const endMs = dayEnd.getTime();
 
   const totalRange = endMs - startMs;
+
+  function visiblePosition(startValue: string | Date, endValue: string | Date) {
+    const rawStart = new Date(startValue).getTime();
+    const rawEnd = new Date(endValue).getTime();
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return null;
+    const start = Math.max(rawStart, startMs);
+    const end = Math.min(rawEnd, endMs);
+    if (end <= start) return null;
+    const left = Math.max(0, Math.min(100, ((start - startMs) / totalRange) * 100));
+    const width = Math.max(0, Math.min(100 - left, ((end - start) / totalRange) * 100));
+    return { left, width, rawStart, rawEnd };
+  }
 
   /* ---------------- TOOLTIP POSITIONING (ref-driven, no re-render) ---------------- */
 
@@ -150,7 +163,7 @@ export default function Timeline({ userId, date }: any) {
 
     if(!containerRef.current) return;
 
-    const start = new Date(a.start).getTime();
+    const start = Math.max(startMs, Math.min(endMs, new Date(a.start).getTime()));
 
     const newZoom = Math.min(zoomRef.current + 2,10);
     const newWidth = baseWidth * newZoom;
@@ -218,28 +231,22 @@ export default function Timeline({ userId, date }: any) {
           {/* CALENDAR OVERLAY LAYER */}
 
           {calendarEvents.length > 0 && (
-            <div className="relative h-6 mb-1">
+            <div className="relative mb-1 h-6 overflow-hidden">
               {calendarEvents.map((evt) => {
-                const start = new Date(evt.start).getTime();
-                const end = new Date(evt.end).getTime();
-
-                const startClamped = Math.max(start, startMs);
-                const endClamped = Math.min(end, endMs);
-
-                const left = ((startClamped - startMs) / totalRange) * 100;
-                const width = ((endClamped - startClamped) / totalRange) * 100;
+                const position = visiblePosition(evt.start, evt.end);
+                if (!position) return null;
 
                 const minBlockWidthPercent = (2 / timelineWidth) * 100;
-                const visibleWidth = Math.max(width, minBlockWidthPercent);
+                const visibleWidth = Math.min(100 - position.left, Math.max(position.width, minBlockWidthPercent));
 
                 return (
                   <div
                     key={evt.id}
-                    onMouseEnter={() => setTooltip({ appName: "Calendar", items: [{ title: evt.title, duration: end - start }], category: "calendar", start: evt.start, end: evt.end, project: evt.project?.name })}
+                    onMouseEnter={() => setTooltip({ appName: "Calendar", items: [{ title: evt.title, duration: position.rawEnd - position.rawStart }], category: "calendar", start: evt.start, end: evt.end, project: evt.project?.name })}
                     onMouseLeave={() => setTooltip(null)}
                     className="absolute h-full cursor-pointer rounded-sm flex items-center overflow-hidden"
                     style={{
-                      left: `${left}%`,
+                      left: `${position.left}%`,
                       width: `${visibleWidth}%`,
                       background: evt.color || "#8b5cf6",
                       opacity: 0.7,
@@ -258,7 +265,7 @@ export default function Timeline({ userId, date }: any) {
 
           {/* ACTIVITY LAYER */}
 
-          <div className="relative h-14 border border-zinc-700">
+          <div className="relative h-14 overflow-hidden border border-zinc-700">
 
             {/* GRID */}
 
@@ -277,20 +284,11 @@ export default function Timeline({ userId, date }: any) {
 
             {data.map((a,i)=>{
 
-              const start = new Date(a.start).getTime();
-              const end = new Date(a.end).getTime();
-
-              const startClamped = Math.max(start,startMs);
-              const endClamped = Math.min(end,endMs);
-
-              const left =
-                ((startClamped-startMs)/totalRange)*100;
-
-              const width =
-                ((endClamped-startClamped)/totalRange)*100;
+              const position = visiblePosition(a.start, a.end);
+              if (!position) return null;
 
                 const minBlockWidthPercent = (2 / timelineWidth) * 100;
-                const visibleWidth = Math.max(width, minBlockWidthPercent);
+                const visibleWidth = Math.min(100 - position.left, Math.max(position.width, minBlockWidthPercent));
 
               const color =
                 CATEGORY_COLORS[a.category] ?? "#6b7280";
@@ -304,7 +302,7 @@ export default function Timeline({ userId, date }: any) {
                   onClick={()=>focusBlock(a)}
                   className="absolute h-full cursor-pointer flex items-center"
                   style={{
-                    left:`${left}%`,
+                    left:`${position.left}%`,
                     width:`${visibleWidth}%`,
                     background:color,
                     opacity:0.85
@@ -327,21 +325,12 @@ export default function Timeline({ userId, date }: any) {
 
           {/* CATEGORY STRIP */}
 
-          <div className="relative h-3 mt-2">
+          <div className="relative mt-2 h-3 overflow-hidden">
 
             {data.map((a,i)=>{
 
-              const start=new Date(a.start).getTime();
-              const end=new Date(a.end).getTime();
-
-              const startClamped = Math.max(start,startMs);
-              const endClamped = Math.min(end,endMs);
-
-              const left =
-                ((startClamped-startMs)/totalRange)*100;
-
-              const width =
-                ((endClamped-startClamped)/totalRange)*100;
+              const position = visiblePosition(a.start, a.end);
+              if (!position) return null;
 
               return(
 
@@ -349,9 +338,9 @@ export default function Timeline({ userId, date }: any) {
                   key={i}
                   className="absolute h-full"
                   style={{
-                    left:`${left}%`,
-                    width: `${width}%`,
-                    minWidth: width > 0 ? 1 : 0,
+                    left:`${position.left}%`,
+                    width: `${position.width}%`,
+                    minWidth: position.width > 0 ? 1 : 0,
                     background:
                       CATEGORY_COLORS[a.category] ?? "#6b7280"
                   }}

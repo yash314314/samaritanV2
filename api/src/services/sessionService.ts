@@ -8,6 +8,7 @@ import { tagActivityToProject } from "./projectTagger";
 import { emitActivityCreated, emitSessionMetricsUpdated } from "../websocket/broadcaster";
 import { emitGoalProgress } from "../websocket/broadcaster";
 import { updateAndEmitGoalProgress } from "./goalProgressService";
+import { reconcileCalendarActivity } from "./calendarTrackingService";
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;
@@ -176,6 +177,10 @@ export async function createActivityFromTracker(data: {
 
   // ─── WebSocket broadcast ───
   emitActivityCreated(data.userId, activity);
+
+  reconcileCalendarActivity(data.userId, activity).catch((error) => {
+    console.error("[CalendarTracking] Activity reconciliation failed", error);
+  });
 
   const updatedSession = await prisma.session.findUnique({
     where: { id: session.id },

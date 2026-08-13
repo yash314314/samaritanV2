@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, Notification } = require("electron");
 const path = require("path");
 const { startTracking, setActiveDeepWorkRef, clearActiveDeepWorkRef } = require("./tracker");
 const { startSyncLoop } = require("./syncEngine");
@@ -214,6 +214,24 @@ app.whenReady().then(() => {
   onWs("intervention:cleared", (payload) => {
     console.log("[WS] Intervention cleared:", payload?.appName || "allowed activity");
     clearInterventionOverlay(payload);
+  });
+
+  onWs("calendar:reminder.due", (reminder) => {
+    const event = reminder?.calendarEvent;
+    if (!event || !Notification.isSupported()) return;
+    const startsAt = new Date(event.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const notification = new Notification({
+      title: event.title || "Calendar reminder",
+      body: `${event.allDay ? "All day" : `Starts at ${startsAt}`}${event.location ? ` · ${event.location}` : ""}`,
+      silent: false,
+    });
+    notification.on("click", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("calendar-reminder-opened", reminder);
+    });
+    notification.show();
   });
 
   ipcMain.on("override-requested", (_event, data = {}) => {

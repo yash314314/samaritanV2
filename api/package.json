@@ -10,6 +10,14 @@
     "seed:patterns": "ts-node src/scripts/seedPatterns.ts",
     "reclassify:activities": "ts-node src/scripts/reclassifyActivities.ts",
     "simulate:deepwork": "ts-node src/scripts/simulateDeepWork.ts",
+    "verify:calendar": "ts-node src/scripts/verifyCalendarClassifier.ts",
+    "verify:calendar:lifecycle": "ts-node src/scripts/verifyCalendarLifecycle.ts",
+    "verify:calendar:reminders": "ts-node src/scripts/verifyCalendarReminders.ts",
+    "verify:calendar:corrections": "ts-node src/scripts/verifyCalendarSessionCorrection.ts",
+    "verify:calendar:intelligence": "ts-node src/scripts/verifyCalendarIntelligence.ts",
+    "verify:calendar:focus": "ts-node src/scripts/verifyCalendarFocusLifecycle.ts",
+    "verify:calendar:timezone": "ts-node src/scripts/verifyCalendarTimezone.ts",
+    "verify:calendar:reviews": "ts-node src/scripts/verifyCalendarBulkReview.ts",
     "gaandfaad_daroga": "ts-node src/seed.ts"
   },
   "keywords": [],
@@ -23,6 +31,7 @@
     "node-cron": "^4.6.0",
     "node-ical": "^0.26.1",
     "prisma": "^6.19.2",
+    "rrule": "^2.8.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {

@@ -13,6 +13,8 @@ import { startMinuteLogger } from "./services/minuteLogger";
 import { startSessionExpiryChecker } from './services/sessionExpiry';
 import { startProjectTimeAggregation } from "./jobs/aggregateProjectTime";
 import { initWebSocket } from "./websocket/manager";
+import { startCalendarTrackingLifecycle } from "./services/calendarTrackingService";
+import { startCalendarReminderScheduler } from "./services/calendarReminderService";
 import "./websocket/handlers"; // Register WS message handlers
 
 const app = express();
@@ -46,4 +48,6 @@ server.listen(4000, () => {
   startSessionExpiryChecker();
   startMinuteLogger();
   startProjectTimeAggregation();
+  startCalendarTrackingLifecycle();
+  startCalendarReminderScheduler();
 });

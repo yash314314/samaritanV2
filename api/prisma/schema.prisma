@@ -8,32 +8,32 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(uuid())
+  id        String   @id @default(uuid())
   name      String
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  sessions  Session[]
+  sessions Session[]
 }
 
 model Session {
-  id            String   @id @default(uuid())
-  user          User     @relation(fields: [userId], references: [id])
-  userId        String
-  startTime     DateTime @default(now())
-  endTime       DateTime?
-  createdAt     DateTime @default(now())
-  focusScore    Float    @default(0)
-  burnoutScore  Float    @default(0)
-  deepWorkScore Float    @default(0)
-  entropyScore  Float    @default(0)
-  switchCount   Int      @default(0)
-  idleTime      Int      @default(0)
-  totalDuration Int      @default(0)
-  productivityScore Float @default(0)
+  id                String    @id @default(uuid())
+  user              User      @relation(fields: [userId], references: [id])
+  userId            String
+  startTime         DateTime  @default(now())
+  endTime           DateTime?
+  createdAt         DateTime  @default(now())
+  focusScore        Float     @default(0)
+  burnoutScore      Float     @default(0)
+  deepWorkScore     Float     @default(0)
+  entropyScore      Float     @default(0)
+  switchCount       Int       @default(0)
+  idleTime          Int       @default(0)
+  totalDuration     Int       @default(0)
+  productivityScore Float     @default(0)
 
-  isDeepWork    Boolean  @default(false)
+  isDeepWork Boolean @default(false)
 
-  activities    Activity[]
+  activities Activity[]
 
   @@index([userId])
   @@index([startTime])
@@ -42,126 +42,130 @@ model Session {
 model AppCategory {
   id        String   @id @default(uuid())
   appName   String   @unique
-  category  String   // productive | neutral | distracting
+  category  String // productive | neutral | distracting
   createdAt DateTime @default(now())
 }
 
-
 model Activity {
-  id              String   @id @default(uuid())
-  session         Session  @relation(fields: [sessionId], references: [id])
-  sessionId       String
+  id        String  @id @default(uuid())
+  session   Session @relation(fields: [sessionId], references: [id])
+  sessionId String
 
-  appName         String
-  windowTitle     String
+  appName     String
+  windowTitle String
 
-  startTime       DateTime
-  endTime         DateTime
-  duration        Int
-  type            String?
+  startTime DateTime
+  endTime   DateTime
+  duration  Int
+  type      String?
 
-  category        String?
-  intent          String?
-  focusImpact     Float?
-  energyImpact    Float?
-  confidence      Float?
+  category     String?
+  intent       String?
+  focusImpact  Float?
+  energyImpact Float?
+  confidence   Float?
 
-  iconUrl         String?
-  domain          String?
-  url             String?
+  iconUrl String?
+  domain  String?
+  url     String?
 
   projectId       String?
-  project         Project? @relation(fields: [projectId], references: [id])
+  project         Project?          @relation(fields: [projectId], references: [id])
+  meetingEvidence MeetingEvidence[]
 
   @@index([sessionId])
   @@index([startTime])
   @@index([projectId])
 }
+
 model AppPattern {
-  id          String   @id @default(uuid())
-  appName     String
-  titleRegex  String
-  category    String
-  intent      String?
-  focusImpact Float?
+  id           String   @id @default(uuid())
+  appName      String
+  titleRegex   String
+  category     String
+  intent       String?
+  focusImpact  Float?
   energyImpact Float?
-  confidence  Float?
-  createdAt   DateTime @default(now())
+  confidence   Float?
+  createdAt    DateTime @default(now())
 
   @@index([appName])
 }
+
 model DeepWorkSession {
-  id              String   @id @default(uuid())
-  userId          String
-  goal            String?
-  plannedMinutes  Int
-  startedAt       DateTime @default(now())
-  endedAt         DateTime?
-  status          String   // active | completed | abandoned
-  enforcement     String   // observe | warn | require_reason | block
+  id             String    @id @default(uuid())
+  userId         String
+  goal           String?
+  plannedMinutes Int
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+  status         String // active | completed | abandoned
+  enforcement    String // observe | warn | require_reason | block
 
-  allowedApps     String[]
-  allowedDomains  String[]
-  blockedApps     String[]
-  blockedDomains  String[]
+  allowedApps    String[]
+  allowedDomains String[]
+  blockedApps    String[]
+  blockedDomains String[]
 
-  focusScore      Float    @default(0)
-  violationCount  Int      @default(0)
-  interruptionMs  Int      @default(0)
-  productiveMs    Int      @default(0)
-  distractionMs   Int      @default(0)
-  idleMs          Int      @default(0)
-  productivityScore Float @default(0)
-  interventions   FocusIntervention[]
-  minuteLogs      DeepWorkMinuteLog[]
-  createdAt       DateTime @default(now())
-  lastViolationAt DateTime?
+  focusScore        Float               @default(0)
+  violationCount    Int                 @default(0)
+  interruptionMs    Int                 @default(0)
+  productiveMs      Int                 @default(0)
+  distractionMs     Int                 @default(0)
+  idleMs            Int                 @default(0)
+  productivityScore Float               @default(0)
+  interventions     FocusIntervention[]
+  minuteLogs        DeepWorkMinuteLog[]
+  createdAt         DateTime            @default(now())
+  lastViolationAt   DateTime?
 }
 
 model FocusIntervention {
-  id              String   @id @default(uuid())
+  id String @id @default(uuid())
 
-  deepWorkId      String
+  deepWorkId String
 
-  deepWork        DeepWorkSession @relation(fields: [deepWorkId], references: [id])
+  deepWork DeepWorkSession @relation(fields: [deepWorkId], references: [id])
 
-  appName         String
-  domain          String?
-  windowTitle     String
+  appName     String
+  domain      String?
+  windowTitle String
 
-  detectedAt      DateTime @default(now())
+  detectedAt DateTime @default(now())
 
-  action          String
-  reason          String?
-  durationMs      Int?
-    @@index([deepWorkId])
+  action     String
+  reason     String?
+  durationMs Int?
+
+  @@index([deepWorkId])
   @@index([detectedAt])
 }
+
 model DeepWorkMinuteLog {
-  id            String   @id @default(uuid())
-  deepWorkId    String
-  deepWork      DeepWorkSession @relation(fields: [deepWorkId], references: [id], onDelete: Cascade)
-  
-  minuteIndex   Int      // 0, 1, 2, 3... relative to session start
-  timestamp     DateTime @default(now())
-  
+  id         String          @id @default(uuid())
+  deepWorkId String
+  deepWork   DeepWorkSession @relation(fields: [deepWorkId], references: [id], onDelete: Cascade)
+
+  minuteIndex Int // 0, 1, 2, 3... relative to session start
+  timestamp   DateTime @default(now())
+
   // Metrics at this minute
   focusScore        Float @default(0)
   productivityScore Float @default(0)
-  
+
   // Flags
-  distractionFlag   Boolean @default(false)
-  idleFlag          Boolean @default(false)
-  
+  distractionFlag Boolean @default(false)
+  idleFlag        Boolean @default(false)
+
   // Context snapshot
-  appName       String?
-  windowTitle   String?
-  category      String?
-  intent        String?
-  
-  createdAt     DateTime @default(now())
-  
-    @@index([deepWorkId])
+  appName     String?
+  windowTitle String?
+  category    String?
+  intent      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([deepWorkId])
   @@index([minuteIndex])
   @@index([timestamp])
 }
@@ -169,20 +173,21 @@ model DeepWorkMinuteLog {
 // ── Rize-like intent / project / calendar layer ──
 
 model Project {
-  id            String         @id @default(uuid())
-  userId        String
-  name          String
-  icon          String?
-  color         String         @default("#8b5cf6")
-  weeklyHourGoal Float         @default(10)
-  active        Boolean        @default(true)
-  createdAt     DateTime       @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  name           String
+  icon           String?
+  color          String   @default("#8b5cf6")
+  weeklyHourGoal Float    @default(10)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
 
-  rules         ProjectRule[]
-  time          ProjectTime[]
-  goals         Goal[]
-  events        CalendarEvent[]
-  activities    Activity[]
+  rules            ProjectRule[]
+  time             ProjectTime[]
+  goals            Goal[]
+  events           CalendarEvent[]
+  calendarSessions CalendarSession[]
+  activities       Activity[]
 }
 
 model ProjectRule {
@@ -200,31 +205,176 @@ model ProjectRule {
 }
 
 model CalendarEvent {
-  id         String   @id @default(uuid())
-  userId     String
-  title      String
-  description String?
-  location   String?
-  startAt    DateTime
-  endAt      DateTime
-  allDay     Boolean  @default(false)
-  color      String?
-  source     String   @default("manual")
-  status     String   @default("confirmed")
-  busy       Boolean  @default(true)
-  recurrenceRule String?
-  reminderMinutes Int?
-  externalId String?
-  projectId  String?
-  project    Project? @relation(fields: [projectId], references: [id])
-  deepWorkId String?
-  notes      String?
+  id               String            @id @default(uuid())
+  userId           String
+  title            String
+  description      String?
+  location         String?
+  startAt          DateTime
+  endAt            DateTime
+  allDay           Boolean           @default(false)
+  color            String?
+  source           String            @default("manual")
+  status           String            @default("confirmed")
+  busy             Boolean           @default(true)
+  recurrenceRule   String?
+  recurrenceParentId     String?
+  recurrenceParent       CalendarEvent?  @relation("CalendarEventRecurrence", fields: [recurrenceParentId], references: [id], onDelete: Cascade)
+  recurrenceOccurrences  CalendarEvent[] @relation("CalendarEventRecurrence")
+  recurrenceOriginalStart DateTime?
+  recurrenceException     Boolean         @default(false)
+  reminderMinutes  Int?
+  externalId       String?
+  calendarSourceId String?
+  calendarSource   CalendarSource?   @relation(fields: [calendarSourceId], references: [id], onDelete: SetNull)
+  attendeeCount    Int               @default(0)
+  attendeeStatus   String            @default("unknown")
+  eventType        String            @default("event")
+  syncStatus       String            @default("synced")
+  lastSyncedAt     DateTime?
+  updatedAt        DateTime          @updatedAt
+  projectId        String?
+  project          Project?          @relation(fields: [projectId], references: [id])
+  deepWorkId       String?
+  focusAutoStart   Boolean           @default(false)
+  focusEnforcement String            @default("warn")
+  focusAllowedApps String[]          @default([])
+  focusAllowedDomains String[]       @default([])
+  focusBlockedApps String[]          @default([])
+  focusBlockedDomains String[]       @default([])
+  notes            String?
+  calendarSessions CalendarSession[]
+  calendarReminder CalendarReminder?
 
+  @@unique([calendarSourceId, externalId])
   @@index([userId])
   @@index([startAt, endAt])
   @@index([deepWorkId])
   @@index([status])
   @@index([externalId])
+  @@index([calendarSourceId])
+  @@index([recurrenceParentId])
+  @@unique([recurrenceParentId, recurrenceOriginalStart])
+}
+
+model CalendarReminder {
+  id              String        @id @default(uuid())
+  userId          String
+  calendarEventId String        @unique
+  calendarEvent   CalendarEvent @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+  remindAt        DateTime
+  status          String        @default("scheduled")
+  deliveredAt     DateTime?
+  snoozedUntil    DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId, status])
+  @@index([status, remindAt])
+  @@index([status, snoozedUntil])
+}
+
+model CalendarConnection {
+  id                    String           @id @default(uuid())
+  userId                String
+  provider              String
+  accountLabel          String?
+  status                String           @default("connected")
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  syncCursor            String?
+  lastSyncedAt          DateTime?
+  connectedAt           DateTime         @default(now())
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  sources               CalendarSource[]
+
+  @@unique([userId, provider, accountLabel])
+  @@index([userId])
+}
+
+model CalendarSource {
+  id                 String             @id @default(uuid())
+  userId             String
+  connectionId       String
+  connection         CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  providerCalendarId String
+  name               String
+  color              String?
+  timezone           String?
+  enabled            Boolean            @default(true)
+  primary            Boolean            @default(false)
+  syncCursor         String?
+  lastSyncedAt       DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  events             CalendarEvent[]
+
+  @@unique([connectionId, providerCalendarId])
+  @@index([userId])
+}
+
+model CalendarTrackingSettings {
+  userId                       String   @id
+  meetingKeyword               String   @default("#rize-meeting")
+  focusKeyword                 String   @default("#rize-focus")
+  breakKeyword                 String   @default("#rize-break")
+  attendeeThreshold            Int      @default(2)
+  offlineMeetingCreation       Boolean  @default(true)
+  offlineMeetingMinutes        Int      @default(10)
+  confirmationThresholdSeconds Int      @default(60)
+  timezone                     String   @default("Asia/Kolkata")
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+}
+
+model CalendarSession {
+  id               String            @id @default(uuid())
+  userId           String
+  calendarEventId  String?
+  calendarEvent    CalendarEvent?    @relation(fields: [calendarEventId], references: [id], onDelete: SetNull)
+  type             String
+  source           String
+  status           String            @default("scheduled")
+  title            String
+  scheduledStart   DateTime?
+  scheduledEnd     DateTime?
+  actualStart      DateTime?
+  actualEnd        DateTime?
+  actualDurationMs Int               @default(0)
+  confidence       Float             @default(0)
+  reviewReason     String?
+  reviewedAt       DateTime?
+  projectId        String?
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  evidence         MeetingEvidence[]
+
+  @@unique([calendarEventId, type])
+  @@index([userId, scheduledStart])
+  @@index([userId, status])
+  @@index([actualStart, actualEnd])
+}
+
+model MeetingEvidence {
+  id                String          @id @default(uuid())
+  calendarSessionId String
+  calendarSession   CalendarSession @relation(fields: [calendarSessionId], references: [id], onDelete: Cascade)
+  activityId        String
+  activity          Activity        @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  signalType        String
+  startedAt         DateTime
+  endedAt           DateTime
+  durationMs        Int
+  confidence        Float
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([calendarSessionId, activityId])
+  @@index([calendarSessionId, startedAt])
+  @@index([activityId])
 }
 
 model ProjectTime {
@@ -240,23 +390,23 @@ model ProjectTime {
 }
 
 model Goal {
-  id        String  @id @default(uuid())
-  userId    String
-  title     String
+  id          String    @id @default(uuid())
+  userId      String
+  title       String
   description String?
-  type      String  @default("focus_minutes")
-  unit      String?
-  target    Float
-  period    String  @default("daily")
-  startDate DateTime?
-  endDate   DateTime?
-  priority  String  @default("medium")
-  progress  Float   @default(0)
+  type        String    @default("focus_minutes")
+  unit        String?
+  target      Float
+  period      String    @default("daily")
+  startDate   DateTime?
+  endDate     DateTime?
+  priority    String    @default("medium")
+  progress    Float     @default(0)
   completedAt DateTime?
-  projectId String?
-  project   Project? @relation(fields: [projectId], references: [id])
-  active    Boolean @default(true)
-  createdAt DateTime @default(now())
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id])
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
 
   @@index([userId])
   @@index([active, period])
