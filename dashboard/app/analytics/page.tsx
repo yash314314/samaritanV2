@@ -34,6 +34,7 @@ import {
   LayoutDashboard,
   Focus,
   ShieldAlert,
+  X,
 } from "lucide-react";
 import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 import AppCategoryTags from "../../components/AppCategoryTags";
@@ -276,6 +277,25 @@ interface HeatmapBucket {
 
 type HeatmapDay = Record<number, HeatmapBucket>;
 type HeatmapResponse = Record<string, HeatmapDay>;
+
+const EMPTY_HEATMAP_BUCKET: HeatmapBucket = {
+  score: 0,
+  productivity: 0,
+  duration: 0,
+  trackedMinutes: 0,
+  idleMinutes: 0,
+  dominantApp: null,
+  dominantCategory: null,
+  dominantIntent: null,
+  topApps: [],
+  categoryBreakdown: [],
+  intentBreakdown: [],
+};
+
+interface SelectedHeatmapCell {
+  date: string;
+  hour: number;
+}
 
 // ═══════════════════════════════════════════════════════════
 //  TIMELINE TYPES — matches /analytics/timeline output format
@@ -615,7 +635,217 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
 //  HEATMAP — Force visible colour variations + rich tooltip
 // ═══════════════════════════════════════════════════════════
 
-const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
+const HeatmapHourModal = ({
+  selection,
+  bucket,
+  sessions,
+  onClose,
+}: {
+  selection: SelectedHeatmapCell | null;
+  bucket: HeatmapBucket | null;
+  sessions: TimelineSession[];
+  onClose: () => void;
+}) => {
+  useEffect(() => {
+    if (!selection) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, selection]);
+
+  const hourWindow = useMemo(() => {
+    if (!selection) return null;
+    const start = new Date(
+      `${selection.date}T${selection.hour.toString().padStart(2, "0")}:00:00+05:30`
+    ).getTime();
+    return { start, end: start + 60 * 60 * 1000 };
+  }, [selection]);
+
+  const overlappingSessions = useMemo(() => {
+    if (!hourWindow) return [];
+    return sessions
+      .map((session) => {
+        const start = new Date(session.start).getTime();
+        const parsedEnd = new Date(session.end).getTime();
+        const end = Number.isFinite(parsedEnd) ? parsedEnd : start + session.duration;
+        const overlapMs = Math.max(0, Math.min(end, hourWindow.end) - Math.max(start, hourWindow.start));
+        const items = (session.items ?? []).flatMap((item) => {
+          const itemStart = new Date(item.start).getTime();
+          const itemEnd = new Date(item.end).getTime();
+          const visibleStart = Math.max(itemStart, hourWindow.start);
+          const visibleEnd = Math.min(itemEnd, hourWindow.end);
+          if (visibleStart >= visibleEnd) return [];
+          return [{
+            ...item,
+            start: new Date(visibleStart).toISOString(),
+            end: new Date(visibleEnd).toISOString(),
+            duration: visibleEnd - visibleStart,
+          }];
+        });
+        return { session, overlapMs, items };
+      })
+      .filter(({ overlapMs }) => overlapMs > 0)
+      .sort((left, right) => new Date(right.session.start).getTime() - new Date(left.session.start).getTime());
+  }, [hourWindow, sessions]);
+
+  if (!selection || !bucket) return null;
+
+  const nextHour = (selection.hour + 1) % 24;
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-3 backdrop-blur-md sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="analytics-heatmap-hour-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="samaritan-card relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden border-purple-500/35 shadow-2xl shadow-black/80">
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-zinc-800 bg-zinc-950/95 px-4 py-4 backdrop-blur sm:px-6">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase text-zinc-500">{selection.date}</p>
+            <h2 id="analytics-heatmap-hour-title" className="truncate text-lg font-bold text-white sm:text-xl">
+              {selection.hour.toString().padStart(2, "0")}:00 - {nextHour.toString().padStart(2, "0")}:00
+              <span className="ml-2 text-sm font-normal text-zinc-500">IST</span>
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+            aria-label="Close hour details"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+          <section className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-zinc-800 bg-zinc-800 sm:grid-cols-4">
+            {[
+              ["Tracked", formatHMS(bucket.duration / 1000), "text-white"],
+              ["Raw score", round2(bucket.score), "text-purple-400"],
+              ["Productivity", `${round0(bucket.productivity)}%`, "text-emerald-400"],
+              ["Idle", `${round1(bucket.idleMinutes)}m`, "text-rose-400"],
+            ].map(([label, value, color]) => (
+              <div key={label} className="min-w-0 bg-zinc-950 px-3 py-4 sm:px-4">
+                <p className="truncate text-[10px] font-medium uppercase text-zinc-500">{label}</p>
+                <p className={`mt-1 truncate font-mono text-lg font-bold ${color}`}>{value}</p>
+              </div>
+            ))}
+          </section>
+
+          {bucket.categoryBreakdown?.length > 0 && (
+            <section>
+              <h3 className="mb-3 text-sm font-semibold text-zinc-300">Category allocation</h3>
+              <div className="space-y-2">
+                {bucket.categoryBreakdown.map((category) => (
+                  <div key={category.name} className="grid grid-cols-[minmax(80px,140px)_1fr_auto] items-center gap-3">
+                    <span className="truncate text-xs text-zinc-400">{category.name}</span>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                      <div className="h-full rounded-full bg-purple-500" style={{ width: `${clamp(category.percentage, 0, 100)}%` }} />
+                    </div>
+                    <span className="w-16 text-right font-mono text-xs text-zinc-500">{category.minutes}m</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {bucket.topApps?.length > 0 && (
+            <section>
+              <h3 className="mb-3 text-sm font-semibold text-zinc-300">Apps in this hour</h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {bucket.topApps.map((app) => (
+                  <div key={app.name} className="flex min-w-0 items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/45 p-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-800 text-xs font-bold text-zinc-400">
+                      {app.name[0]}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-zinc-200">{app.name}</p>
+                      <AppCategoryTags app={app} limit={3} />
+                    </div>
+                    <span className="shrink-0 font-mono text-xs text-zinc-500">{app.minutes}m</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-zinc-300">Activity log</h3>
+              <span className="text-xs text-zinc-500">{overlappingSessions.length} sessions</span>
+            </div>
+
+            {overlappingSessions.length > 0 ? (
+              <div className="space-y-3">
+                {overlappingSessions.map(({ session, overlapMs, items }, sessionIndex) => (
+                  <article key={`${session.appName}-${session.start}-${sessionIndex}`} className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/35">
+                    <div className="flex min-w-0 items-start gap-3 p-3">
+                      {session.iconUrl ? (
+                        <img src={session.iconUrl} alt="" className="h-8 w-8 shrink-0 rounded-lg bg-zinc-800/60 object-contain p-0.5" />
+                      ) : (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-800 text-xs font-bold text-zinc-400">
+                          {session.appName[0]}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-medium text-zinc-200">{session.appName}</p>
+                          <span className="rounded-full border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
+                            {session.category}
+                          </span>
+                        </div>
+                        <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                          {formatTimeIST(session.start)} - {formatTimeIST(session.end)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-mono text-xs text-zinc-300">{formatHMS(overlapMs / 1000)}</p>
+                        <p className="text-[10px] text-zinc-600">in this hour</p>
+                      </div>
+                    </div>
+
+                    {items.length > 0 && (
+                      <div className="divide-y divide-zinc-800/60 border-t border-zinc-800 bg-zinc-950/35">
+                        {items.map((item, itemIndex) => (
+                          <div key={`${item.start}-${itemIndex}`} className="flex min-w-0 items-center gap-2 px-3 py-2 pl-8 sm:pl-14">
+                            <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{item.title}</span>
+                            {item.domain && <span className="hidden max-w-40 truncate text-[10px] text-zinc-600 sm:block">{item.domain}</span>}
+                            <span className="shrink-0 font-mono text-[10px] text-zinc-600">
+                              {formatTimeIST(item.start)} - {formatTimeIST(item.end)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-zinc-800 px-4 py-8 text-center">
+                <Clock className="mx-auto mb-2 h-5 w-5 text-zinc-600" />
+                <p className="text-sm text-zinc-400">No individual activity sessions were recorded in this hour.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const HeatmapGrid = ({
+  data,
+  onSelect,
+}: {
+  data: HeatmapResponse;
+  onSelect: (selection: SelectedHeatmapCell) => void;
+}) => {
   const dates = useMemo(() => Object.keys(data).sort(), [data]);
   const hours = HEATMAP_HOURS;
 
@@ -708,11 +938,17 @@ const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
                 const score = bucket?.score ?? 0;
                 return (
                   <div key={h} className="flex-1 px-0.5">
-                    <div
-                      className={`h-6 rounded-sm ${getColor(
+                    <button
+                      type="button"
+                      className={`relative block h-6 w-full cursor-pointer rounded-sm ${getColor(
                         score
-                      )} cursor-crosshair transition-all hover:ring-2 hover:ring-purple-400/50 relative`}
+                      )} transition-all hover:ring-2 hover:ring-purple-400/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400`}
                       onMouseEnter={(e) => handleMouseEnter(date, h, bucket, e)}
+                      onClick={() => {
+                        setHovered(null);
+                        onSelect({ date, hour: h });
+                      }}
+                      aria-label={`${date}, ${h.toString().padStart(2, "0")}:00 IST, open activity details${bucket?.duration ? "" : ", no activity recorded"}`}
                     />
                   </div>
                 );
@@ -776,6 +1012,7 @@ export default function AnalyticsPage() {
   const [daily, setDaily] = useState<DailyAnalytics | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapResponse>({});
   const [timeline, setTimeline] = useState<TimelineSession[] | null>(null);
+  const [selectedHeatmapCell, setSelectedHeatmapCell] = useState<SelectedHeatmapCell | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1475,9 +1712,9 @@ export default function AnalyticsPage() {
                 <Card className="dashboard-grid-card col-span-12 min-h-[420px] p-4">
                   <SectionTitle icon={Thermometer} title="Activity Heatmap (IST Hours)" />
                   <p className="text-sm text-zinc-500 mb-4">
-                    Raw productivity score by hour. Colors normalized to actual min/max range. Hover cells for detail.
+                    Raw productivity score by hour. Hover for a summary or click a cell to inspect its activity log.
                   </p>
-                  <HeatmapGrid data={heatmap} />
+                  <HeatmapGrid data={heatmap} onSelect={setSelectedHeatmapCell} />
                 </Card>
 
                 {/* ── Recent Hourly Breakdown — exact timeline logs grouped by IST hour ── */}
@@ -1493,6 +1730,13 @@ export default function AnalyticsPage() {
           </>
         )}
       </div>
+
+      <HeatmapHourModal
+        selection={selectedHeatmapCell}
+        bucket={selectedHeatmapCell ? heatmap[selectedHeatmapCell.date]?.[selectedHeatmapCell.hour] ?? EMPTY_HEATMAP_BUCKET : null}
+        sessions={timeline ?? []}
+        onClose={() => setSelectedHeatmapCell(null)}
+      />
     </div>
   );
 }

@@ -12,7 +12,6 @@ import {
   Clock,
   Zap,
   TrendingUp,
-  ArrowLeft,
   Loader2,
   Activity,
   Eye,
@@ -64,6 +63,24 @@ interface HeatmapBucket {
 
 type HeatmapDay = Record<number, HeatmapBucket>;
 type HeatmapResponse = Record<string, HeatmapDay>;
+
+const EMPTY_HEATMAP_BUCKET: HeatmapBucket = {
+  score: 0,
+  productivity: 0,
+  focus: 0,
+  duration: 0,
+  idleRatio: 0,
+  colorValue: 0,
+  colorMode: "score",
+  trackedMinutes: 0,
+  idleMinutes: 0,
+  dominantApp: null,
+  dominantCategory: null,
+  dominantIntent: null,
+  topApps: [],
+  categoryBreakdown: [],
+  intentBreakdown: [],
+};
 
 interface TimelineItem {
   title: string;
@@ -522,10 +539,12 @@ const HeatmapGrid = ({
                 if (isEmpty && !showEmpty) return <div key={h} className="flex-1 px-0.5" />;
                 return (
                   <div key={h} className="flex-1 px-0.5">
-                    <div
-                      className={`h-6 rounded-sm ${getColor(bucket)} cursor-crosshair transition-all hover:ring-2 hover:ring-white/30 relative`}
+                    <button
+                      type="button"
+                      className={`relative block h-6 w-full cursor-pointer rounded-sm ${getColor(bucket)} transition-all hover:ring-2 hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400`}
                       onMouseEnter={(e) => handleMouseEnter(date, h, bucket, e)}
-                      onClick={() => bucket && onCellClick(date, h, bucket)}
+                      onClick={() => onCellClick(date, h, bucket ?? EMPTY_HEATMAP_BUCKET)}
+                      aria-label={`${date}, ${h.toString().padStart(2, "0")}:00 IST, open activity details${bucket ? "" : ", no activity recorded"}`}
                     />
                   </div>
                 );
@@ -770,34 +789,81 @@ const HourDetailDrawer = ({
   bucket: HeatmapBucket | null;
   timelineSessions: TimelineSession[];
 }) => {
-  if (!open || !bucket) return null;
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
-  const filteredSessions = timelineSessions
-    .filter((s) => {
-      const sessionDate = getISTDateKey(s.start);
-      const sessionHour = getISTHour(s.start);
-      return sessionDate === date && sessionHour === hour;
-    })
-    .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+  const filteredSessions = useMemo(() => {
+    if (!open || !date) return [];
+    const hourStart = new Date(`${date}T${hour.toString().padStart(2, "0")}:00:00+05:30`).getTime();
+    const hourEnd = hourStart + 60 * 60 * 1000;
+
+    return timelineSessions
+      .flatMap((session) => {
+        const sessionStart = new Date(session.start).getTime();
+        const sessionEnd = new Date(session.end).getTime();
+        const visibleStart = Math.max(sessionStart, hourStart);
+        const visibleEnd = Math.min(sessionEnd, hourEnd);
+        if (visibleStart >= visibleEnd) return [];
+
+        const items = (session.items ?? []).flatMap((item) => {
+          const itemStart = new Date(item.start).getTime();
+          const itemEnd = new Date(item.end).getTime();
+          const visibleItemStart = Math.max(itemStart, hourStart);
+          const visibleItemEnd = Math.min(itemEnd, hourEnd);
+          if (visibleItemStart >= visibleItemEnd) return [];
+          return [{
+            ...item,
+            start: new Date(visibleItemStart).toISOString(),
+            end: new Date(visibleItemEnd).toISOString(),
+            duration: visibleItemEnd - visibleItemStart,
+          }];
+        });
+
+        return [{
+          ...session,
+          start: new Date(visibleStart).toISOString(),
+          end: new Date(visibleEnd).toISOString(),
+          duration: visibleEnd - visibleStart,
+          items,
+        }];
+      })
+      .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+  }, [date, hour, open, timelineSessions]);
+
+  if (!open || !bucket) return null;
+  const nextHour = (hour + 1) % 24;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-zinc-950 border-l border-zinc-800 h-full overflow-y-auto shadow-2xl">
-        <div className="sticky top-0 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-center justify-between z-10">
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-3 backdrop-blur-md sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="heatmap-hour-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="samaritan-card relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden border-purple-500/35 shadow-2xl shadow-black/80">
+        <div className="z-10 flex shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-4 py-4 backdrop-blur sm:px-6">
           <div>
             <p className="text-zinc-500 text-xs uppercase tracking-wider">{date}</p>
-            <h2 className="text-xl font-bold text-white">
-              {hour.toString().padStart(2, "0")}:00 – {(hour + 1).toString().padStart(2, "0")}:00 <span className="text-zinc-500 text-base font-normal">IST</span>
+            <h2 id="heatmap-hour-title" className="text-xl font-bold text-white">
+              {hour.toString().padStart(2, "0")}:00 - {nextHour.toString().padStart(2, "0")}:00 <span className="text-zinc-500 text-base font-normal">IST</span>
             </h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors">
-            <ArrowLeft className="w-5 h-5" />
+          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors" aria-label="Close hour details">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Card className="p-4">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Duration</p>
               <p className="text-2xl font-bold text-white mt-1">{formatHMS(bucket.duration / 1000)}</p>
@@ -899,6 +965,13 @@ const HourDetailDrawer = ({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {filteredSessions.length === 0 && (
+            <div className="rounded-lg border border-dashed border-zinc-800 px-4 py-8 text-center">
+              <Clock className="mx-auto mb-2 h-5 w-5 text-zinc-600" />
+              <p className="text-sm text-zinc-400">No individual activity sessions were recorded in this hour.</p>
             </div>
           )}
         </div>

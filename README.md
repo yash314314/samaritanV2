@@ -72,7 +72,13 @@ npm --prefix dashboard install
 npm --prefix desktop install
 ```
 
-The root package currently does not orchestrate the three applications.
+From the repository root, the PowerShell launcher starts PostgreSQL when needed, applies migrations, bootstraps the fixed local user, and starts the API, dashboard, and Electron tracker:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-samaritan.ps1
+```
+
+Use `-InstallDependencies` on the first run if any `node_modules` directory is missing. Add `-OpenDashboard` to open the browser automatically, `-SkipDatabase` when PostgreSQL is managed separately, `-SkipSetup` to bypass migration and bootstrap checks, or `-SkipTracker` when only the web stack is needed.
 
 ### 2. Start PostgreSQL
 
