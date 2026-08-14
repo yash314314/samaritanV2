@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import { emitGoalChanged } from '../websocket/broadcaster';
 import { hydrateGoalProgress, listGoalsWithProgress } from '../services/goalProgressService';
+import { dispatchWebhookEvent } from '../services/webhookService';
 
 const router = Router();
 
@@ -69,6 +70,8 @@ router.post('/', async (req, res) => {
     });
     const hydrated = await hydrateGoalProgress(goal);
     emitGoalChanged(userId, 'created', { goal: hydrated });
+    void dispatchWebhookEvent(userId, 'goal.changed', { action: 'created', goal: hydrated }, goal.id)
+      .catch((error) => console.error('Goal webhook dispatch failed:', error));
     res.json(hydrated);
   } catch (error) {
     console.error('Goal creation error:', error);
@@ -121,6 +124,8 @@ router.patch('/:id', async (req, res) => {
     });
     const hydrated = await hydrateGoalProgress(goal);
     emitGoalChanged(goal.userId, 'updated', { goal: hydrated });
+    void dispatchWebhookEvent(goal.userId, 'goal.changed', { action: 'updated', goal: hydrated })
+      .catch((error) => console.error('Goal webhook dispatch failed:', error));
     res.json(hydrated);
   } catch (error) {
     console.error('Goal update error:', error);
@@ -135,6 +140,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const goal = await prisma.goal.delete({ where: { id } });
     emitGoalChanged(goal.userId, 'deleted', { id });
+    void dispatchWebhookEvent(goal.userId, 'goal.changed', { action: 'deleted', id }, `${id}:deleted`)
+      .catch((error) => console.error('Goal webhook dispatch failed:', error));
     res.json({ success: true });
   } catch (error) {
     console.error('Goal deletion error:', error);

@@ -28,12 +28,12 @@ import {
 } from "lucide-react";
 import { addMonths, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
 
-import { calendarApi, fetchHeatmap, fetchTimeline, projectsApi } from "@/lib/api";
+import { calendarApi, clearApiCache, fetchHeatmap, fetchTimeline, projectsApi } from "@/lib/api";
 import { CalendarTimeGrid, type TimeGridEvent } from "@/components/calendar/CalendarTimeGrid";
 import { CalendarAgenda } from "@/components/calendar/CalendarAgenda";
 import { CalendarReviewInbox } from "@/components/calendar/CalendarReviewInbox";
-import { CalendarInsights, type CalendarMeetingInsights } from "@/components/calendar/CalendarInsights";
-import type { CalendarIntelligence } from "@/components/calendar/CalendarIntelligencePanel";
+import { CalendarInsights, type CalendarMeetingInsights, type CalendarWorkHoursUtilization } from "@/components/calendar/CalendarInsights";
+import type { CalendarIntelligence, CalendarSlotSuggestion } from "@/components/calendar/CalendarIntelligencePanel";
 import {
   CalendarReminderBell,
   CalendarReminderToast,
@@ -62,6 +62,13 @@ const COMMON_TIMEZONES = [
   "Asia/Tokyo",
   "Australia/Sydney",
 ];
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DEFAULT_WORK_HOURS: CalendarWorkHour[] = WEEKDAY_NAMES.map((_, dayOfWeek) => ({
+  dayOfWeek,
+  enabled: dayOfWeek >= 1 && dayOfWeek <= 5,
+  startMinute: 9 * 60,
+  endMinute: 18 * 60,
+}));
 
 interface CalendarEvent {
   id: string;
@@ -134,6 +141,14 @@ interface TrackingSettings {
   offlineMeetingMinutes: number;
   confirmationThresholdSeconds: number;
   timezone: string;
+  workHours: CalendarWorkHour[];
+}
+
+interface CalendarWorkHour {
+  dayOfWeek: number;
+  enabled: boolean;
+  startMinute: number;
+  endMinute: number;
 }
 
 interface Project {
@@ -159,6 +174,16 @@ function dateKey(day: Date) {
 
 function inputDate(day: Date, hour: number) {
   return floatingCalendarDateTime(day, hour * 60);
+}
+
+function minuteTime(value: number) {
+  const minute = Math.max(0, Math.min(1439, Math.round(value)));
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+}
+
+function timeMinute(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
 }
 
 function nextDateKeyValue(value: string) {
@@ -278,6 +303,7 @@ export default function CalendarPage() {
   const [showModal, setShowModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [trackingSettingsError, setTrackingSettingsError] = useState("");
   const [showReminderCenter, setShowReminderCenter] = useState(false);
   const [showReviewInbox, setShowReviewInbox] = useState(false);
   const [reminders, setReminders] = useState<CalendarReminder[]>([]);
@@ -329,11 +355,19 @@ export default function CalendarPage() {
   const [calendarIntelligence, setCalendarIntelligence] = useState<CalendarIntelligence>({
     timezone: "Asia/Kolkata",
     workday: { startHour: 9, endHour: 18 },
+    workHours: DEFAULT_WORK_HOURS,
     summary: { pressureScore: 0, pressureLevel: "low", conflictCount: 0, compressedGapCount: 0, overloadedDayCount: 0, focusWindowCount: 0, availableFocusMs: 0 },
     days: [],
     conflicts: [],
     focusWindows: [],
     recommendations: [],
+  });
+  const [workHoursUtilization, setWorkHoursUtilization] = useState<CalendarWorkHoursUtilization>({
+    timezone: "Asia/Kolkata",
+    from: "",
+    to: "",
+    summary: { scheduledMs: 0, elapsedScheduledMs: 0, trackedMs: 0, withinWorkHoursMs: 0, offHoursMs: 0, utilizationPercent: 0, adherencePercent: 0, scheduledDayCount: 0, elapsedDayCount: 0, onTargetDayCount: 0, offHoursDayCount: 0 },
+    days: [],
   });
   const [nowMs, setNowMs] = useState(Date.now());
   const [sessionForm, setSessionForm] = useState({
@@ -446,13 +480,14 @@ export default function CalendarPage() {
     setLoadingReview(true);
     setCalendarError("");
     try {
-      const [eventData, heatmapData, sessionData, summaryData, insightsData, intelligenceData] = await Promise.all([
+      const [eventData, heatmapData, sessionData, summaryData, insightsData, intelligenceData, utilizationData] = await Promise.all([
         calendarApi.list(USER_ID, calendarFrom, calendarTo),
         fetchHeatmap(USER_ID, calendarFrom, calendarTo, "focus"),
         calendarApi.sessions(USER_ID, calendarFrom, calendarTo),
         calendarApi.sessionSummary(USER_ID, insightFrom, insightTo),
         calendarApi.meetingInsights(USER_ID, insightFrom, insightTo),
         calendarApi.intelligence(USER_ID, insightFrom, insightTo),
+        calendarApi.workHoursUtilization(USER_ID, insightFrom, insightTo),
       ]);
       setEvents(Array.isArray(eventData) ? eventData : []);
       setMonthHeatmap(heatmapData ?? {});
@@ -460,6 +495,7 @@ export default function CalendarPage() {
       setSessionSummary(summaryData);
       setMeetingInsights(insightsData);
       setCalendarIntelligence(intelligenceData);
+      setWorkHoursUtilization(utilizationData);
     } catch (error) {
       setCalendarError(error instanceof Error ? error.message : "Calendar sync failed");
       throw error;
@@ -544,6 +580,7 @@ export default function CalendarPage() {
       next[index] = session;
       return next;
     });
+    clearApiCache();
     loadMonth().catch(console.error);
   }, [loadMonth]);
 
@@ -657,6 +694,25 @@ export default function CalendarPage() {
       busy: true,
       focusAutoStart: true,
     }));
+  }
+
+  async function findCalendarSlot(eventId: string) {
+    return calendarApi.slotSuggestion(USER_ID, eventId) as Promise<CalendarSlotSuggestion>;
+  }
+
+  async function applyCalendarSlot(suggestion: CalendarSlotSuggestion) {
+    const event = events.find((item) => item.id === suggestion.eventId);
+    if (!event) throw new Error("Calendar event is no longer available");
+    await calendarApi.update(event.id, {
+      userId: USER_ID,
+      startAt: suggestion.startAt,
+      endAt: suggestion.endAt,
+      ...(suggestion.recurrenceScope ? { recurrenceScope: suggestion.recurrenceScope } : {}),
+    });
+    const movedDayKey = calendarDateKey(suggestion.startAt, calendarTimeZone);
+    const [year, month, day] = movedDayKey.split("-").map(Number);
+    selectDay(new Date(year, month - 1, day));
+    await loadMonth();
   }
 
   async function moveCalendarEvent(event: TimeGridEvent, day: Date, startMinute: number) {
@@ -862,10 +918,15 @@ export default function CalendarPage() {
   async function saveTrackingSettings(event: React.FormEvent) {
     event.preventDefault();
     if (!trackingSettings) return;
-    const updated = await calendarApi.updateTrackingSettings(USER_ID, trackingSettings);
-    setTrackingSettings(updated);
-    setShowSettings(false);
-    await loadMonth();
+    setTrackingSettingsError("");
+    try {
+      const updated = await calendarApi.updateTrackingSettings(USER_ID, trackingSettings);
+      setTrackingSettings(updated);
+      setShowSettings(false);
+      await loadMonth();
+    } catch (error) {
+      setTrackingSettingsError(error instanceof Error ? error.message : "Could not save calendar settings");
+    }
   }
 
   const monthSummaries = days
@@ -975,7 +1036,10 @@ export default function CalendarPage() {
                 <Clock3 className="h-4 w-4" />
               </button>
               <button
-                onClick={() => setShowSettings(true)}
+                onClick={() => {
+                  setTrackingSettingsError("");
+                  setShowSettings(true);
+                }}
                 className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
                 title="Calendar tracking settings"
               >
@@ -1379,7 +1443,14 @@ export default function CalendarPage() {
           </div>
         ) : calendarView === "insights" ? (
           <div className="samaritan-card min-h-0 overflow-hidden p-0">
-            <CalendarInsights insights={meetingInsights} intelligence={calendarIntelligence} onProtectFocus={protectFocusWindow} />
+            <CalendarInsights
+              insights={meetingInsights}
+              intelligence={calendarIntelligence}
+              utilization={workHoursUtilization}
+              onProtectFocus={protectFocusWindow}
+              onFindSlot={findCalendarSlot}
+              onApplySlot={applyCalendarSlot}
+            />
           </div>
         ) : (
           <div className="samaritan-card min-h-0 overflow-hidden p-0">
@@ -1389,6 +1460,7 @@ export default function CalendarPage() {
               events={visibleEvents}
               sessions={calendarSessions}
               timeZone={calendarTimeZone}
+              workHours={trackingSettings?.workHours ?? DEFAULT_WORK_HOURS}
               onSelectDay={selectDay}
               onCreateRange={openCreateRange}
               onEditEvent={(event) => openEdit(event as CalendarEvent)}
@@ -1562,7 +1634,7 @@ export default function CalendarPage() {
 
         {showSettings && trackingSettings && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-            <form onSubmit={saveTrackingSettings} className="samaritan-card max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
+            <form onSubmit={saveTrackingSettings} className="samaritan-card max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[10px] font-semibold uppercase text-purple-400">Automation</div>
@@ -1594,6 +1666,54 @@ export default function CalendarPage() {
                     {timezoneOptions.map((zone) => <option key={zone} value={zone}>{zone.replaceAll("_", " ")}</option>)}
                   </select>
                 </div>
+                <div className="sm:col-span-2">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <label className="text-xs text-zinc-400">Work hours</label>
+                    <span className="text-[10px] text-zinc-600">Used for focus windows and conflict repair</span>
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+                    {(trackingSettings.workHours ?? DEFAULT_WORK_HOURS).map((workday) => (
+                      <div key={workday.dayOfWeek} className="flex flex-wrap items-center gap-2 border-b border-zinc-900 px-3 py-2 last:border-b-0">
+                        <input
+                          type="checkbox"
+                          checked={workday.enabled}
+                          onChange={(event) => setTrackingSettings({
+                            ...trackingSettings,
+                            workHours: (trackingSettings.workHours ?? DEFAULT_WORK_HOURS).map((item) => item.dayOfWeek === workday.dayOfWeek ? { ...item, enabled: event.target.checked } : item),
+                          })}
+                          aria-label={`Enable ${WEEKDAY_NAMES[workday.dayOfWeek]}`}
+                          className="accent-purple-500"
+                        />
+                        <span className={`min-w-20 flex-1 truncate text-xs ${workday.enabled ? "text-zinc-300" : "text-zinc-600"}`}>{WEEKDAY_NAMES[workday.dayOfWeek]}</span>
+                        <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 pl-6 sm:w-[230px] sm:pl-0">
+                          <input
+                            type="time"
+                            value={minuteTime(workday.startMinute)}
+                            disabled={!workday.enabled}
+                            onChange={(event) => setTrackingSettings({
+                              ...trackingSettings,
+                              workHours: (trackingSettings.workHours ?? DEFAULT_WORK_HOURS).map((item) => item.dayOfWeek === workday.dayOfWeek ? { ...item, startMinute: timeMinute(event.target.value) } : item),
+                            })}
+                            aria-label={`${WEEKDAY_NAMES[workday.dayOfWeek]} starts`}
+                            className="min-w-0 rounded border border-zinc-800 bg-black px-2 py-1.5 text-xs disabled:opacity-35"
+                          />
+                          <span className="text-[10px] text-zinc-700">to</span>
+                          <input
+                            type="time"
+                            value={minuteTime(workday.endMinute)}
+                            disabled={!workday.enabled}
+                            onChange={(event) => setTrackingSettings({
+                              ...trackingSettings,
+                              workHours: (trackingSettings.workHours ?? DEFAULT_WORK_HOURS).map((item) => item.dayOfWeek === workday.dayOfWeek ? { ...item, endMinute: timeMinute(event.target.value) } : item),
+                            })}
+                            aria-label={`${WEEKDAY_NAMES[workday.dayOfWeek]} ends`}
+                            className="min-w-0 rounded border border-zinc-800 bg-black px-2 py-1.5 text-xs disabled:opacity-35"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Ad-hoc detection</label>
                   <div className="flex h-[38px] items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 px-3">
@@ -1616,6 +1736,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               </div>
+              {trackingSettingsError && <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{trackingSettingsError}</div>}
               <div className="mt-6 flex gap-3">
                 <button type="button" onClick={() => setShowSettings(false)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">Cancel</button>
                 <button type="submit" className="flex-1 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600">Save settings</button>

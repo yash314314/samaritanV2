@@ -1,5 +1,6 @@
 import type { Goal } from "@prisma/client";
 import { prisma } from "../prisma";
+import { getProjectTimeRange } from "./projectTimeService";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -62,6 +63,12 @@ async function progressForGoal(goal: Goal) {
         startedAt: { gte: start, lte: end },
       },
     });
+  }
+
+  if (goal.projectId) {
+    const totals = await getProjectTimeRange(goal.userId, start, new Date(end.getTime() + 1));
+    const minutes = totals.get(goal.projectId)?.minutes ?? 0;
+    return goal.type === "hours" ? minutes / 60 : minutes;
   }
 
   const activities = await prisma.activity.findMany({

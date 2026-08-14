@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Target, Clock, Calendar } from "lucide-react";
+import { useCallback, useState, useEffect } from "react";
+import { CalendarDays, Clock3, Pencil, Plus, Trash2, Video } from "lucide-react";
 import { projectsApi, projectRulesApi } from "@/lib/api";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
@@ -14,7 +15,17 @@ interface Project {
   weeklyHourGoal: number;
   goals?: { id: string }[];
   rules?: { id: string }[];
-  _count?: { time: number; events: number };
+  _count?: { time: number; events: number; calendarSessions: number };
+  timeSummary?: {
+    weekMinutes: number;
+    activityMinutes: number;
+    calendarMinutes: number;
+    goalMinutes: number;
+    progressPercent: number;
+    from: string;
+    to: string;
+    timezone: string;
+  };
 }
 
 interface ProjectRule {
@@ -35,11 +46,19 @@ export default function ProjectsPage() {
   const [form, setForm] = useState({ name: "", icon: "", color: "#8b5cf6", weeklyHourGoal: 10 });
   const [ruleForm, setRuleForm] = useState({ appName: "", domain: "", titleKeyword: "", matchType: "exact" });
 
-  function loadProjects() {
-    projectsApi.list(USER_ID).then((data) => setProjects(data)).catch(console.error);
-  }
+  const loadProjects = useCallback(async () => {
+    const data = await projectsApi.list(USER_ID);
+    setProjects(data as Project[]);
+  }, []);
 
-  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => {
+    projectsApi.list(USER_ID).then((data) => setProjects(data as Project[])).catch(console.error);
+  }, []);
+
+  useRealtimeRefresh(loadProjects, {
+    events: ["activity:new", "calendar:session.started", "calendar:session.updated", "calendar:session.ended", "calendar:changed", "project:changed"],
+    debounceMs: 700,
+  });
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -105,7 +124,7 @@ export default function ProjectsPage() {
           </button>
         </div>
 
-        <div className="dashboard-scroll-panel grid auto-rows-min grid-cols-1 gap-3 pr-1 md:grid-cols-2 xl:grid-cols-4">
+        <div className="dashboard-scroll-panel grid auto-rows-min grid-cols-1 gap-3 pr-1 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <div key={project.id} className="samaritan-card p-4">
               <div className="mb-3 flex items-start justify-between">
@@ -127,21 +146,42 @@ export default function ProjectsPage() {
                   </button>
                 </div>
               </div>
-              <div className="mb-3 grid grid-cols-1 gap-1.5">
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Target className="w-4 h-4" />
-                  <span>{project.weeklyHourGoal}h/week goal</span>
+              <div className="mb-3 border-y border-zinc-900 py-3">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase text-zinc-600">This week</div>
+                    <div className="mt-1 text-xl font-semibold text-zinc-100">{((project.timeSummary?.weekMinutes ?? 0) / 60).toFixed(1)}h</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium" style={{ color: project.color }}>{project.timeSummary?.progressPercent ?? 0}%</div>
+                    <div className="text-[10px] text-zinc-600">of {project.weeklyHourGoal}h goal</div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Clock className="w-4 h-4" />
-                  <span>{project._count?.time || 0} time entries</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-zinc-400">
-                  <Calendar className="w-4 h-4" />
-                  <span>{project._count?.events || 0} events</span>
+                <div className="mt-2 h-1.5 overflow-hidden bg-zinc-900">
+                  <div
+                    className="h-full origin-left transition-all duration-700"
+                    style={{ width: `${Math.min(100, Math.max(0, project.timeSummary?.progressPercent ?? 0))}%`, backgroundColor: project.color }}
+                  />
                 </div>
               </div>
-              <button onClick={() => loadRules(project)} className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-sm transition-colors hover:bg-zinc-800">
+              <div className="mb-3 grid grid-cols-3 divide-x divide-zinc-900 text-center">
+                <div className="min-w-0 px-1">
+                  <Clock3 className="mx-auto h-3.5 w-3.5 text-purple-400" />
+                  <div className="mt-1 truncate text-xs font-medium text-zinc-300">{((project.timeSummary?.activityMinutes ?? 0) / 60).toFixed(1)}h</div>
+                  <div className="text-[9px] uppercase text-zinc-700">Activity</div>
+                </div>
+                <div className="min-w-0 px-1">
+                  <Video className="mx-auto h-3.5 w-3.5 text-cyan-400" />
+                  <div className="mt-1 truncate text-xs font-medium text-zinc-300">{((project.timeSummary?.calendarMinutes ?? 0) / 60).toFixed(1)}h</div>
+                  <div className="text-[9px] uppercase text-zinc-700">Sessions</div>
+                </div>
+                <div className="min-w-0 px-1">
+                  <CalendarDays className="mx-auto h-3.5 w-3.5 text-emerald-400" />
+                  <div className="mt-1 truncate text-xs font-medium text-zinc-300">{project._count?.events || 0}</div>
+                  <div className="text-[9px] uppercase text-zinc-700">Events</div>
+                </div>
+              </div>
+              <button onClick={() => loadRules(project)} className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-sm transition-colors hover:bg-zinc-900">
                 Manage Rules ({project.rules?.length || 0})
               </button>
             </div>

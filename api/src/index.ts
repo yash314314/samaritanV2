@@ -8,6 +8,9 @@ import projectRulesRoutes from './routes/projectRules';
 import calendarRoutes from './routes/calendar';
 import goalsRoutes from './routes/goals';
 import ratingsRoutes from './routes/ratings';
+import breaksRoutes from './routes/breaks';
+import distractionBlocksRoutes from './routes/distractionBlocks';
+import webhooksRoutes from './routes/webhooks';
 import cors from 'cors';
 import { startMinuteLogger } from "./services/minuteLogger";
 import { startSessionExpiryChecker } from './services/sessionExpiry';
@@ -15,6 +18,8 @@ import { startProjectTimeAggregation } from "./jobs/aggregateProjectTime";
 import { initWebSocket } from "./websocket/manager";
 import { startCalendarTrackingLifecycle } from "./services/calendarTrackingService";
 import { startCalendarReminderScheduler } from "./services/calendarReminderService";
+import { startSmartBreakLifecycle } from "./services/smartBreakService";
+import { startWebhookDispatcher } from "./services/webhookService";
 import "./websocket/handlers"; // Register WS message handlers
 
 const app = express();
@@ -35,6 +40,9 @@ app.use('/api/projects', projectRulesRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/ratings', ratingsRoutes);
+app.use('/api/breaks', breaksRoutes);
+app.use('/api/distraction-blocks', distractionBlocksRoutes);
+app.use('/api/webhooks', webhooksRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: "OK", ws: true });
@@ -50,4 +58,6 @@ server.listen(4000, () => {
   startProjectTimeAggregation();
   startCalendarTrackingLifecycle();
   startCalendarReminderScheduler();
+  startSmartBreakLifecycle();
+  startWebhookDispatcher();
 });

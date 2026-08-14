@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { getCurrentProjectWeek } from '../services/projectTimeService';
+import { emitProjectChanged } from '../websocket/broadcaster';
+import { dispatchWebhookEvent } from '../services/webhookService';
 
 const router = Router();
 
@@ -12,16 +15,35 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    const projects = await prisma.project.findMany({
-      where: { userId, active: true },
-      include: {
-        rules: true,
-        goals: { where: { active: true } },
-        _count: { select: { events: true, time: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(projects);
+    const [projects, week] = await Promise.all([
+      prisma.project.findMany({
+        where: { userId, active: true },
+        include: {
+          rules: true,
+          goals: { where: { active: true } },
+          _count: { select: { events: true, time: true, calendarSessions: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      getCurrentProjectWeek(userId),
+    ]);
+    res.json(projects.map((project) => {
+      const time = week.totals.get(project.id) ?? { minutes: 0, activityMinutes: 0, calendarMinutes: 0 };
+      const goalMinutes = Math.max(0, project.weeklyHourGoal * 60);
+      return {
+        ...project,
+        timeSummary: {
+          weekMinutes: Number(time.minutes.toFixed(1)),
+          activityMinutes: Number(time.activityMinutes.toFixed(1)),
+          calendarMinutes: Number(time.calendarMinutes.toFixed(1)),
+          goalMinutes,
+          progressPercent: goalMinutes > 0 ? Math.round((time.minutes / goalMinutes) * 100) : 0,
+          from: week.from,
+          to: week.to,
+          timezone: week.timezone,
+        },
+      };
+    }));
   } catch (error) {
     console.error('Projects fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
@@ -46,6 +68,9 @@ router.post('/', async (req, res) => {
         weeklyHourGoal: weeklyHourGoal || 10,
       },
     });
+    emitProjectChanged(userId, 'created', { project });
+    void dispatchWebhookEvent(userId, 'project.changed', { action: 'created', project }, project.id)
+      .catch((error) => console.error('Project webhook dispatch failed:', error));
     res.json(project);
   } catch (error) {
     console.error('Project creation error:', error);
@@ -69,6 +94,9 @@ router.patch('/:id', async (req, res) => {
         ...(active !== undefined && { active }),
       },
     });
+    emitProjectChanged(project.userId, 'updated', { project });
+    void dispatchWebhookEvent(project.userId, 'project.changed', { action: 'updated', project })
+      .catch((error) => console.error('Project webhook dispatch failed:', error));
     res.json(project);
   } catch (error) {
     console.error('Project update error:', error);
@@ -81,7 +109,10 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    await prisma.project.delete({ where: { id } });
+    const project = await prisma.project.delete({ where: { id } });
+    emitProjectChanged(project.userId, 'deleted', { id });
+    void dispatchWebhookEvent(project.userId, 'project.changed', { action: 'deleted', id }, `${id}:deleted`)
+      .catch((error) => console.error('Project webhook dispatch failed:', error));
     res.json({ success: true });
   } catch (error) {
     console.error('Project deletion error:', error);
@@ -90,4 +121,3 @@ router.delete('/:id', async (req, res) => {
 });
 
 export default router;
-

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, BrainCircuit, CalendarCheck2, ClockArrowUp, Gauge, TimerReset } from "lucide-react";
+import { Activity, BrainCircuit, BriefcaseBusiness, CalendarCheck2, ClockArrowUp, Gauge, MoonStar, Target, TimerReset } from "lucide-react";
 import { format, parseISO } from "date-fns";
-import { CalendarIntelligencePanel, type CalendarIntelligence } from "./CalendarIntelligencePanel";
+import { CalendarIntelligencePanel, type CalendarIntelligence, type CalendarSlotSuggestion } from "./CalendarIntelligencePanel";
 
 export type CalendarMeetingInsights = {
   scheduledMs: number;
@@ -21,6 +21,42 @@ export type CalendarMeetingInsights = {
   focusSampleCount: number;
   daily: Array<{ date: string; meetingMs: number; meetingCount: number; focusScore: number | null }>;
   projects: Array<{ id: string | null; name: string; color: string; durationMs: number; meetingCount: number }>;
+};
+
+export type CalendarWorkHoursUtilization = {
+  timezone: string;
+  from: string;
+  to: string;
+  summary: {
+    scheduledMs: number;
+    elapsedScheduledMs: number;
+    trackedMs: number;
+    withinWorkHoursMs: number;
+    offHoursMs: number;
+    utilizationPercent: number;
+    adherencePercent: number;
+    scheduledDayCount: number;
+    elapsedDayCount: number;
+    onTargetDayCount: number;
+    offHoursDayCount: number;
+  };
+  days: Array<{
+    date: string;
+    dayOfWeek: number;
+    enabled: boolean;
+    startMinute: number;
+    endMinute: number;
+    scheduledMs: number;
+    elapsedScheduledMs: number;
+    trackedMs: number;
+    withinWorkHoursMs: number;
+    offHoursMs: number;
+    utilizationPercent: number;
+    adherencePercent: number;
+    firstActivityAt: string | null;
+    lastActivityAt: string | null;
+    status: "off" | "future" | "upcoming" | "active" | "complete";
+  }>;
 };
 
 function durationLabel(ms: number | null) {
@@ -61,8 +97,118 @@ function Metric({
   );
 }
 
-export function CalendarInsights({ insights, intelligence, onProtectFocus }: { insights: CalendarMeetingInsights; intelligence: CalendarIntelligence; onProtectFocus: (window: CalendarIntelligence["focusWindows"][number]) => void }) {
-  const [view, setView] = useState<"outcomes" | "schedule">("outcomes");
+function activityWindow(day: CalendarWorkHoursUtilization["days"][number], timeZone: string) {
+  if (!day.firstActivityAt || !day.lastActivityAt) return "No tracked activity";
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${formatter.format(new Date(day.firstActivityAt))} - ${formatter.format(new Date(day.lastActivityAt))}`;
+}
+
+function WorkHoursPanel({ utilization }: { utilization: CalendarWorkHoursUtilization }) {
+  const visibleDays = utilization.days.filter((day) => day.enabled || day.trackedMs > 0);
+  const maxDayMs = Math.max(1, ...visibleDays.map((day) => Math.max(day.scheduledMs, day.trackedMs)));
+  const outsideDays = [...visibleDays]
+    .filter((day) => day.offHoursMs > 0)
+    .sort((left, right) => right.offHoursMs - left.offHoursMs);
+  const peakDay = [...visibleDays].sort((left, right) => right.trackedMs - left.trackedMs)[0];
+
+  return (
+    <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <section className="flex min-h-0 flex-col border-b border-zinc-800 p-4 lg:border-b-0 lg:border-r">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-200">Tracked against schedule</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-zinc-600">
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 bg-purple-500" />Within work hours</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 bg-amber-400" />Outside schedule</span>
+              <span className="flex items-center gap-1.5"><span className="h-px w-3 bg-zinc-500" />Scheduled capacity</span>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-sm font-semibold text-zinc-200">{durationLabel(utilization.summary.trackedMs)}</div>
+            <div className="text-[10px] text-zinc-600">tracked in range</div>
+          </div>
+        </div>
+
+        <div className="dashboard-scroll-panel flex min-h-0 flex-1 items-end gap-1 overflow-x-auto border-b border-zinc-800 px-1 pb-6 pt-3">
+          {visibleDays.map((day, index) => {
+            const scheduleHeight = (day.scheduledMs / maxDayMs) * 92;
+            const withinHeight = (day.withinWorkHoursMs / maxDayMs) * 92;
+            const offHeight = (day.offHoursMs / maxDayMs) * 92;
+            const date = parseISO(day.date);
+            return (
+              <div
+                key={day.date}
+                className="group relative h-full min-w-5 flex-1"
+                title={`${format(date, "EEE, MMM d")}: ${durationLabel(day.trackedMs)} tracked, ${durationLabel(day.scheduledMs)} scheduled, ${day.utilizationPercent}% utilized. ${activityWindow(day, utilization.timezone)}`}
+              >
+                {day.enabled && (
+                  <div className="absolute inset-x-0 border-t border-zinc-600/80" style={{ bottom: `${scheduleHeight}%` }} />
+                )}
+                <div
+                  className="absolute inset-x-[18%] bottom-0 min-h-px origin-bottom bg-purple-500/80 transition-colors duration-300 group-hover:bg-purple-400"
+                  style={{ height: `${withinHeight}%`, animation: `calendar-bar-rise 520ms ${Math.min(index, 20) * 24}ms ease-out both` }}
+                />
+                {offHeight > 0 && (
+                  <div
+                    className="absolute inset-x-[18%] bg-amber-400/80 transition-colors duration-300 group-hover:bg-amber-300"
+                    style={{ bottom: `${withinHeight}%`, height: `${offHeight}%`, animation: `calendar-bar-rise 520ms ${Math.min(index, 20) * 24 + 80}ms ease-out both` }}
+                  />
+                )}
+                <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[8px] text-zinc-700 group-hover:text-zinc-300">
+                  {format(date, "d")}
+                </span>
+              </div>
+            );
+          })}
+          {visibleDays.length === 0 && <div className="m-auto text-xs text-zinc-600">No schedule or activity in this range</div>}
+        </div>
+      </section>
+
+      <section className="flex min-h-0 flex-col p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-zinc-200">Schedule signals</h2>
+          <span className="text-[10px] text-zinc-600">15m threshold</span>
+        </div>
+        <div className="border-b border-zinc-800 pb-3">
+          <div className="text-[10px] uppercase text-zinc-600">Longest tracked day</div>
+          <div className="mt-1 flex items-center justify-between gap-3 text-xs">
+            <span className="truncate text-zinc-300">{peakDay ? format(parseISO(peakDay.date), "EEEE, MMM d") : "--"}</span>
+            <span className="shrink-0 font-medium text-purple-300">{durationLabel(peakDay?.trackedMs ?? 0)}</span>
+          </div>
+        </div>
+        <div className="mt-3 min-h-0 flex-1">
+          <div className="mb-2 text-[10px] uppercase text-zinc-600">Most outside schedule</div>
+          <div className="dashboard-scroll-panel space-y-1.5 pr-1">
+            {outsideDays.map((day) => (
+              <div key={day.date} className="flex items-center justify-between gap-3 border-b border-zinc-900 py-1.5 last:border-0">
+                <div className="min-w-0">
+                  <div className="truncate text-[11px] text-zinc-300">{format(parseISO(day.date), "EEE, MMM d")}</div>
+                  <div className="truncate text-[9px] text-zinc-700">{activityWindow(day, utilization.timezone)}</div>
+                </div>
+                <span className="shrink-0 text-[11px] font-medium text-amber-300">{durationLabel(day.offHoursMs)}</span>
+              </div>
+            ))}
+            {outsideDays.length === 0 && <div className="py-6 text-center text-xs text-zinc-600">All tracked time stayed within your schedule</div>}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function CalendarInsights({ insights, intelligence, utilization, onProtectFocus, onFindSlot, onApplySlot }: {
+  insights: CalendarMeetingInsights;
+  intelligence: CalendarIntelligence;
+  utilization: CalendarWorkHoursUtilization;
+  onProtectFocus: (window: CalendarIntelligence["focusWindows"][number]) => void;
+  onFindSlot: (eventId: string) => Promise<CalendarSlotSuggestion>;
+  onApplySlot: (suggestion: CalendarSlotSuggestion) => Promise<void>;
+}) {
+  const [view, setView] = useState<"outcomes" | "schedule" | "work-hours">("outcomes");
   const maxMeetingMs = Math.max(1, ...insights.daily.map((day) => day.meetingMs));
   const totalProjectMs = Math.max(1, insights.projects.reduce((sum, project) => sum + project.durationMs, 0));
   const variancePrefix = insights.varianceMs > 0 ? "+" : insights.varianceMs < 0 ? "-" : "";
@@ -70,7 +216,12 @@ export function CalendarInsights({ insights, intelligence, onProtectFocus }: { i
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden">
-      <div className="grid grid-cols-2 divide-x divide-y divide-zinc-800 border-b border-zinc-800 lg:grid-cols-4 lg:divide-y-0">
+      {view === "work-hours" ? <div className="grid grid-cols-2 divide-x divide-y divide-zinc-800 border-b border-zinc-800 lg:grid-cols-4 lg:divide-y-0">
+        <Metric icon={BriefcaseBusiness} label="Utilization" value={`${utilization.summary.utilizationPercent}%`} detail={`${durationLabel(utilization.summary.withinWorkHoursMs)} / ${durationLabel(utilization.summary.elapsedScheduledMs)} elapsed`} />
+        <Metric icon={Target} label="Schedule adherence" value={`${utilization.summary.adherencePercent}%`} detail={`${durationLabel(utilization.summary.offHoursMs)} outside schedule`} tone="emerald" />
+        <Metric icon={MoonStar} label="Off-hours days" value={`${utilization.summary.offHoursDayCount}`} detail="At least 15 minutes outside" tone="amber" />
+        <Metric icon={Gauge} label="On-target days" value={`${utilization.summary.onTargetDayCount}/${utilization.summary.elapsedDayCount}`} detail="At least 80% utilized" tone="cyan" />
+      </div> : <div className="grid grid-cols-2 divide-x divide-y divide-zinc-800 border-b border-zinc-800 lg:grid-cols-4 lg:divide-y-0">
         <Metric
           icon={CalendarCheck2}
           label="Attendance"
@@ -98,14 +249,15 @@ export function CalendarInsights({ insights, intelligence, onProtectFocus }: { i
           value={insights.focusDelta == null ? "--" : `${focusPrefix}${insights.focusDelta}`}
           detail={`${insights.focusSampleCount} before / after comparisons`}
         />
-      </div>
+      </div>}
 
-      <div className="flex items-center justify-between border-b border-zinc-800 bg-black px-4 py-2">
-        <div className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
-          <button type="button" onClick={() => setView("outcomes")} className={`rounded-md px-3 py-1.5 text-[11px] transition ${view === "outcomes" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>Meeting outcomes</button>
-          <button type="button" onClick={() => setView("schedule")} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] transition ${view === "schedule" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}><BrainCircuit className="h-3 w-3" />Schedule intelligence</button>
+      <div className="flex min-w-0 items-center justify-between border-b border-zinc-800 bg-black px-3 py-2 sm:px-4">
+        <div className="flex min-w-0 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+          <button type="button" onClick={() => setView("outcomes")} className={`shrink-0 rounded-md px-3 py-1.5 text-[11px] transition ${view === "outcomes" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>Meetings</button>
+          <button type="button" onClick={() => setView("schedule")} className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] transition ${view === "schedule" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}><BrainCircuit className="h-3 w-3" />Schedule</button>
+          <button type="button" onClick={() => setView("work-hours")} className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] transition ${view === "work-hours" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}><BriefcaseBusiness className="h-3 w-3" />Work hours</button>
         </div>
-        <span className="text-[9px] uppercase text-zinc-700">Explainable schedule analysis</span>
+        <span className="hidden text-[9px] uppercase text-zinc-700 lg:block">Explainable schedule analysis</span>
       </div>
 
       {view === "outcomes" ? <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -184,14 +336,19 @@ export function CalendarInsights({ insights, intelligence, onProtectFocus }: { i
             {insights.projects.length === 0 && <div className="py-8 text-center text-xs text-zinc-600">No project meetings</div>}
           </div>
         </section>
-      </div> : <CalendarIntelligencePanel intelligence={intelligence} onProtectFocus={onProtectFocus} />}
+      </div> : view === "schedule" ? <CalendarIntelligencePanel intelligence={intelligence} onProtectFocus={onProtectFocus} onFindSlot={onFindSlot} onApplySlot={onApplySlot} /> : <WorkHoursPanel utilization={utilization} />}
 
-      <div className="grid grid-cols-2 divide-x divide-zinc-800 border-t border-zinc-800 bg-zinc-950/55 text-center sm:grid-cols-4">
+      {view === "work-hours" ? <div className="grid grid-cols-2 divide-x divide-zinc-800 border-t border-zinc-800 bg-zinc-950/55 text-center sm:grid-cols-4">
+        <div className="px-3 py-2"><div className="text-sm font-semibold text-purple-300">{durationLabel(utilization.summary.withinWorkHoursMs)}</div><div className="text-[9px] uppercase text-zinc-600">In hours</div></div>
+        <div className="px-3 py-2"><div className="text-sm font-semibold text-amber-300">{durationLabel(utilization.summary.offHoursMs)}</div><div className="text-[9px] uppercase text-zinc-600">Off hours</div></div>
+        <div className="px-3 py-2"><div className="text-sm font-semibold text-cyan-300">{durationLabel(utilization.summary.elapsedScheduledMs)}</div><div className="text-[9px] uppercase text-zinc-600">Elapsed schedule</div></div>
+        <div className="px-3 py-2"><div className="text-sm font-semibold text-zinc-200">{utilization.summary.scheduledDayCount}</div><div className="text-[9px] uppercase text-zinc-600">Scheduled days</div></div>
+      </div> : <div className="grid grid-cols-2 divide-x divide-zinc-800 border-t border-zinc-800 bg-zinc-950/55 text-center sm:grid-cols-4">
         <div className="px-3 py-2"><div className="text-sm font-semibold text-amber-300">{insights.tentativeCount}</div><div className="text-[9px] uppercase text-zinc-600">Review</div></div>
         <div className="px-3 py-2"><div className="text-sm font-semibold text-rose-300">{insights.missedCount}</div><div className="text-[9px] uppercase text-zinc-600">Missed</div></div>
         <div className="px-3 py-2"><div className="text-sm font-semibold text-cyan-300">{durationLabel(insights.overrunMs)}</div><div className="text-[9px] uppercase text-zinc-600">Overrun</div></div>
         <div className="px-3 py-2"><div className="text-sm font-semibold text-zinc-200">{insights.meetingCount}</div><div className="text-[9px] uppercase text-zinc-600">Meetings</div></div>
-      </div>
+      </div>}
     </div>
   );
 }

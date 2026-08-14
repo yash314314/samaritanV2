@@ -12,6 +12,7 @@ import {
   emitInterventionTriggered,
 } from "../websocket/broadcaster";
 import { updateAndEmitGoalProgress } from "./goalProgressService";
+import { dispatchWebhookEvent } from "./webhookService";
 
 type StrictFocusInput = {
   userId: string;
@@ -290,6 +291,12 @@ export async function endDeepWorkSession(
     status,
     endedAt: new Date(),
   });
+  void dispatchWebhookEvent(
+    userId,
+    status === "completed" ? "focus_session.completed" : "focus_session.abandoned",
+    { session: updated },
+    id
+  ).catch((error) => console.error("Focus session webhook dispatch failed:", error));
 
   const goals = await updateAndEmitGoalProgress(userId);
   emitGoalProgress(userId, goals);
@@ -320,6 +327,12 @@ export async function completeDeepWorkSessionByTimer(id: string) {
     endedAt,
     reason: "planned_duration"
   });
+  void dispatchWebhookEvent(
+    session.userId,
+    "focus_session.completed",
+    { session: updated, reason: "planned_duration" },
+    id
+  ).catch((error) => console.error("Focus session webhook dispatch failed:", error));
 
   const goals = await updateAndEmitGoalProgress(session.userId);
   emitGoalProgress(session.userId, goals);

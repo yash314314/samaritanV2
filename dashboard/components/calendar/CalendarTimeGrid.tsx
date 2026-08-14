@@ -2,7 +2,16 @@
 
 import { useMemo, useRef, useState } from "react";
 import { addDays, format, isSameDay, startOfWeek } from "date-fns";
-import { Activity } from "lucide-react";
+import { Activity, BriefcaseBusiness, Clock3 } from "lucide-react";
+import {
+  calendarGridBlock,
+  calendarGridClampMinute,
+  calendarGridMinuteAt,
+  calendarGridRange,
+  type CalendarGridMode,
+  type CalendarGridRange,
+  type CalendarGridWorkHour,
+} from "@/lib/calendarGrid";
 import { layoutCalendarEvents } from "@/lib/calendarLayout";
 import { calendarDateKey, calendarIntervalSegment, calendarMinuteOfDay, calendarTimeLabel, type CalendarDaySegment } from "@/lib/calendarTime";
 
@@ -48,6 +57,7 @@ type Props = {
   events: TimeGridEvent[];
   sessions: TimeGridSession[];
   timeZone: string;
+  workHours: CalendarGridWorkHour[];
   onSelectDay: (day: Date) => void;
   onCreateRange: (day: Date, startMinute: number, endMinute: number) => void;
   onEditEvent: (event: TimeGridEvent) => void;
@@ -55,32 +65,18 @@ type Props = {
   onResizeEvent: (event: TimeGridEvent, endDay: Date, endMinute: number) => void;
 };
 
-const START_HOUR = 0;
-const END_HOUR = 24;
-const TOTAL_MINUTES = (END_HOUR - START_HOUR) * 60;
 const SNAP_MINUTES = 15;
 
-function clampMinute(value: number) {
-  return Math.max(START_HOUR * 60, Math.min(END_HOUR * 60, value));
-}
-
-function snappedMinute(clientY: number, element: HTMLElement) {
+function snappedMinute(clientY: number, element: HTMLElement, range: CalendarGridRange) {
   const rect = element.getBoundingClientRect();
-  return snappedMinuteFromRect(clientY, rect.top, rect.height);
+  return calendarGridMinuteAt(clientY, rect.top, rect.height, range, SNAP_MINUTES);
 }
 
-function snappedMinuteFromRect(clientY: number, top: number, height: number) {
-  const relative = Math.max(0, Math.min(height, clientY - top));
-  const raw = START_HOUR * 60 + (relative / Math.max(1, height)) * TOTAL_MINUTES;
-  return clampMinute(Math.round(raw / SNAP_MINUTES) * SNAP_MINUTES);
-}
-
-function blockStyle(startMinute: number, endMinute: number) {
-  const start = clampMinute(startMinute);
-  const end = clampMinute(endMinute);
+function blockStyle(startMinute: number, endMinute: number, range: CalendarGridRange) {
+  const block = calendarGridBlock(startMinute, endMinute, range);
   return {
-    top: `${((start - START_HOUR * 60) / TOTAL_MINUTES) * 100}%`,
-    height: `${Math.max(1.2, ((end - start) / TOTAL_MINUTES) * 100)}%`,
+    top: `${block.top}%`,
+    height: `${block.height}%`,
   };
 }
 
@@ -101,6 +97,7 @@ export function CalendarTimeGrid({
   events,
   sessions,
   timeZone,
+  workHours,
   onSelectDay,
   onCreateRange,
   onEditEvent,
@@ -110,6 +107,7 @@ export function CalendarTimeGrid({
   const [selection, setSelection] = useState<DragSelection | null>(null);
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [resizePreview, setResizePreview] = useState<ResizeState | null>(null);
+  const [gridMode, setGridMode] = useState<CalendarGridMode>("work");
   const resizeRef = useRef<ResizeState | null>(null);
   const justResizedRef = useRef<string | null>(null);
   const days = useMemo(() => {
@@ -117,27 +115,34 @@ export function CalendarTimeGrid({
     const start = startOfWeek(selectedDay);
     return Array.from({ length: 7 }, (_, index) => addDays(start, index));
   }, [selectedDay, view]);
-  const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, index) => START_HOUR + index);
+  const range = useMemo(() => calendarGridRange(workHours, gridMode), [gridMode, workHours]);
+  const hours = Array.from(
+    { length: range.totalMinutes / 60 + 1 },
+    (_, index) => range.startMinute / 60 + index
+  );
 
   function beginSelection(event: React.PointerEvent<HTMLDivElement>, dayIndex: number) {
     if (event.button !== 0 || draggedEventId) return;
-    const minute = snappedMinute(event.clientY, event.currentTarget);
+    const minute = Math.min(
+      range.endMinute - SNAP_MINUTES,
+      snappedMinute(event.clientY, event.currentTarget, range)
+    );
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelection({ dayIndex, startMinute: minute, endMinute: minute + 30 });
   }
 
   function updateSelection(event: React.PointerEvent<HTMLDivElement>, dayIndex: number) {
     if (!selection || selection.dayIndex !== dayIndex) return;
-    setSelection({ ...selection, endMinute: snappedMinute(event.clientY, event.currentTarget) });
+    setSelection({ ...selection, endMinute: snappedMinute(event.clientY, event.currentTarget, range) });
   }
 
   function finishSelection(event: React.PointerEvent<HTMLDivElement>, dayIndex: number) {
     if (!selection || selection.dayIndex !== dayIndex) return;
-    const pointerMinute = snappedMinute(event.clientY, event.currentTarget);
-    const start = Math.min(selection.startMinute, pointerMinute);
-    const end = Math.max(selection.startMinute, pointerMinute);
+    const pointerMinute = snappedMinute(event.clientY, event.currentTarget, range);
+    const start = calendarGridClampMinute(Math.min(selection.startMinute, pointerMinute), range);
+    const end = calendarGridClampMinute(Math.max(selection.startMinute, pointerMinute), range);
     setSelection(null);
-    onCreateRange(days[dayIndex], start, Math.max(start + 30, end));
+    onCreateRange(days[dayIndex], start, Math.min(range.endMinute, Math.max(start + 30, end)));
   }
 
   function beginResize(event: React.PointerEvent<HTMLSpanElement>, calendarEvent: TimeGridEvent, segment: CalendarDaySegment, dayIndex: number) {
@@ -166,7 +171,7 @@ export function CalendarTimeGrid({
     event.stopPropagation();
     const endMinute = Math.max(
       state.startMinute + SNAP_MINUTES,
-      snappedMinuteFromRect(event.clientY, state.gridTop, state.gridHeight)
+      calendarGridMinuteAt(event.clientY, state.gridTop, state.gridHeight, range, SNAP_MINUTES)
     );
     const next = { ...state, endMinute };
     resizeRef.current = next;
@@ -193,30 +198,71 @@ export function CalendarTimeGrid({
         className="grid border-b border-zinc-800 bg-zinc-950/70"
         style={{ gridTemplateColumns: `48px repeat(${days.length}, minmax(0, 1fr))` }}
       >
-        <div />
+        <div className="flex items-center justify-center gap-0.5 px-1">
+          <button
+            type="button"
+            aria-label="Show configured workday"
+            title="Configured workday"
+            onClick={() => setGridMode("work")}
+            className={`flex h-6 w-5 items-center justify-center rounded transition ${gridMode === "work" ? "bg-purple-500 text-white" : "text-zinc-600 hover:bg-zinc-900 hover:text-zinc-300"}`}
+          >
+            <BriefcaseBusiness className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            aria-label="Show full 24-hour day"
+            title="Full 24-hour day"
+            onClick={() => setGridMode("full")}
+            className={`flex h-6 w-5 items-center justify-center rounded transition ${gridMode === "full" ? "bg-purple-500 text-white" : "text-zinc-600 hover:bg-zinc-900 hover:text-zinc-300"}`}
+          >
+            <Clock3 className="h-3 w-3" />
+          </button>
+        </div>
         {days.map((day) => {
-          const today = isSameDay(day, new Date());
-          const selected = isSameDay(day, selectedDay);
           const dayKey = format(day, "yyyy-MM-dd");
+          const today = calendarDateKey(new Date(), timeZone) === dayKey;
+          const selected = isSameDay(day, selectedDay);
           const allDayEvents = events.filter((event) => event.allDay && calendarIntervalSegment(event.startAt, event.endAt, dayKey, timeZone));
+          const schedule = workHours.find((item) => item.dayOfWeek === day.getDay());
+          const offHoursCount = events.filter((event) => {
+            if (event.allDay) return false;
+            const segment = calendarIntervalSegment(event.startAt, event.endAt, dayKey, timeZone);
+            return segment && (segment.startMinute < range.startMinute || segment.endMinute > range.endMinute);
+          }).length;
           return (
-            <button
+            <div
               key={day.toISOString()}
-              type="button"
-              onClick={() => onSelectDay(day)}
-              className={`min-w-0 border-l border-zinc-800 px-2 py-2 text-center transition ${selected ? "bg-purple-500/8" : "hover:bg-zinc-900"}`}
+              className={`min-w-0 border-l border-zinc-800 px-1 py-1.5 text-center transition ${selected ? "bg-purple-500/8" : "hover:bg-zinc-900"}`}
             >
-              <div className="text-[10px] font-medium uppercase text-zinc-500">{format(day, "EEE")}</div>
-              <div className={`mx-auto mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${today ? "bg-purple-500 text-white" : "text-zinc-200"}`}>
-                {format(day, "d")}
-              </div>
-              {allDayEvents.slice(0, 1).map((event) => (
-                <div key={event.id} className="mt-1 truncate rounded px-1 py-0.5 text-[9px] text-white" style={{ background: event.color ?? "#7c3aed" }}>
-                  {event.title}
+              <button type="button" onClick={() => onSelectDay(day)} className="w-full min-w-0">
+                <div className="text-[10px] font-medium uppercase text-zinc-500">{format(day, "EEE")}</div>
+                <div className={`mx-auto mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${today ? "bg-purple-500 text-white" : "text-zinc-200"}`}>
+                  {format(day, "d")}
                 </div>
-              ))}
-              {allDayEvents.length > 1 && <div className="mt-0.5 text-[9px] text-zinc-500">+{allDayEvents.length - 1} all-day</div>}
-            </button>
+                {allDayEvents.slice(0, 1).map((event) => (
+                  <div key={event.id} className="mt-1 truncate rounded px-1 py-0.5 text-[9px] text-white" style={{ background: event.color ?? "#7c3aed" }}>
+                    {event.title}
+                  </div>
+                ))}
+                {allDayEvents.length > 1 && <div className="mt-0.5 truncate text-[9px] text-zinc-500">+{allDayEvents.length - 1} all-day</div>}
+              </button>
+              <div className="mt-0.5 flex min-h-3 items-center justify-center gap-1 text-[9px]">
+                {schedule?.enabled === false && <span className="truncate text-zinc-600">Off</span>}
+                {gridMode === "work" && offHoursCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setGridMode("full");
+                    }}
+                    className="max-w-full truncate rounded bg-purple-500/15 px-1 text-purple-300 hover:bg-purple-500/25"
+                    title="Show events outside the compact workday"
+                  >
+                    {offHoursCount} {view === "day" ? "off-hours" : "off"}
+                  </button>
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -241,17 +287,35 @@ export function CalendarTimeGrid({
               .map((event) => [event.id, calendarIntervalSegment(event.startAt, event.endAt, dayKey, timeZone)] as const)
               .filter((entry): entry is readonly [string, CalendarDaySegment] => Boolean(entry[1]))
           );
-          const dayEvents = events.filter((event) => eventSegments.has(event.id));
+          const dayEvents = events.filter((event) => {
+            const segment = eventSegments.get(event.id);
+            return segment && segment.endMinute > range.startMinute && segment.startMinute < range.endMinute;
+          });
           const positionedEvents = layoutCalendarEvents(dayEvents);
-          const unlinkedSessions = sessions.filter((session) =>
-            !session.calendarEventId && session.actualStart && calendarDateKey(session.actualStart, timeZone) === dayKey
+          const sessionSegments = new Map(
+            sessions
+              .filter((session) => !session.calendarEventId && session.actualStart)
+              .map((session) => [
+                session.id,
+                calendarIntervalSegment(session.actualStart!, session.actualEnd ?? new Date(), dayKey, timeZone),
+              ] as const)
+              .filter((entry): entry is readonly [string, CalendarDaySegment] => Boolean(entry[1]))
           );
+          const unlinkedSessions = sessions.filter((session) => {
+            const segment = sessionSegments.get(session.id);
+            return !session.calendarEventId && segment && segment.endMinute > range.startMinute && segment.startMinute < range.endMinute;
+          });
           const selectedRange = selection?.dayIndex === dayIndex ? {
             start: Math.min(selection.startMinute, selection.endMinute),
             end: Math.max(selection.startMinute, selection.endMinute),
           } : null;
           const isToday = calendarDateKey(new Date(), timeZone) === dayKey;
           const currentMinute = calendarMinuteOfDay(new Date(), timeZone);
+          const schedule = workHours.find((item) => item.dayOfWeek === day.getDay());
+          const scheduleStart = schedule?.enabled ? Math.max(range.startMinute, schedule.startMinute) : range.startMinute;
+          const scheduleEnd = schedule?.enabled ? Math.min(range.endMinute, schedule.endMinute) : range.startMinute;
+          const topShade = ((scheduleStart - range.startMinute) / range.totalMinutes) * 100;
+          const bottomShade = ((range.endMinute - scheduleEnd) / range.totalMinutes) * 100;
 
           return (
             <div
@@ -267,17 +331,26 @@ export function CalendarTimeGrid({
                 event.preventDefault();
                 const calendarEvent = events.find((item) => item.id === draggedEventId);
                 setDraggedEventId(null);
-                if (calendarEvent) onMoveEvent(calendarEvent, day, snappedMinute(event.clientY, event.currentTarget));
+                if (calendarEvent) onMoveEvent(calendarEvent, day, snappedMinute(event.clientY, event.currentTarget, range));
               }}
             >
+              {schedule?.enabled ? (
+                <>
+                  {topShade > 0 && <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] bg-zinc-950/75" style={{ height: `${topShade}%` }} />}
+                  {scheduleEnd > scheduleStart && <div className="pointer-events-none absolute inset-x-0 z-[1] bg-purple-500/[0.018]" style={{ top: `${topShade}%`, height: `${100 - topShade - bottomShade}%` }} />}
+                  {bottomShade > 0 && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] bg-zinc-950/75" style={{ height: `${bottomShade}%` }} />}
+                </>
+              ) : (
+                <div className="pointer-events-none absolute inset-0 z-[1] bg-zinc-950/80" />
+              )}
               {hours.map((hour, index) => (
-                <div key={hour} className="pointer-events-none absolute left-0 right-0 border-t border-zinc-900" style={{ top: `${(index / (hours.length - 1)) * 100}%` }} />
+                <div key={hour} className="pointer-events-none absolute left-0 right-0 z-[2] border-t border-zinc-900" style={{ top: `${(index / (hours.length - 1)) * 100}%` }} />
               ))}
 
               {selectedRange && (
                 <div
                   className="pointer-events-none absolute left-1 right-1 z-30 rounded border border-purple-400 bg-purple-500/20 shadow-[0_0_24px_rgba(168,85,247,0.18)]"
-                  style={blockStyle(selectedRange.start, selectedRange.end)}
+                  style={blockStyle(selectedRange.start, selectedRange.end, range)}
                 >
                   <span className="px-1 text-[9px] font-medium text-purple-100">
                     {Math.max(30, selectedRange.end - selectedRange.start)}m
@@ -339,12 +412,12 @@ export function CalendarTimeGrid({
                       }
                       if (!segment.startsHere) return;
                       const durationMinutes = Math.max(SNAP_MINUTES, endMinute - startMinute);
-                      const nextStart = Math.max(START_HOUR * 60, Math.min(END_HOUR * 60 - durationMinutes, startMinute + direction * SNAP_MINUTES));
+                      const nextStart = Math.max(range.startMinute, Math.min(range.endMinute - durationMinutes, startMinute + direction * SNAP_MINUTES));
                       onMoveEvent(calendarEvent, day, nextStart);
                     }}
                     className="absolute z-10 min-w-0 cursor-grab overflow-hidden rounded border px-1.5 py-1 text-left text-white shadow-lg transition-[filter,box-shadow] hover:z-30 hover:brightness-110 active:cursor-grabbing"
                     style={{
-                      ...blockStyle(startMinute, endMinute),
+                      ...blockStyle(startMinute, endMinute, range),
                       left: `calc(${(column / columnCount) * 100}% + 3px)`,
                       width: `calc(${100 / columnCount}% - 5px)`,
                       borderColor: color,
@@ -379,15 +452,14 @@ export function CalendarTimeGrid({
               })}
 
               {unlinkedSessions.map((session) => {
-                const start = new Date(session.actualStart!);
-                const end = session.actualEnd ? new Date(session.actualEnd) : new Date();
+                const segment = sessionSegments.get(session.id)!;
                 const colors = sessionColor(session.type);
                 return (
                   <div
                     key={session.id}
                     className="pointer-events-none absolute left-[12%] right-1 z-20 overflow-hidden rounded border-l-2 px-1.5 py-1 backdrop-blur-sm"
                     style={{
-                      ...blockStyle(calendarMinuteOfDay(start, timeZone), calendarMinuteOfDay(end, timeZone)),
+                      ...blockStyle(segment.startMinute, segment.endMinute, range),
                       borderColor: colors.border,
                       background: colors.background,
                     }}
@@ -400,9 +472,9 @@ export function CalendarTimeGrid({
                 );
               })}
 
-              {isToday && currentMinute >= START_HOUR * 60 && currentMinute <= END_HOUR * 60 && (
-                <div className="pointer-events-none absolute left-0 right-0 z-40 flex items-center" style={{ top: `${((currentMinute - START_HOUR * 60) / TOTAL_MINUTES) * 100}%` }}>
-                  <span className="-ml-1 h-2 w-2 rounded-full bg-rose-400" />
+              {isToday && currentMinute >= range.startMinute && currentMinute <= range.endMinute && (
+                <div className="pointer-events-none absolute left-0 right-0 z-40 flex items-center" style={{ top: `${((currentMinute - range.startMinute) / range.totalMinutes) * 100}%` }}>
+                  <span className="-ml-1 h-2 w-2 animate-pulse rounded-full bg-rose-400" />
                   <span className="h-px flex-1 bg-rose-400/80" />
                 </div>
               )}

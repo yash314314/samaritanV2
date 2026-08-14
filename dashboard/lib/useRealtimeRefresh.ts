@@ -18,6 +18,7 @@ const DEFAULT_EVENTS = [
   "intervention:triggered",
   "intervention:resolved",
   "calendar:changed",
+  "project:changed",
   "goal:changed",
   "goal:progress",
 ];

@@ -2,8 +2,10 @@ const activeWin = require("active-win");
 const { handleEvent, closeSession } = require("./sessionEngine");
 const { killProcess } = require("./taskkill");
 const { streamCurrentActivity } = require("./wsClient");
-const { powerMonitor, app } = require("electron");
+const { reportDistractionBlock } = require("./wsClient");
+const { powerMonitor, app, Notification } = require("electron");
 const { resolveBrowserContext } = require("./browserUrlResolver");
+const { findMatchingDistractionRule } = require("./distractionMatcher");
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 const idleThreshold = 120; // seconds
@@ -56,6 +58,9 @@ let trackingRunning = false;
 
 // Reference to the active deep work session (set from main.js)
 let activeDeepWorkRef = null;
+let distractionRulesRef = [];
+const enforcementCooldowns = new Map();
+const ENFORCEMENT_COOLDOWN_MS = 10_000;
 
 /**
  * Set the active deep work session reference so the tracker can
@@ -67,6 +72,11 @@ function setActiveDeepWorkRef(session) {
 
 function clearActiveDeepWorkRef() {
   activeDeepWorkRef = null;
+}
+
+function setDistractionRulesRef(rules) {
+  distractionRulesRef = Array.isArray(rules) ? rules : [];
+  console.log(`[Samaritan] Persistent blocker armed with ${distractionRulesRef.length} enabled rule(s)`);
 }
 
 function normalize(value) {
@@ -102,7 +112,18 @@ function shouldPreemptivelyBlock(context) {
 }
 
 function enforceBlockIfNeeded(context) {
-  if (!shouldPreemptivelyBlock(context)) return;
+  const persistentRule = findMatchingDistractionRule(
+    distractionRulesRef,
+    context,
+    Boolean(activeDeepWorkRef)
+  );
+  const deepWorkBlocked = shouldPreemptivelyBlock(context);
+  if (!persistentRule && !deepWorkBlocked) return;
+
+  const cooldownKey = `${persistentRule?.id || "deepwork"}:${context.processId || context.app}:${context.domain || ""}`;
+  const lastAttempt = enforcementCooldowns.get(cooldownKey) || 0;
+  if (Date.now() - lastAttempt < ENFORCEMENT_COOLDOWN_MS) return;
+  enforcementCooldowns.set(cooldownKey, Date.now());
 
   const result = killProcess({
     appName: context.app,
@@ -114,6 +135,30 @@ function enforceBlockIfNeeded(context) {
     console.log(`[Samaritan] Block enforcement terminated ${context.app}: ${result.reason}`);
   } else {
     console.log(`[Samaritan] Block enforcement could not terminate ${context.app}: ${result.reason}`);
+  }
+
+  if (persistentRule) {
+    reportDistractionBlock({
+      ruleId: persistentRule.id,
+      targetType: persistentRule.targetType,
+      target: persistentRule.target,
+      appName: context.app,
+      domain: context.domain || null,
+      windowTitle: context.title || null,
+      processId: context.processId || null,
+      outcome: result.killed ? "killed" : "failed",
+      reason: result.reason,
+      occurredAt: new Date().toISOString(),
+    });
+    if (Notification.isSupported()) {
+      new Notification({
+        title: result.killed ? "Distraction blocked" : "Block attempt failed",
+        body: result.killed
+          ? `${context.app} matched ${persistentRule.target}.`
+          : `${context.app}: ${result.reason}`,
+        urgency: result.killed ? "normal" : "critical",
+      }).show();
+    }
   }
 }
 async function enterIdle(reason, startedAt) {
@@ -298,4 +343,9 @@ function startTracking() {
 
 }
 
-module.exports = { startTracking, setActiveDeepWorkRef, clearActiveDeepWorkRef };
+module.exports = {
+  startTracking,
+  setActiveDeepWorkRef,
+  clearActiveDeepWorkRef,
+  setDistractionRulesRef,
+};

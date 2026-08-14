@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { emitProjectChanged } from '../websocket/broadcaster';
 
 const router = Router();
 
@@ -33,6 +34,8 @@ router.post('/:projectId/rules', async (req, res) => {
         matchType: matchType || 'exact',
       },
     });
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    if (project) emitProjectChanged(project.userId, 'rules-updated', { projectId, rule });
     res.json(rule);
   } catch (error) {
     console.error('Rule creation error:', error);
@@ -42,10 +45,12 @@ router.post('/:projectId/rules', async (req, res) => {
 
 // DELETE /api/projects/:projectId/rules/:ruleId
 router.delete('/:projectId/rules/:ruleId', async (req, res) => {
-  const { ruleId } = req.params;
+  const { projectId, ruleId } = req.params;
 
   try {
     await prisma.projectRule.delete({ where: { id: ruleId } });
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    if (project) emitProjectChanged(project.userId, 'rules-updated', { projectId, ruleId });
     res.json({ success: true });
   } catch (error) {
     console.error('Rule deletion error:', error);
@@ -54,4 +59,3 @@ router.delete('/:projectId/rules/:ruleId', async (req, res) => {
 });
 
 export default router;
-

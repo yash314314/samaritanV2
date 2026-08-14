@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import ical from 'node-ical';
 import { emitCalendarChanged } from '../websocket/broadcaster';
+import { dispatchWebhookEvent } from '../services/webhookService';
 import {
   getCalendarTrackingSettings,
   getCalendarMeetingInsights,
@@ -31,9 +32,10 @@ import {
   syncCalendarEventReminder,
   syncCalendarEventReminders,
 } from '../services/calendarReminderService';
-import { getCalendarIntelligence } from '../services/calendarIntelligenceService';
+import { getCalendarIntelligence, suggestCalendarEventSlot } from '../services/calendarIntelligenceService';
 import { stopCalendarFocusForEvent } from '../services/calendarFocusService';
 import { normalizeAllDayCalendarRange, parseCalendarDate } from '../services/calendarTimeService';
+import { getCalendarWorkHoursUtilization } from '../services/calendarWorkHoursService';
 
 const router = Router();
 
@@ -68,6 +70,23 @@ router.patch('/tracking/settings', async (req, res) => {
   } catch (error) {
     console.error('Calendar settings update error:', error);
     res.status(400).json({ error: 'Failed to update calendar tracking settings' });
+  }
+});
+
+router.get('/work-hours/utilization', async (req, res) => {
+  const { userId, from, to } = req.query;
+  if (!userId || typeof userId !== 'string' || typeof from !== 'string' || typeof to !== 'string') {
+    return res.status(400).json({ error: 'Provide userId, from, and to' });
+  }
+  try {
+    const timezone = await calendarTimezone(userId);
+    const startAt = parseCalendarDate(from, timezone);
+    const endAt = parseCalendarDate(to, timezone, true);
+    if (!startAt || !endAt || endAt <= startAt) return res.status(400).json({ error: 'Invalid date range' });
+    res.json(await getCalendarWorkHoursUtilization(userId, startAt, endAt));
+  } catch (error) {
+    console.error('Calendar work-hours utilization error:', error);
+    res.status(500).json({ error: 'Failed to calculate work-hours utilization' });
   }
 });
 
@@ -142,6 +161,21 @@ router.get('/intelligence', async (req, res) => {
   } catch (error) {
     console.error('Calendar intelligence fetch error:', error);
     res.status(500).json({ error: 'Failed to analyze calendar schedule' });
+  }
+});
+
+router.get('/intelligence/slot-suggestion', async (req, res) => {
+  const { userId, eventId } = req.query;
+  if (!userId || typeof userId !== 'string' || !eventId || typeof eventId !== 'string') {
+    return res.status(400).json({ error: 'Provide userId and eventId' });
+  }
+  try {
+    const suggestion = await suggestCalendarEventSlot(userId, eventId);
+    if (!suggestion) return res.status(404).json({ error: 'No open workday slot found in the next 14 days' });
+    res.json(suggestion);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to find an open slot';
+    res.status(message.includes('not found') ? 404 : 400).json({ error: message });
   }
 });
 
@@ -571,6 +605,8 @@ router.post('/', async (req, res) => {
     await Promise.all(occurrences.map((occurrence) => materializeCalendarEventSession(occurrence.id)));
     await syncCalendarEventReminders([event.id, ...occurrences.map((occurrence) => occurrence.id)]);
     emitCalendarChanged(userId, 'created', { event, occurrenceCount: occurrences.length });
+    void dispatchWebhookEvent(userId, 'calendar.event.changed', { action: 'created', event, occurrenceCount: occurrences.length }, event.id)
+      .catch((error) => console.error('Calendar webhook dispatch failed:', error));
     res.json({ ...event, occurrenceCount: occurrences.length });
   } catch (error) {
     console.error('Event creation error:', error);
@@ -694,6 +730,8 @@ router.patch('/:id', async (req, res) => {
       await stopCalendarFocusForEvent(event.id);
     }
     emitCalendarChanged(event.userId, 'updated', { event, occurrenceCount: occurrences.length });
+    void dispatchWebhookEvent(event.userId, 'calendar.event.changed', { action: 'updated', event, occurrenceCount: occurrences.length }, `${event.id}:${event.updatedAt.toISOString()}`)
+      .catch((error) => console.error('Calendar webhook dispatch failed:', error));
     res.json({ ...event, occurrenceCount: occurrences.length });
   } catch (error) {
     console.error('Event update error:', error);
@@ -721,6 +759,8 @@ router.delete('/:id', async (req, res) => {
       ]);
       await syncCalendarEventReminder(id);
       emitCalendarChanged(existing.userId, 'deleted', { id, scope });
+      void dispatchWebhookEvent(existing.userId, 'calendar.event.changed', { action: 'deleted', id, scope }, `${id}:deleted:${scope}`)
+        .catch((error) => console.error('Calendar webhook dispatch failed:', error));
       return res.json({ success: true, scope });
     }
     const targetId = scope === 'series' && existing.recurrenceParentId ? existing.recurrenceParentId : id;
@@ -734,6 +774,8 @@ router.delete('/:id', async (req, res) => {
       prisma.calendarEvent.delete({ where: { id: targetId } }),
     ]);
     emitCalendarChanged(event.userId, 'deleted', { id: targetId, scope });
+    void dispatchWebhookEvent(event.userId, 'calendar.event.changed', { action: 'deleted', id: targetId, scope }, `${targetId}:deleted:${scope}`)
+      .catch((error) => console.error('Calendar webhook dispatch failed:', error));
     res.json({ success: true, scope });
   } catch (error) {
     console.error('Event deletion error:', error);

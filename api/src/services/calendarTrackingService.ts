@@ -27,22 +27,45 @@ const DEFAULT_SETTINGS: CalendarClassifierSettings & {
   timezone: "Asia/Kolkata",
 };
 
+export type CalendarWorkHourInput = {
+  dayOfWeek: number;
+  enabled: boolean;
+  startMinute: number;
+  endMinute: number;
+};
+
+export const DEFAULT_CALENDAR_WORK_HOURS: CalendarWorkHourInput[] = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+  dayOfWeek,
+  enabled: dayOfWeek >= 1 && dayOfWeek <= 5,
+  startMinute: 9 * 60,
+  endMinute: 18 * 60,
+}));
+
 let lifecycleRunning = false;
 let lifecycleTimer: NodeJS.Timeout | null = null;
 
 export async function getCalendarTrackingSettings(userId: string) {
-  const stored = await prisma.calendarTrackingSettings.findUnique({ where: { userId } });
-  if (!stored) return { userId, ...DEFAULT_SETTINGS };
+  const [stored, storedWorkHours] = await Promise.all([
+    prisma.calendarTrackingSettings.findUnique({ where: { userId } }),
+    prisma.calendarWorkHour.findMany({ where: { userId }, orderBy: { dayOfWeek: "asc" } }),
+  ]);
+  const workHours = DEFAULT_CALENDAR_WORK_HOURS.map((fallback) => {
+    const saved = storedWorkHours.find((item) => item.dayOfWeek === fallback.dayOfWeek);
+    return saved
+      ? { dayOfWeek: saved.dayOfWeek, enabled: saved.enabled, startMinute: saved.startMinute, endMinute: saved.endMinute }
+      : fallback;
+  });
+  if (!stored) return { userId, ...DEFAULT_SETTINGS, workHours };
   try {
-    return { ...stored, timezone: normalizeCalendarTimezone(stored.timezone) };
+    return { ...stored, timezone: normalizeCalendarTimezone(stored.timezone), workHours };
   } catch {
-    return { ...stored, timezone: DEFAULT_SETTINGS.timezone };
+    return { ...stored, timezone: DEFAULT_SETTINGS.timezone, workHours };
   }
 }
 
 export async function updateCalendarTrackingSettings(
   userId: string,
-  input: Partial<typeof DEFAULT_SETTINGS>
+  input: Partial<typeof DEFAULT_SETTINGS> & { workHours?: CalendarWorkHourInput[] }
 ) {
   const current = await getCalendarTrackingSettings(userId);
   const data = {
@@ -56,11 +79,37 @@ export async function updateCalendarTrackingSettings(
     timezone: normalizeCalendarTimezone(input.timezone ?? current.timezone),
   };
 
-  return prisma.calendarTrackingSettings.upsert({
-    where: { userId },
-    update: data,
-    create: { userId, ...data },
+  let normalizedWorkHours: CalendarWorkHourInput[] | undefined;
+  if (input.workHours !== undefined) {
+    if (!Array.isArray(input.workHours)) throw new Error("Work hours must be an array");
+    const submitted = new Map(input.workHours.map((item) => [Number(item.dayOfWeek), item]));
+    normalizedWorkHours = current.workHours.map((fallback) => {
+      const item = submitted.get(fallback.dayOfWeek) ?? fallback;
+      const startMinute = Math.round(Number(item.startMinute));
+      const endMinute = Math.round(Number(item.endMinute));
+      if (!Number.isFinite(startMinute) || startMinute < 0 || startMinute >= 1440) throw new Error("Invalid workday start time");
+      if (!Number.isFinite(endMinute) || endMinute <= 0 || endMinute > 1440) throw new Error("Invalid workday end time");
+      if (Boolean(item.enabled) && endMinute <= startMinute) throw new Error("Workday end must be after its start");
+      return { dayOfWeek: fallback.dayOfWeek, enabled: Boolean(item.enabled), startMinute, endMinute };
+    });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.calendarTrackingSettings.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data },
+    });
+    for (const item of normalizedWorkHours ?? []) {
+      await tx.calendarWorkHour.upsert({
+        where: { userId_dayOfWeek: { userId, dayOfWeek: item.dayOfWeek } },
+        update: item,
+        create: { userId, ...item },
+      });
+    }
   });
+
+  return getCalendarTrackingSettings(userId);
 }
 
 function sessionInclude() {

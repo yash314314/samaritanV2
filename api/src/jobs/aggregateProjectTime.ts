@@ -15,20 +15,8 @@ export function startProjectTimeAggregation() {
     async () => {
       console.log("[ProjectTimeAggregation] Running nightly aggregation...");
 
-      // Compute "yesterday" in IST (YYYY-MM-DD)
-      const IST_OFFSET = 5.5 * 60 * 60 * 1000;
-      const now = new Date();
-      const ist = new Date(now.getTime() + IST_OFFSET);
-      const yesterday = new Date(ist.getTime() - 24 * 60 * 60 * 1000);
-
-      const date = [
-        yesterday.getUTCFullYear(),
-        String(yesterday.getUTCMonth() + 1).padStart(2, "0"),
-        String(yesterday.getUTCDate()).padStart(2, "0"),
-      ].join("-");
-
       try {
-        const results = await aggregateAllUsersProjectTime(date);
+        const results = await aggregateAllUsersProjectTime();
         console.log("[ProjectTimeAggregation] Completed:", results);
       } catch (err) {
         console.error("[ProjectTimeAggregation] Failed:", err);

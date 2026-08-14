@@ -1,11 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import { format, parseISO } from "date-fns";
-import { AlertTriangle, Clock3, Focus, Plus, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertTriangle, CalendarClock, Clock3, Focus, LoaderCircle, MoveRight, Plus, ShieldAlert, Sparkles } from "lucide-react";
+
+export type CalendarSlotSuggestion = {
+  eventId: string;
+  startAt: string;
+  endAt: string;
+  durationMs: number;
+  bufferMinutes: number;
+  movedToAnotherDay: boolean;
+  recurrenceScope: "occurrence" | null;
+};
 
 export type CalendarIntelligence = {
   timezone: string;
   workday: { startHour: number; endHour: number };
+  workHours: Array<{ dayOfWeek: number; enabled: boolean; startMinute: number; endMinute: number }>;
   summary: {
     pressureScore: number;
     pressureLevel: "low" | "balanced" | "high" | "critical";
@@ -59,9 +71,67 @@ function severityStyle(severity: CalendarIntelligence["recommendations"][number]
   return { icon: Sparkles, color: "text-purple-300", background: "bg-purple-500/10", border: "border-purple-500/20" };
 }
 
-export function CalendarIntelligencePanel({ intelligence, onProtectFocus }: { intelligence: CalendarIntelligence; onProtectFocus: (window: CalendarIntelligence["focusWindows"][number]) => void }) {
+function suggestionLabel(suggestion: CalendarSlotSuggestion, timeZone: string) {
+  const date = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "short", day: "numeric" }).format(new Date(suggestion.startAt));
+  const time = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
+  return `${date}, ${time.format(new Date(suggestion.startAt))} to ${time.format(new Date(suggestion.endAt))}`;
+}
+
+function zonedDateLabel(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function zonedTimeLabel(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+
+export function CalendarIntelligencePanel({
+  intelligence,
+  onProtectFocus,
+  onFindSlot,
+  onApplySlot,
+}: {
+  intelligence: CalendarIntelligence;
+  onProtectFocus: (window: CalendarIntelligence["focusWindows"][number]) => void;
+  onFindSlot: (eventId: string) => Promise<CalendarSlotSuggestion>;
+  onApplySlot: (suggestion: CalendarSlotSuggestion) => Promise<void>;
+}) {
+  const [slotSuggestions, setSlotSuggestions] = useState<Record<string, CalendarSlotSuggestion>>({});
+  const [slotErrors, setSlotErrors] = useState<Record<string, string>>({});
+  const [busyConflict, setBusyConflict] = useState<string | null>(null);
   const pressureTone = intelligence.summary.pressureScore >= 75 ? "text-rose-300" : intelligence.summary.pressureScore >= 50 ? "text-amber-300" : "text-emerald-300";
   const busiestDays = [...intelligence.days].sort((a, b) => b.pressureScore - a.pressureScore).slice(0, 8);
+  const enabledDayCount = intelligence.workHours.filter((item) => item.enabled).length;
+
+  async function findSlot(key: string, eventId: string) {
+    setBusyConflict(key);
+    setSlotErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const suggestion = await onFindSlot(eventId);
+      setSlotSuggestions((current) => ({ ...current, [key]: suggestion }));
+    } catch (error) {
+      setSlotErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : "No open slot found" }));
+    } finally {
+      setBusyConflict(null);
+    }
+  }
+
+  async function applySlot(key: string, suggestion: CalendarSlotSuggestion) {
+    setBusyConflict(key);
+    setSlotErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      await onApplySlot(suggestion);
+      setSlotSuggestions((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    } catch (error) {
+      setSlotErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : "Could not move event" }));
+    } finally {
+      setBusyConflict(null);
+    }
+  }
 
   return (
     <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -80,17 +150,37 @@ export function CalendarIntelligencePanel({ intelligence, onProtectFocus }: { in
               <span className="text-[10px] text-zinc-600">{intelligence.timezone}</span>
             </div>
             <div className="dashboard-scroll-panel space-y-2 pr-1">
-              {intelligence.conflicts.map((conflict) => (
-                <div key={`${conflict.first.id}-${conflict.second.id}`} className="border-l-2 border-rose-500 bg-rose-500/10 px-3 py-2.5">
+              {intelligence.conflicts.map((conflict) => {
+                const conflictKey = `${conflict.first.id}-${conflict.second.id}`;
+                const suggestion = slotSuggestions[conflictKey];
+                const error = slotErrors[conflictKey];
+                const busy = busyConflict === conflictKey;
+                return (
+                <div key={conflictKey} className="border-l-2 border-rose-500 bg-rose-500/10 px-3 py-2.5">
                   <div className="flex items-start gap-2.5">
                     <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-3"><span className="truncate text-xs font-medium text-zinc-200">{conflict.first.title} overlaps {conflict.second.title}</span><span className="shrink-0 text-[9px] text-rose-300">{duration(conflict.overlapMs)}</span></div>
-                      <p className="mt-1 text-[10px] text-zinc-500">{format(new Date(conflict.first.start), "h:mm a")} - {format(new Date(conflict.first.end), "h:mm a")} / {format(new Date(conflict.second.start), "h:mm a")} - {format(new Date(conflict.second.end), "h:mm a")}</p>
+                      <p className="mt-1 text-[10px] text-zinc-500">{zonedTimeLabel(conflict.first.start, intelligence.timezone)} - {zonedTimeLabel(conflict.first.end, intelligence.timezone)} / {zonedTimeLabel(conflict.second.start, intelligence.timezone)} - {zonedTimeLabel(conflict.second.end, intelligence.timezone)}</p>
+                      {suggestion ? (
+                        <div className="mt-2 rounded border border-purple-500/20 bg-black/35 p-2">
+                          <div className="flex items-center gap-1.5 text-[10px] text-purple-200"><CalendarClock className="h-3 w-3" />{suggestionLabel(suggestion, intelligence.timezone)}</div>
+                          <div className="mt-1 text-[9px] text-zinc-600">Includes a {suggestion.bufferMinutes}m recovery buffer{suggestion.movedToAnotherDay ? " on the next available workday" : ""}.</div>
+                          <button type="button" disabled={busy} onClick={() => applySlot(conflictKey, suggestion)} className="mt-2 flex items-center gap-1 rounded-md bg-purple-500 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-purple-600 disabled:opacity-40">
+                            {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <MoveRight className="h-3 w-3" />}Move {conflict.second.title}
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" disabled={busy} onClick={() => findSlot(conflictKey, conflict.second.id)} className="mt-2 flex items-center gap-1 rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40">
+                          {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <CalendarClock className="h-3 w-3" />}Find open time
+                        </button>
+                      )}
+                      {error && <p className="mt-2 text-[10px] text-rose-300">{error}</p>}
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               {intelligence.recommendations.map((recommendation) => {
                 const style = severityStyle(recommendation.severity);
                 const Icon = style.icon;
@@ -137,7 +227,7 @@ export function CalendarIntelligencePanel({ intelligence, onProtectFocus }: { in
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><Focus className="h-4 w-4 text-purple-400" /><h3 className="text-sm font-semibold text-zinc-200">Focus opportunities</h3></div>
-            <p className="mt-1 text-[10px] text-zinc-600">Open time inside the {intelligence.workday.startHour}:00-{intelligence.workday.endHour}:00 workday</p>
+            <p className="mt-1 text-[10px] text-zinc-600">Open time inside your configured schedule · {enabledDayCount} workdays</p>
           </div>
           <div className="text-right"><div className="text-sm font-semibold text-purple-200">{duration(intelligence.summary.availableFocusMs)}</div><div className="text-[9px] text-zinc-600">available</div></div>
         </div>
@@ -145,11 +235,11 @@ export function CalendarIntelligencePanel({ intelligence, onProtectFocus }: { in
           {intelligence.focusWindows.map((window) => (
             <div key={`${window.date}-${window.startAt}`} className="group border-l-2 border-purple-500 bg-purple-500/5 px-3 py-2.5 transition hover:bg-purple-500/10">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-medium text-zinc-200">{format(new Date(window.startAt), "EEE, MMM d")}</span>
+                <span className="text-xs font-medium text-zinc-200">{zonedDateLabel(window.startAt, intelligence.timezone)}</span>
                 <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${window.quality === "prime" ? "bg-purple-500/20 text-purple-200" : "bg-zinc-900 text-zinc-500"}`}>{window.quality}</span>
               </div>
               <div className="mt-1.5 flex items-center justify-between text-[11px]">
-                <span className="flex items-center gap-1.5 text-zinc-400"><Clock3 className="h-3 w-3" />{format(new Date(window.startAt), "h:mm a")} - {format(new Date(window.endAt), "h:mm a")}</span>
+                <span className="flex items-center gap-1.5 text-zinc-400"><Clock3 className="h-3 w-3" />{zonedTimeLabel(window.startAt, intelligence.timezone)} - {zonedTimeLabel(window.endAt, intelligence.timezone)}</span>
                 <span className="font-medium text-purple-300">{duration(window.durationMs)}</span>
               </div>
               <p className="mt-1.5 text-[9px] leading-relaxed text-zinc-600">{window.reason}</p>

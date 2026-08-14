@@ -134,11 +134,23 @@ import {
   }) {
     broadcastToDashboards(userId, "deepwork:started", session);
     broadcastToDesktop(userId, "deepwork:started", session);
+    emitWidgetStateUpdate(userId, {
+      focus: {
+        id: session.id,
+        goal: session.goal,
+        plannedMinutes: session.plannedMinutes,
+        startedAt: session.startedAt,
+        enforcement: session.enforcement,
+        remainingSeconds: session.plannedMinutes * 60,
+      },
+      updatedAt: new Date(),
+    });
   }
   
   export function emitDeepWorkEnded(userId: string, sessionId: string, result: any) {
     broadcastToDashboards(userId, "deepwork:ended", { sessionId, result });
     broadcastToDesktop(userId, "deepwork:ended", { sessionId });
+    emitWidgetStateUpdate(userId, { focus: null, updatedAt: new Date() });
   }
   
   export function emitDeepWorkState(userId: string, sessionId: string, state: {
@@ -154,6 +166,16 @@ import {
   }) {
     broadcastToSession(userId, sessionId, "deepwork:state", state);
     broadcastToDesktop(userId, "deepwork:state", { sessionId, ...state });
+    emitWidgetStateUpdate(userId, {
+      focusState: {
+        sessionId,
+        remainingSeconds: Math.max(0, Math.round(state.remainingMinutes * 60)),
+        focusScore: state.focusScore,
+        productivityScore: state.productivityScore,
+        violationCount: state.violationCount,
+      },
+      updatedAt: new Date(),
+    });
   }
   
   export function emitDeepWorkMinute(userId: string, sessionId: string, minuteLog: {
@@ -257,6 +279,14 @@ import {
     broadcastToDesktop(userId, `calendar:focus.${action}`, payload);
   }
 
+  export function emitProjectChanged(
+    userId: string,
+    action: "created" | "updated" | "deleted" | "rules-updated",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, "project:changed", { action, ...payload });
+  }
+
   export function emitGoalChanged(
     userId: string,
     action: "created" | "updated" | "deleted",
@@ -268,4 +298,47 @@ import {
 
   export function emitGoalProgress(userId: string, goals: any[]) {
     broadcastToDashboards(userId, "goal:progress", { goals });
+  }
+
+  export function emitSmartBreakChanged(
+    userId: string,
+    action: "suggested" | "started" | "snoozed" | "skipped" | "completed" | "settings",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, `break:${action}`, payload);
+    broadcastToDesktop(userId, `break:${action}`, payload);
+    emitWidgetStateUpdate(userId, {
+      break: ["completed", "skipped"].includes(action) ? null : payload.break ?? null,
+      updatedAt: new Date(),
+    });
+  }
+
+  export function emitDistractionBlocksChanged(
+    userId: string,
+    action: "created" | "updated" | "deleted",
+    payload: any
+  ) {
+    const event = { action, ...payload };
+    broadcastToDashboards(userId, "distraction-blocks:changed", event);
+    broadcastToDesktop(userId, "distraction-blocks:changed", event);
+  }
+
+  export function emitDistractionBlockEvent(userId: string, payload: any) {
+    broadcastToDashboards(userId, "distraction-block:event", payload);
+  }
+
+  export function emitWidgetStateUpdate(userId: string, payload: any) {
+    broadcastToDesktop(userId, "widget.state.update", payload);
+  }
+
+  export function emitWebhookChanged(
+    userId: string,
+    action: "created" | "updated" | "deleted",
+    payload: any
+  ) {
+    broadcastToDashboards(userId, "webhook:changed", { action, ...payload });
+  }
+
+  export function emitWebhookDelivery(userId: string, payload: any) {
+    broadcastToDashboards(userId, "webhook:delivery", payload);
   }

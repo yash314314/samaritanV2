@@ -4,6 +4,7 @@ import TopBar from "../components/TopBar";
 import { AppProvider } from "../context/AppContext";
 import { WsProvider } from "../components/WsProvider";
 import ElectronFocusBridge from "../components/ElectronFocusBridge";
+import SmartBreakController from "../components/SmartBreakController";
 
 export default function RootLayout({
   children
@@ -17,6 +18,7 @@ export default function RootLayout({
           <WsProvider>
             <div className="flex h-screen min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
               <ElectronFocusBridge />
+              <SmartBreakController />
               <Sidebar />
 
               <main className="flex min-w-0 flex-1 flex-col overflow-hidden p-4 lg:p-5">

@@ -205,48 +205,49 @@ model ProjectRule {
 }
 
 model CalendarEvent {
-  id               String            @id @default(uuid())
-  userId           String
-  title            String
-  description      String?
-  location         String?
-  startAt          DateTime
-  endAt            DateTime
-  allDay           Boolean           @default(false)
-  color            String?
-  source           String            @default("manual")
-  status           String            @default("confirmed")
-  busy             Boolean           @default(true)
-  recurrenceRule   String?
-  recurrenceParentId     String?
-  recurrenceParent       CalendarEvent?  @relation("CalendarEventRecurrence", fields: [recurrenceParentId], references: [id], onDelete: Cascade)
-  recurrenceOccurrences  CalendarEvent[] @relation("CalendarEventRecurrence")
+  id                      String            @id @default(uuid())
+  userId                  String
+  title                   String
+  description             String?
+  location                String?
+  startAt                 DateTime
+  endAt                   DateTime
+  allDay                  Boolean           @default(false)
+  color                   String?
+  source                  String            @default("manual")
+  status                  String            @default("confirmed")
+  busy                    Boolean           @default(true)
+  recurrenceRule          String?
+  recurrenceParentId      String?
+  recurrenceParent        CalendarEvent?    @relation("CalendarEventRecurrence", fields: [recurrenceParentId], references: [id], onDelete: Cascade)
+  recurrenceOccurrences   CalendarEvent[]   @relation("CalendarEventRecurrence")
   recurrenceOriginalStart DateTime?
-  recurrenceException     Boolean         @default(false)
-  reminderMinutes  Int?
-  externalId       String?
-  calendarSourceId String?
-  calendarSource   CalendarSource?   @relation(fields: [calendarSourceId], references: [id], onDelete: SetNull)
-  attendeeCount    Int               @default(0)
-  attendeeStatus   String            @default("unknown")
-  eventType        String            @default("event")
-  syncStatus       String            @default("synced")
-  lastSyncedAt     DateTime?
-  updatedAt        DateTime          @updatedAt
-  projectId        String?
-  project          Project?          @relation(fields: [projectId], references: [id])
-  deepWorkId       String?
-  focusAutoStart   Boolean           @default(false)
-  focusEnforcement String            @default("warn")
-  focusAllowedApps String[]          @default([])
-  focusAllowedDomains String[]       @default([])
-  focusBlockedApps String[]          @default([])
-  focusBlockedDomains String[]       @default([])
-  notes            String?
-  calendarSessions CalendarSession[]
-  calendarReminder CalendarReminder?
+  recurrenceException     Boolean           @default(false)
+  reminderMinutes         Int?
+  externalId              String?
+  calendarSourceId        String?
+  calendarSource          CalendarSource?   @relation(fields: [calendarSourceId], references: [id], onDelete: SetNull)
+  attendeeCount           Int               @default(0)
+  attendeeStatus          String            @default("unknown")
+  eventType               String            @default("event")
+  syncStatus              String            @default("synced")
+  lastSyncedAt            DateTime?
+  updatedAt               DateTime          @updatedAt
+  projectId               String?
+  project                 Project?          @relation(fields: [projectId], references: [id])
+  deepWorkId              String?
+  focusAutoStart          Boolean           @default(false)
+  focusEnforcement        String            @default("warn")
+  focusAllowedApps        String[]          @default([])
+  focusAllowedDomains     String[]          @default([])
+  focusBlockedApps        String[]          @default([])
+  focusBlockedDomains     String[]          @default([])
+  notes                   String?
+  calendarSessions        CalendarSession[]
+  calendarReminder        CalendarReminder?
 
   @@unique([calendarSourceId, externalId])
+  @@unique([recurrenceParentId, recurrenceOriginalStart])
   @@index([userId])
   @@index([startAt, endAt])
   @@index([deepWorkId])
@@ -254,7 +255,6 @@ model CalendarEvent {
   @@index([externalId])
   @@index([calendarSourceId])
   @@index([recurrenceParentId])
-  @@unique([recurrenceParentId, recurrenceOriginalStart])
 }
 
 model CalendarReminder {
@@ -327,6 +327,132 @@ model CalendarTrackingSettings {
   timezone                     String   @default("Asia/Kolkata")
   createdAt                    DateTime @default(now())
   updatedAt                    DateTime @updatedAt
+}
+
+model SmartBreakSettings {
+  userId               String   @id
+  enabled              Boolean  @default(true)
+  workThresholdMinutes Int      @default(90)
+  breakDurationMinutes Int      @default(10)
+  snoozeMinutes        Int      @default(15)
+  resetIdleMinutes     Int      @default(5)
+  workHoursOnly        Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model SmartBreak {
+  id                 String    @id @default(uuid())
+  userId             String
+  status             String    @default("suggested")
+  openKey            String?   @unique
+  suggestedAt        DateTime  @default(now())
+  dueAt              DateTime
+  snoozedUntil       DateTime?
+  startedAt          DateTime?
+  endedAt            DateTime?
+  continuousWorkMs   Int       @default(0)
+  recommendedMinutes Int       @default(10)
+  reason             String
+  calendarSessionId  String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId, suggestedAt])
+  @@index([userId, status])
+  @@index([dueAt])
+}
+
+model DistractionBlock {
+  id               String   @id @default(uuid())
+  userId           String
+  targetType       String
+  target           String
+  normalizedTarget String
+  scope            String   @default("during_focus")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, targetType, normalizedTarget, scope])
+  @@index([userId, active])
+  @@index([userId, scope])
+}
+
+model DistractionBlockEvent {
+  id          String   @id @default(uuid())
+  userId      String
+  ruleId      String?
+  targetType  String
+  target      String
+  appName     String
+  domain      String?
+  windowTitle String?
+  processId   Int?
+  outcome     String
+  reason      String?
+  deviceId    String?
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([userId, occurredAt])
+  @@index([ruleId, occurredAt])
+  @@index([userId, outcome])
+}
+
+model WebhookEndpoint {
+  id             String            @id @default(uuid())
+  userId         String
+  name           String
+  targetUrl      String
+  events         String[]
+  secret         String
+  active         Boolean           @default(true)
+  lastDeliveryAt DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  deliveries     WebhookDelivery[]
+
+  @@index([userId, active])
+  @@index([userId, createdAt])
+}
+
+model WebhookDelivery {
+  id             String          @id @default(uuid())
+  webhookId      String
+  webhook        WebhookEndpoint @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event          String
+  idempotencyKey String
+  payload        Json
+  status         String          @default("queued")
+  attemptCount   Int             @default(0)
+  responseStatus Int?
+  responseBody   String?
+  error          String?
+  nextAttemptAt  DateTime        @default(now())
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([webhookId, idempotencyKey])
+  @@index([status, nextAttemptAt])
+  @@index([webhookId, createdAt])
+  @@index([event, createdAt])
+}
+
+model CalendarWorkHour {
+  id          String   @id @default(uuid())
+  userId      String
+  dayOfWeek   Int
+  enabled     Boolean  @default(true)
+  startMinute Int      @default(540)
+  endMinute   Int      @default(1080)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, dayOfWeek])
+  @@index([userId])
 }
 
 model CalendarSession {

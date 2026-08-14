@@ -1,12 +1,18 @@
-const { app, BrowserWindow, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, screen } = require("electron");
 const path = require("path");
-const { startTracking, setActiveDeepWorkRef, clearActiveDeepWorkRef } = require("./tracker");
+const {
+  startTracking,
+  setActiveDeepWorkRef,
+  clearActiveDeepWorkRef,
+  setDistractionRulesRef,
+} = require("./tracker");
 const { startSyncLoop } = require("./syncEngine");
 const {
   connect: connectWs,
   on: onWs,
   subscribeToDeepWork,
-  unsubscribeFromDeepWork
+  unsubscribeFromDeepWork,
+  send: sendWs,
 } = require("./wsClient");
 const { flushCurrentSession, handleFocusIntervention } = require("./sessionEngine");
 
@@ -15,6 +21,11 @@ const API_BASE = "http://localhost:4000";
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 let mainWindow;
+let widgetWindow;
+let tray;
+let widgetExpanded = false;
+let widgetPinned = true;
+let quitting = false;
 let activeDeepWork = null;
 let activeIntervention = null;
 
@@ -60,6 +71,17 @@ async function hydrateActiveDeepWork() {
     }
   } catch (err) {
     console.warn("[DeepWork] Active session hydration failed:", err.message);
+  }
+}
+
+async function hydrateDistractionBlocks() {
+  try {
+    const response = await fetch(`${API_BASE}/api/distraction-blocks/active?userId=${USER_ID}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const state = await response.json();
+    setDistractionRulesRef(state.rules || []);
+  } catch (err) {
+    console.warn("[DistractionBlocker] Rule hydration failed:", err.message);
   }
 }
 
@@ -175,15 +197,104 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+function positionWidget() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const [width, height] = widgetWindow.getSize();
+  widgetWindow.setPosition(
+    display.workArea.x + display.workArea.width - width - 18,
+    display.workArea.y + display.workArea.height - height - 18,
+    false
+  );
+}
+
+function createWidgetWindow() {
+  widgetWindow = new BrowserWindow({
+    width: 360,
+    height: 90,
+    minWidth: 360,
+    maxWidth: 360,
+    minHeight: 90,
+    maxHeight: 320,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, "widgetPreload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  widgetWindow.loadFile(path.join(__dirname, "renderer", "widget.html"));
+  widgetWindow.once("ready-to-show", () => {
+    positionWidget();
+    widgetWindow.showInactive();
+  });
+  widgetWindow.on("close", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    widgetWindow.hide();
+  });
+  widgetWindow.on("closed", () => { widgetWindow = null; });
+}
+
+async function createTray() {
+  const icon = await app.getFileIcon(process.execPath, { size: "small" });
+  tray = new Tray(icon);
+  tray.setToolTip("Samaritan Tracker");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Show Widget", click: () => { widgetWindow?.show(); positionWidget(); } },
+    { label: "Open Dashboard", click: () => openDashboard("/") },
+    { label: "Start 25 Minute Focus", click: () => sendWs("widget.startFocus", { targetMinutes: 25, goal: "Tray focus session" }) },
+    { type: "separator" },
+    { label: "Quit Samaritan", click: () => { quitting = true; app.quit(); } },
+  ]));
+  tray.on("click", () => {
+    if (!widgetWindow || widgetWindow.isDestroyed()) createWidgetWindow();
+    else if (widgetWindow.isVisible()) widgetWindow.hide();
+    else { widgetWindow.show(); positionWidget(); }
+  });
+}
+
+function openDashboard(route = "/") {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (isDev && route.startsWith("/")) mainWindow.loadURL(`http://localhost:3000${route}`);
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+app.whenReady().then(async () => {
   createWindow();
+  createWidgetWindow();
+  await createTray();
 
   // Connect WebSocket
   connectWs();
   hydrateActiveDeepWork();
+  hydrateDistractionBlocks();
 
   onWs("connection:established", () => {
     hydrateActiveDeepWork();
+    hydrateDistractionBlocks();
+    sendWs("widget.subscribe", {});
+  });
+
+  onWs("widget.state.update", (state) => {
+    if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.webContents.send("widget:state", state);
+  });
+
+  onWs("widget.action.result", (result) => {
+    if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.webContents.send("widget:actionResult", result);
+  });
+
+  onWs("distraction-blocks:changed", (state) => {
+    console.log("[WS] Distraction blocker rules changed:", state.action);
+    setDistractionRulesRef(state.rules || []);
   });
 
   // Listen for deep work events from server via WS
@@ -240,15 +351,37 @@ app.whenReady().then(() => {
     resolveActiveIntervention(reason);
   });
 
+  ipcMain.on("widget:ready", () => sendWs("widget.subscribe", {}));
+  ipcMain.on("widget:setExpanded", (_event, expanded) => {
+    widgetExpanded = Boolean(expanded);
+    if (!widgetWindow || widgetWindow.isDestroyed()) return;
+    widgetWindow.setSize(360, widgetExpanded ? 320 : 90, true);
+    positionWidget();
+  });
+  ipcMain.on("widget:setPinned", (_event, pinned) => {
+    widgetPinned = Boolean(pinned);
+    widgetWindow?.setAlwaysOnTop(widgetPinned);
+    widgetWindow?.webContents.send("widget:windowState", { pinned: widgetPinned, expanded: widgetExpanded });
+  });
+  ipcMain.on("widget:hide", () => widgetWindow?.hide());
+  ipcMain.on("widget:openDashboard", (_event, route) => openDashboard(typeof route === "string" ? route : "/"));
+  ipcMain.on("widget:startFocus", (_event, payload) => sendWs("widget.startFocus", payload));
+  ipcMain.on("widget:endFocus", (_event, payload) => sendWs("widget.endFocus", payload));
+  ipcMain.on("widget:quickTag", (_event, payload) => sendWs("widget.quickTag", payload));
+  ipcMain.on("widget:snoozeBreak", (_event, payload) => sendWs("widget.snoozeBreak", payload));
+  ipcMain.on("widget:startBreak", (_event, payload) => sendWs("widget.startBreak", payload));
+
   startTracking();
   //startSyncLoop();
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && quitting) {
     app.quit();
   }
 });
+
+app.on("before-quit", () => { quitting = true; });
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {

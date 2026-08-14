@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Shield, Timer, Zap } from "lucide-react";
+import { Loader2, Timer, Zap } from "lucide-react";
 
 import DeepWorkActiveOverlay from "@/components/focus/DeepWorkActiveOverlay";
 import DeepWorkConfigModal from "@/components/focus/DeepWorkConfigModal";
@@ -9,7 +9,8 @@ import DeepWorkExtensionPrompt from "@/components/focus/DeepWorkExtensionPrompt"
 import DeepWorkHistoryCard from "@/components/focus/DeepWorkHistoryCard";
 import DeepWorkReadinessCard from "@/components/focus/DeepWorkReadinessCard";
 import DeepWorkResultPanel from "@/components/focus/DeepWorkResultPanel";
-import { focusApi } from "@/lib/api";
+import DistractionBlockerCard from "@/components/focus/DistractionBlockerCard";
+import { breaksApi, focusApi } from "@/lib/api";
 import { getWsClient } from "@/lib/ws";
 import { useInterventionAlerts, useLiveDeepWork } from "@/lib/useWs";
 
@@ -324,7 +325,7 @@ export default function FocusPage() {
           <DeepWorkReadinessCard data={readiness} onOpenConfig={() => setConfigOpen(true)} />
         </div>
         <div className="min-h-0 xl:col-span-4">
-          <EnforcementGuide />
+          <DistractionBlockerCard focusActive={Boolean(activeSession)} />
         </div>
         <div className="min-h-0 xl:col-span-4">
           <DeepWorkHistoryCard sessions={history} onViewResult={setResultSessionId} />
@@ -355,9 +356,18 @@ export default function FocusPage() {
           actualMinutes={extensionPrompt.actual}
           goal={extensionPrompt.goal}
           onExtend={handleExtend}
-          onBreak={() => {
-            setResultSessionId(extensionPrompt.sessionId);
-            setExtensionPrompt(null);
+          onBreak={async () => {
+            try {
+              await breaksApi.start({
+                reason: "Recovery after a deep work session",
+                recommendedMinutes: 10,
+              });
+            } catch (error) {
+              console.error("Could not start recovery break", error);
+            } finally {
+              setResultSessionId(extensionPrompt.sessionId);
+              setExtensionPrompt(null);
+            }
           }}
         />
       )}
@@ -372,32 +382,6 @@ export default function FocusPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function EnforcementGuide() {
-  const levels = [
-    { label: "Observe", value: "observe", detail: "Log distractions without interrupting you." },
-    { label: "Warn", value: "warn", detail: "Show a warning notification and dashboard alert." },
-    { label: "Require Reason", value: "require_reason", detail: "Ask for justification and record the reason without killing apps." },
-    { label: "Block", value: "block", detail: "Terminate violating apps after the desktop tracker confirms the active process." },
-  ];
-
-  return (
-    <div className="samaritan-card flex h-full min-h-0 flex-col p-4">
-      <div className="mb-4 flex items-center gap-2">
-        <Shield className="h-4 w-4 text-rose-400" />
-        <h2 className="text-sm font-semibold text-zinc-300">Enforcement Levels</h2>
-      </div>
-      <div className="dashboard-scroll-panel space-y-2 pr-1">
-        {levels.map((level) => (
-          <div key={level.value} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-xs font-semibold text-zinc-200">{level.label}</div>
-            <div className="mt-1 text-xs text-zinc-500">{level.detail}</div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

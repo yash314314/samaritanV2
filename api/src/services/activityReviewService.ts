@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { recalculateSessionMetrics } from "./activityService";
 import { emitActivityReviewed } from "../websocket/broadcaster";
+import { dispatchWebhookEvent } from "./webhookService";
 
 const allowedCategories = new Set([
   "deep_work",
@@ -136,5 +137,7 @@ export async function reviewActivities(
     activityIds: requestedIds,
   };
   emitActivityReviewed(userId, result);
+  void dispatchWebhookEvent(userId, "activity.reviewed", result, requestedIds.sort().join(":"))
+    .catch((error) => console.error("Activity review webhook dispatch failed:", error));
   return result;
 }

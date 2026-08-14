@@ -3,16 +3,20 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import type { CalendarEvent } from "@prisma/client";
 import { prisma } from "../prisma";
-import { getCalendarTrackingSettings } from "./calendarTrackingService";
+import {
+  DEFAULT_CALENDAR_WORK_HOURS,
+  getCalendarTrackingSettings,
+  type CalendarWorkHourInput,
+} from "./calendarTrackingService";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const WORKDAY_START_HOUR = 9;
-const WORKDAY_END_HOUR = 18;
 const FOCUS_WINDOW_MINUTES = 60;
 const RECOVERY_BUFFER_MINUTES = 30;
 const CHAIN_GAP_MINUTES = 15;
+const RESCHEDULE_BUFFER_MINUTES = 15;
+const RESCHEDULE_HORIZON_DAYS = 14;
 const MINUTE_MS = 60_000;
 
 type BusyWindow = {
@@ -24,9 +28,134 @@ type BusyWindow = {
   eventType: string;
 };
 
+export type CalendarSlotSuggestion = {
+  eventId: string;
+  startAt: Date;
+  endAt: Date;
+  durationMs: number;
+  bufferMinutes: number;
+  movedToAnotherDay: boolean;
+  recurrenceScope: "occurrence" | null;
+};
+
+type SlotWindow = { start: Date; end: Date };
+
+function dateInZoneOffset(base: Date, dayOffset: number, zone: string) {
+  const local = dayjs(base).tz(zone);
+  const shifted = new Date(Date.UTC(local.year(), local.month(), local.date() + dayOffset));
+  const key = `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+  return { key, day: dayjs.tz(key, zone) };
+}
+
+function roundUpToQuarterHour(value: Date) {
+  return new Date(Math.ceil(value.getTime() / (15 * MINUTE_MS)) * 15 * MINUTE_MS);
+}
+
+function zonedDateAtMinute(dateKey: string, minute: number, zone: string) {
+  if (minute === 1440) {
+    return dateInZoneOffset(dayjs.tz(dateKey, zone).toDate(), 1, zone).day.toDate();
+  }
+  const hour = String(Math.floor(minute / 60)).padStart(2, "0");
+  const minutePart = String(minute % 60).padStart(2, "0");
+  return dayjs.tz(`${dateKey}T${hour}:${minutePart}`, zone).toDate();
+}
+
+export function findAvailableCalendarSlot(input: {
+  eventId: string;
+  durationMs: number;
+  searchFrom: Date;
+  originalStart: Date;
+  timeZone: string;
+  busy: SlotWindow[];
+  workHours?: CalendarWorkHourInput[];
+  horizonDays?: number;
+  bufferMinutes?: number;
+  recurrenceScope?: "occurrence" | null;
+}): CalendarSlotSuggestion | null {
+  const horizonDays = input.horizonDays ?? RESCHEDULE_HORIZON_DAYS;
+  const bufferMinutes = input.bufferMinutes ?? RESCHEDULE_BUFFER_MINUTES;
+  const bufferMs = bufferMinutes * MINUTE_MS;
+  const workHours = input.workHours ?? DEFAULT_CALENDAR_WORK_HOURS;
+  const longestWorkdayMs = Math.max(0, ...workHours.filter((item) => item.enabled).map((item) => (item.endMinute - item.startMinute) * MINUTE_MS));
+  if (input.durationMs <= 0 || input.durationMs > longestWorkdayMs) return null;
+
+  for (let offset = 0; offset <= horizonDays; offset += 1) {
+    const { key, day } = dateInZoneOffset(input.searchFrom, offset, input.timeZone);
+    const schedule = workHours.find((item) => item.dayOfWeek === day.day());
+    if (!schedule?.enabled) continue;
+    const workdayStart = zonedDateAtMinute(key, schedule.startMinute, input.timeZone);
+    const workdayEnd = zonedDateAtMinute(key, schedule.endMinute, input.timeZone);
+    let cursor = roundUpToQuarterHour(new Date(Math.max(workdayStart.getTime(), offset === 0 ? input.searchFrom.getTime() : workdayStart.getTime())));
+    const windows = input.busy
+      .filter((window) => window.end > workdayStart && window.start < workdayEnd)
+      .map((window) => ({
+        start: new Date(Math.max(workdayStart.getTime(), window.start.getTime() - bufferMs)),
+        end: new Date(Math.min(workdayEnd.getTime(), window.end.getTime() + bufferMs)),
+      }))
+      .sort((left, right) => left.start.getTime() - right.start.getTime());
+
+    for (const window of windows) {
+      if (cursor.getTime() + input.durationMs <= window.start.getTime()) break;
+      if (cursor < window.end) cursor = roundUpToQuarterHour(window.end);
+    }
+    if (cursor.getTime() + input.durationMs > workdayEnd.getTime()) continue;
+
+    const endAt = new Date(cursor.getTime() + input.durationMs);
+    return {
+      eventId: input.eventId,
+      startAt: cursor,
+      endAt,
+      durationMs: input.durationMs,
+      bufferMinutes,
+      movedToAnotherDay: dayjs(cursor).tz(input.timeZone).format("YYYY-MM-DD") !== dayjs(input.originalStart).tz(input.timeZone).format("YYYY-MM-DD"),
+      recurrenceScope: input.recurrenceScope ?? null,
+    };
+  }
+  return null;
+}
+
+export async function suggestCalendarEventSlot(userId: string, eventId: string, now = new Date()) {
+  const [event, settings] = await Promise.all([
+    prisma.calendarEvent.findFirst({ where: { id: eventId, userId, status: { not: "cancelled" } } }),
+    getCalendarTrackingSettings(userId),
+  ]);
+  if (!event) throw new Error("Calendar event not found");
+  if (event.allDay) throw new Error("All-day events must be moved manually");
+  if (event.recurrenceRule && !event.recurrenceParentId) throw new Error("Recurring series roots must be moved manually");
+
+  const durationMs = event.endAt.getTime() - event.startAt.getTime();
+  const searchFrom = new Date(Math.max(now.getTime(), event.startAt.getTime()));
+  const searchEnd = new Date(searchFrom.getTime() + (RESCHEDULE_HORIZON_DAYS + 2) * 24 * 60 * MINUTE_MS);
+  const busyEvents = await prisma.calendarEvent.findMany({
+    where: {
+      userId,
+      id: { not: event.id },
+      status: { not: "cancelled" },
+      busy: true,
+      allDay: false,
+      startAt: { lt: searchEnd },
+      endAt: { gt: new Date(searchFrom.getTime() - RESCHEDULE_BUFFER_MINUTES * MINUTE_MS) },
+    },
+    select: { startAt: true, endAt: true },
+    orderBy: { startAt: "asc" },
+  });
+
+  return findAvailableCalendarSlot({
+    eventId: event.id,
+    durationMs,
+    searchFrom,
+    originalStart: event.startAt,
+    timeZone: settings.timezone,
+    busy: busyEvents.map((item) => ({ start: item.startAt, end: item.endAt })),
+    workHours: settings.workHours,
+    recurrenceScope: event.recurrenceParentId ? "occurrence" : null,
+  });
+}
+
 export type CalendarIntelligence = {
   timezone: string;
   workday: { startHour: number; endHour: number };
+  workHours: CalendarWorkHourInput[];
   summary: {
     pressureScore: number;
     pressureLevel: "low" | "balanced" | "high" | "critical";
@@ -127,13 +256,14 @@ export async function getCalendarIntelligence(userId: string, from: Date, to: Da
   let cursor = firstDay;
 
   while (cursor.valueOf() <= lastDay.valueOf()) {
-    if (cursor.day() === 0 || cursor.day() === 6) {
-      cursor = cursor.add(1, "day");
+    const schedule = settings.workHours.find((item) => item.dayOfWeek === cursor.day());
+    if (!schedule?.enabled) {
+      cursor = dateInZoneOffset(cursor.toDate(), 1, zone).day;
       continue;
     }
     const date = cursor.format("YYYY-MM-DD");
-    const workdayStart = cursor.hour(WORKDAY_START_HOUR).minute(0).second(0).millisecond(0).toDate();
-    const workdayEnd = cursor.hour(WORKDAY_END_HOUR).minute(0).second(0).millisecond(0).toDate();
+    const workdayStart = zonedDateAtMinute(date, schedule.startMinute, zone);
+    const workdayEnd = zonedDateAtMinute(date, schedule.endMinute, zone);
     const windows = events
       .map((event) => clipWindow(event, workdayStart, workdayEnd))
       .filter((window): window is BusyWindow => Boolean(window))
@@ -183,7 +313,7 @@ export async function getCalendarIntelligence(userId: string, from: Date, to: Da
       focusWindows.push({ ...window, startAt: futureStart, durationMs: window.endAt.getTime() - futureStart.getTime() });
     }
 
-    const workdayMs = (WORKDAY_END_HOUR - WORKDAY_START_HOUR) * 60 * MINUTE_MS;
+    const workdayMs = (schedule.endMinute - schedule.startMinute) * MINUTE_MS;
     const meetingLoadPercent = Math.round((busyMs / workdayMs) * 100);
     const longestFocusMs = Math.max(0, ...dayFocusWindows.map((window) => window.durationMs));
     const chainPenalty = windows.slice(1).filter((window, index) => {
@@ -200,7 +330,7 @@ export async function getCalendarIntelligence(userId: string, from: Date, to: Da
       if (windows.length > 0 && longestFocusMs < FOCUS_WINDOW_MINUTES * MINUTE_MS) recommendations.push({ id: `fragmented-${date}`, severity: "warning", title: "No deep-work window", detail: `There is no uninterrupted ${FOCUS_WINDOW_MINUTES}-minute block inside the workday.`, date });
     }
 
-    cursor = cursor.add(1, "day");
+    cursor = dateInZoneOffset(cursor.toDate(), 1, zone).day;
   }
 
   const availableFocusMs = focusWindows.reduce((sum, window) => sum + window.durationMs, 0);
@@ -209,9 +339,14 @@ export async function getCalendarIntelligence(userId: string, from: Date, to: Da
   const compressedGapCount = days.reduce((sum, day) => sum + day.compressedGapCount, 0);
   if (recommendations.length === 0) recommendations.push({ id: "balanced", severity: "info", title: "Schedule has breathing room", detail: "No material conflicts or high-pressure meeting patterns were found in this range." });
 
+  const enabledWorkHours = settings.workHours.filter((item) => item.enabled);
   return {
     timezone: zone,
-    workday: { startHour: WORKDAY_START_HOUR, endHour: WORKDAY_END_HOUR },
+    workday: {
+      startHour: (enabledWorkHours.length ? Math.min(...enabledWorkHours.map((item) => item.startMinute)) : 9 * 60) / 60,
+      endHour: (enabledWorkHours.length ? Math.max(...enabledWorkHours.map((item) => item.endMinute)) : 18 * 60) / 60,
+    },
+    workHours: settings.workHours,
     summary: {
       pressureScore: averagePressure,
       pressureLevel: pressureLevel(averagePressure),

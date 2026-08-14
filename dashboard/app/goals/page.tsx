@@ -3,6 +3,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { Archive, CheckCircle2, Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { goalsApi, projectsApi } from "@/lib/api";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import { useWsMessage } from "@/lib/ws";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -69,16 +70,17 @@ export default function GoalsPage() {
   }, []);
 
   useEffect(() => {
-    loadGoals().catch(console.error);
+    goalsApi.list(USER_ID).then((data) => setGoals(data)).catch(console.error);
     projectsApi.list(USER_ID).then((data) => setProjects(data)).catch(console.error);
-  }, [loadGoals]);
+  }, []);
 
   useWsMessage<{ goals: Goal[] }>("goal:progress", (payload) => {
     setGoals(payload.goals);
   });
 
-  useWsMessage("goal:changed", () => {
-    loadGoals().catch(console.error);
+  useRealtimeRefresh(loadGoals, {
+    events: ["goal:changed", "calendar:session.started", "calendar:session.updated", "calendar:session.ended", "calendar:changed", "project:changed"],
+    debounceMs: 500,
   });
 
   function openEdit(goal: Goal) {

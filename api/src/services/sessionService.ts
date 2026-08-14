@@ -9,6 +9,8 @@ import { emitActivityCreated, emitSessionMetricsUpdated } from "../websocket/bro
 import { emitGoalProgress } from "../websocket/broadcaster";
 import { updateAndEmitGoalProgress } from "./goalProgressService";
 import { reconcileCalendarActivity } from "./calendarTrackingService";
+import { evaluateSmartBreak } from "./smartBreakService";
+import { updateWidgetPersistedActivity } from "./widgetStateService";
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;
@@ -177,9 +179,16 @@ export async function createActivityFromTracker(data: {
 
   // ─── WebSocket broadcast ───
   emitActivityCreated(data.userId, activity);
+  updateWidgetPersistedActivity(data.userId, activity).catch((error) => {
+    console.error("[WidgetState] Persisted activity update failed", error);
+  });
 
   reconcileCalendarActivity(data.userId, activity).catch((error) => {
     console.error("[CalendarTracking] Activity reconciliation failed", error);
+  });
+
+  evaluateSmartBreak(data.userId).catch((error) => {
+    console.error("[SmartBreak] Activity evaluation failed", error);
   });
 
   const updatedSession = await prisma.session.findUnique({

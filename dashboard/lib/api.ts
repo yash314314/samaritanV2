@@ -25,7 +25,7 @@ export function clearApiCache() {
 
 function isCacheableGet(endpoint: string): boolean {
   // Never cache live session/status endpoints (their responses are time-sensitive).
-  return !/(\/active|\/status)/.test(endpoint);
+  return !/(\/active|\/status|\/next-suggestion|\/distraction-blocks|\/webhooks)/.test(endpoint);
 }
 
 // â”€â”€â”€ UNIFIED REQUEST HELPER â”€â”€â”€
@@ -306,6 +306,10 @@ export const calendarApi = {
     request(`/api/calendar/sessions/insights?${new URLSearchParams({ userId, from, to })}`),
   intelligence: (userId: string, from: string, to: string) =>
     request(`/api/calendar/intelligence?${new URLSearchParams({ userId, from, to })}`),
+  workHoursUtilization: (userId: string, from: string, to: string) =>
+    request(`/api/calendar/work-hours/utilization?${new URLSearchParams({ userId, from, to })}`),
+  slotSuggestion: (userId: string, eventId: string) =>
+    request(`/api/calendar/intelligence/slot-suggestion?${new URLSearchParams({ userId, eventId })}`),
   startManualSession: (data: { userId: string; type: string; title?: string; projectId?: string }) =>
     request("/api/calendar/sessions/manual/start", {
       method: "POST",
@@ -412,4 +416,93 @@ export const ratingsApi = {
     if (to) params.append("to", to);
     return request(`/api/ratings?${params}`);
   },
+};
+
+// SMART BREAKS API
+export const breaksApi = {
+  next: () => request(`/api/breaks/next-suggestion?${new URLSearchParams({ userId: USER_ID })}`),
+  settings: () => request(`/api/breaks/settings?${new URLSearchParams({ userId: USER_ID })}`),
+  updateSettings: (data: {
+    enabled?: boolean;
+    workThresholdMinutes?: number;
+    breakDurationMinutes?: number;
+    snoozeMinutes?: number;
+    resetIdleMinutes?: number;
+    workHoursOnly?: boolean;
+  }) => request("/api/breaks/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ userId: USER_ID, ...data }),
+  }),
+  start: (data: { breakId?: string; recommendedMinutes?: number; reason?: string } = {}) =>
+    request("/api/breaks/start", {
+      method: "POST",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  snooze: (id: string, minutes?: number) => request(`/api/breaks/${id}/snooze`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID, minutes }),
+  }),
+  skip: (id: string) => request(`/api/breaks/${id}/skip`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID }),
+  }),
+  end: (id: string) => request(`/api/breaks/${id}/end`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID }),
+  }),
+  history: (from?: string, to?: string) => {
+    const params = new URLSearchParams({ userId: USER_ID });
+    if (from) params.append("from", from);
+    if (to) params.append("to", to);
+    return request(`/api/breaks/history?${params}`);
+  },
+};
+
+export const distractionBlocksApi = {
+  dashboard: () => request(`/api/distraction-blocks?${new URLSearchParams({ userId: USER_ID })}`),
+  active: () => request(`/api/distraction-blocks/active?${new URLSearchParams({ userId: USER_ID })}`),
+  create: (data: { targetType: "app" | "domain"; target: string; scope: "always" | "during_focus" }) =>
+    request("/api/distraction-blocks", {
+      method: "POST",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  update: (id: string, data: { active?: boolean; scope?: "always" | "during_focus"; target?: string }) =>
+    request(`/api/distraction-blocks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  delete: (id: string) => request(`/api/distraction-blocks/${id}?${new URLSearchParams({ userId: USER_ID })}`, {
+    method: "DELETE",
+  }),
+};
+
+export const webhooksApi = {
+  events: () => request("/api/webhooks/events"),
+  list: () => request(`/api/webhooks?${new URLSearchParams({ userId: USER_ID })}`),
+  create: (data: { name: string; targetUrl: string; events: string[]; active?: boolean }) =>
+    request("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  update: (id: string, data: { name?: string; targetUrl?: string; events?: string[]; active?: boolean }) =>
+    request(`/api/webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  delete: (id: string) => request(`/api/webhooks/${id}?${new URLSearchParams({ userId: USER_ID })}`, {
+    method: "DELETE",
+  }),
+  test: (id: string) => request(`/api/webhooks/${id}/test`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID }),
+  }),
+  rotateSecret: (id: string) => request(`/api/webhooks/${id}/rotate-secret`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID }),
+  }),
+  deliveries: (id: string) => request(`/api/webhooks/${id}/deliveries?${new URLSearchParams({ userId: USER_ID })}`),
+  retry: (id: string) => request(`/api/webhooks/deliveries/${id}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ userId: USER_ID }),
+  }),
 };

@@ -112,6 +112,15 @@ body {
   from { opacity: 0; transform: scaleX(0); }
   to { opacity: 1; transform: scaleX(1); }
 }
+
+@keyframes webhook-row-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.webhook-row-enter {
+  animation: webhook-row-enter 220ms ease-out both;
+}
 /* ===========================
    Square Tile Calendar (Fixed)
    =========================== */
@@ -197,6 +206,31 @@ body {
   30% { transform: rotate(-10deg); }
   45% { transform: rotate(6deg); }
   60% { transform: rotate(0deg); }
+}
+
+@keyframes smart-break-enter {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes smart-break-breathe {
+  0%, 100% { transform: scale(0.94); box-shadow: 0 0 35px rgba(168, 85, 247, 0.08); }
+  50% { transform: scale(1.04); box-shadow: 0 0 75px rgba(168, 85, 247, 0.2); }
+}
+
+.smart-break-enter {
+  animation: smart-break-enter 220ms ease-out both;
+}
+
+.smart-break-breathe {
+  animation: smart-break-breathe 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smart-break-enter,
+  .smart-break-breathe {
+    animation: none;
+  }
 }
 
 .calendar-reminder-enter {

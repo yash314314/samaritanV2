@@ -196,6 +196,13 @@ function streamCurrentActivity(context) {
   return true;
 }
 
+function reportDistractionBlock(event) {
+  send("distraction-block:event", {
+    id: crypto.randomUUID(),
+    ...event,
+  });
+}
+
 /** Subscribe to deep work state changes */
 function subscribeToDeepWork(deepWorkId) {
   send("session:subscribe", { deepWorkId });
@@ -218,6 +225,7 @@ module.exports = {
   off,
   streamActivity,
   streamCurrentActivity,
+  reportDistractionBlock,
   subscribeToDeepWork,
   unsubscribeFromDeepWork,
   get isConnected() { return isConnected; },
