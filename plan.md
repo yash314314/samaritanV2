@@ -302,15 +302,15 @@ File: api/src/jobs/aggregateProjectTime.ts (new)
 
 ### 7.1 Verification Checklist
 
-- [ ] api: npx tsc --noEmit -> 0 errors
-- [ ] dashboard: npm run build -> compiles, routes generated
-- [ ] All new API routes return 200 with test data
-- [ ] Projects CRUD works (create, read, update, delete)
-- [ ] Calendar events display correctly in month grid
-- [ ] Goals page renders with sample data
-- [ ] Desktop session engine tags activities to projects
-- [ ] ProjectTime aggregation runs without errors
-- [ ] WebSocket updates propagate to dashboard
+- [x] api: npx tsc --noEmit -> 0 errors
+- [x] dashboard: npm run build -> compiles, routes generated
+- [x] All new API routes return 200 with test data
+- [x] Projects CRUD works (create, read, update, archive, restore)
+- [x] Calendar events display correctly in month, week, day, and agenda views
+- [x] Goals dashboard renders live progress, pace, and history
+- [x] Desktop session engine tags activities to projects
+- [x] ProjectTime aggregation runs without errors
+- [x] WebSocket updates propagate to dashboard
 
 ### 7.2 Build Commands
 
@@ -328,12 +328,12 @@ npm run start
 
 ### 7.3 Polish
 
-- [ ] Add loading skeletons for new pages
-- [ ] Add error boundaries
-- [ ] Add empty states for projects/calendar/goals
+- [x] Add loading skeletons for dashboard routes
+- [x] Add recoverable route error boundary
+- [x] Add empty states for projects/calendar/goals
 - [ ] Responsive design check
 - [ ] Color theme consistency
-- [ ] Accessibility (keyboard nav, ARIA labels)
+- [x] Accessibility for Projects and Goals navigation, filters, and selections
 
 ---
 
@@ -389,5 +389,5 @@ dashboard/
 
 ---
 
-**Last updated:** 2026-08-09
-**Status:** Phase 0 complete ✅, Phase 1 complete ✅, Phase 2 complete ✅, Phase 3 complete ✅, Phase 4 complete ✅, Phase 5 in progress 🚧
+**Last updated:** 2026-08-14
+**Status:** Phases 0-4 complete. Phase 5 verification and route-state polish complete; responsive visual QA remains.

@@ -150,6 +150,7 @@ export async function deleteDistractionBlock(userId: string, id: string) {
 export async function recordDistractionBlockEvent(userId: string, input: {
   id?: unknown;
   ruleId?: unknown;
+  deepWorkId?: unknown;
   targetType?: unknown;
   target?: unknown;
   appName?: unknown;
@@ -179,6 +180,7 @@ export async function recordDistractionBlockEvent(userId: string, input: {
         ...(id ? { id } : {}),
         userId,
         ruleId,
+        deepWorkId: typeof input.deepWorkId === "string" ? input.deepWorkId : null,
         targetType: type,
         target: requiredText(input.target, "Target", 120),
         appName: requiredText(input.appName, "App name", 160),

@@ -35,6 +35,11 @@ async function logMinuteForSession(sessionId: string) {
 
   if (!session || session.status !== "active") return;
 
+  if (session.currentPhase !== "focus" || session.pausedAt) {
+    await pushDeepWorkState(session.userId, sessionId);
+    return;
+  }
+
   const nextMinuteIndex = session.minuteLogs.length;
 
   const now = new Date();

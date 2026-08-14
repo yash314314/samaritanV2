@@ -70,12 +70,12 @@ export function calculateProjectTime(intervals: ProjectTimeInterval[]) {
   );
 }
 
-async function projectIntervals(userId: string, from: Date, to: Date, now = new Date()) {
+export async function getProjectTimeIntervals(userId: string, from: Date, to: Date, now = new Date(), projectId?: string) {
   const [activities, calendarSessions] = await Promise.all([
     prisma.activity.findMany({
       where: {
         session: { userId },
-        projectId: { not: null },
+        projectId: projectId ?? { not: null },
         OR: [{ category: { not: "distracting" } }, { category: null }],
         startTime: { lt: to },
         endTime: { gt: from },
@@ -85,7 +85,7 @@ async function projectIntervals(userId: string, from: Date, to: Date, now = new 
     prisma.calendarSession.findMany({
       where: {
         userId,
-        projectId: { not: null },
+        projectId: projectId ?? { not: null },
         type: { in: ["meeting", "focus"] },
         status: { in: ["confirmed", "active"] },
         actualStart: { lt: to },
@@ -120,7 +120,7 @@ async function projectIntervals(userId: string, from: Date, to: Date, now = new 
 }
 
 export async function getProjectTimeRange(userId: string, from: Date, to: Date, now = new Date()) {
-  return calculateProjectTime(await projectIntervals(userId, from, to, now));
+  return calculateProjectTime(await getProjectTimeIntervals(userId, from, to, now));
 }
 
 export async function getCurrentProjectWeek(userId: string, now = new Date()) {

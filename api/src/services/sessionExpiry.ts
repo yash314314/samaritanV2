@@ -1,5 +1,4 @@
 import { prisma } from "../prisma";
-import { emitDeepWorkExpired } from "../websocket/broadcaster";
 import { completeDeepWorkSessionByTimer } from "./deepWorkService";
 
 export function startSessionExpiryChecker() {
@@ -15,31 +14,13 @@ export function startSessionExpiryChecker() {
       });
 
       for (const session of activeSessions) {
-        const plannedEnd = new Date(
-          session.startedAt.getTime() + session.plannedMinutes * 60 * 1000
-        );
-
-        if (session.plannedMinutes <= 0) {
-          await prisma.deepWorkSession.update({
-            where: { id: session.id },
-            data: {
-              status: "expired",
-              endedAt: now
-            }
-          });
-
-          emitDeepWorkExpired(session.userId, session.id);
-          console.log(`[SessionExpiry] Session ${session.id} expired`);
-          continue;
-        }
-
-        if (now >= plannedEnd) {
+        if (!session.pausedAt && session.phaseEndsAt && now >= session.phaseEndsAt) {
           await completeDeepWorkSessionByTimer(session.id);
-          console.log(`[SessionExpiry] Session ${session.id} completed by timer`);
+          console.log(`[SessionExpiry] Advanced timer for session ${session.id}`);
         }
       }
     } catch (err) {
       console.error("[SessionExpiry] Error:", err);
     }
-  }, 10000);
+  }, 1000);
 }

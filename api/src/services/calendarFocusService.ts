@@ -78,6 +78,7 @@ export async function activateCalendarFocusSession(sessionId: string, now = new 
   const plannedMinutes = Math.max(1, Math.ceil((session.scheduledEnd.getTime() - now.getTime()) / 60_000));
   const deepWork = await startDeepWorkSession({
     userId: session.userId,
+    projectId: session.projectId,
     goal: event.title,
     plannedMinutes,
     enforcement: ENFORCEMENT_LEVELS.has(event.focusEnforcement) ? event.focusEnforcement : "warn",

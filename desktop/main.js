@@ -43,7 +43,9 @@ function setActiveDeepWork(session) {
     allowedApps: session.allowedApps || [],
     allowedDomains: session.allowedDomains || [],
     blockedApps: session.blockedApps || [],
-    blockedDomains: session.blockedDomains || []
+    blockedDomains: session.blockedDomains || [],
+    currentPhase: session.currentPhase || "focus",
+    paused: Boolean(session.paused ?? session.pausedAt)
   };
 
   // Sync the deep work session to the tracker for pre-emptive process killing
@@ -152,6 +154,7 @@ async function resolveActiveIntervention(reason) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        userId: USER_ID,
         reason,
         action: "allowed_once"
       })
@@ -308,6 +311,17 @@ app.whenReady().then(async () => {
     clearActiveDeepWork(sessionId, result?.endedAt).catch((err) => {
       console.error("[DeepWork] Failed to flush session on end:", err.message);
     });
+  });
+
+  onWs("deepwork:state", (state = {}) => {
+    if (!activeDeepWork || state.sessionId !== activeDeepWork.id) return;
+    activeDeepWork = {
+      ...activeDeepWork,
+      currentPhase: state.currentPhase || activeDeepWork.currentPhase,
+      paused: Boolean(state.paused),
+    };
+    setActiveDeepWorkRef(activeDeepWork);
+    if (activeDeepWork.currentPhase !== "focus" || activeDeepWork.paused) clearInterventionOverlay();
   });
 
   onWs("deepwork:expired", ({ sessionId, endedAt } = {}) => {

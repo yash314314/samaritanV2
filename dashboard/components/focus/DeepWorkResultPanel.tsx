@@ -5,7 +5,6 @@ import {
   X,
   Clock,
   Zap,
-  TrendingUp,
   Shield,
   AlertTriangle,
   CheckCircle2,
@@ -23,6 +22,8 @@ import {
   Gauge,
   Activity,
   Flame,
+  Coffee,
+  Layers3,
 } from "lucide-react";
 import { focusApi } from "../../lib/api";
 import {
@@ -56,6 +57,26 @@ interface Intervention {
   reason?: string | null;
   detectedAt: string;
   durationMs?: number;
+  resolution?: string | null;
+  resolvedAt?: string | null;
+}
+
+interface DeepWorkPhase {
+  id: string;
+  type: "focus" | "short_break" | "long_break";
+  round: number;
+  status: string;
+  plannedSeconds: number;
+  actualSeconds?: number | null;
+}
+
+interface EnforcementEvent {
+  id: string;
+  appName: string;
+  outcome: string;
+  method?: string | null;
+  error?: string | null;
+  createdAt: string;
 }
 
 interface SessionMetrics {
@@ -71,6 +92,13 @@ interface SessionMetrics {
   violationCount?: number;
   interruptionMs?: number;
   avgRecoveryMinutes?: number;
+  focusedMinutes?: number;
+  breakMinutes?: number;
+  blockedCount?: number;
+  blockFailureCount?: number;
+  warnedCount?: number;
+  reasonRequiredCount?: number;
+  overrideCount?: number;
 }
 
 interface SessionInfo {
@@ -83,6 +111,11 @@ interface SessionInfo {
   endedAt?: string | null;
   status: string;
   enforcement?: string;
+  timerMode?: string;
+  totalRounds?: number;
+  completedRounds?: number;
+  ambientSound?: string;
+  project?: { id: string; name: string; color?: string | null } | null;
 }
 
 interface ResultApiResponse {
@@ -90,6 +123,8 @@ interface ResultApiResponse {
   metrics?: SessionMetrics;
   timeSeries?: TimeSeriesPoint[];
   interventions?: Intervention[];
+  phases?: DeepWorkPhase[];
+  enforcementEvents?: EnforcementEvent[];
 }
 
 interface Props {
@@ -152,6 +187,8 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   const session = result.session ?? ({} as SessionInfo);
   const metrics = result.metrics ?? {};
   const interventions = result.interventions ?? [];
+  const phases = result.phases ?? [];
+  const enforcementEvents = result.enforcementEvents ?? [];
   const timeSeries = result.timeSeries ?? [];
 
   const plannedMin = session.plannedMinutes || 0;
@@ -175,6 +212,10 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   // Violations
   const violationCount = metrics.violationCount ?? 0;
   const avgRecoveryMinutes = metrics.avgRecoveryMinutes ?? 0;
+  const focusedMinutes = metrics.focusedMinutes ?? 0;
+  const breakMinutes = metrics.breakMinutes ?? 0;
+  const blockedCount = metrics.blockedCount ?? 0;
+  const blockFailureCount = metrics.blockFailureCount ?? 0;
 
   // ─── Chart data: per-second interpolation from backend ───
   // Downsample to ~300 points max for chart performance while keeping the curve smooth
@@ -236,6 +277,34 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
             <ResultCard icon={<Target className="h-4 w-4" />} label="Efficiency" value={`${focusEfficiency}%`} sub="productive / total" color="text-amber-400" bg="bg-amber-500/10" border="border-amber-500/20" />
           </div>
 
+          <div className="grid gap-3 md:grid-cols-2">
+            <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-500"><Layers3 className="h-4 w-4 text-purple-400" />Session structure</h3>
+                <span className="text-[10px] text-zinc-600">{session.timerMode === "pomodoro" ? `${session.completedRounds ?? 0}/${session.totalRounds ?? 0} rounds` : "Countdown"}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="block text-[10px] uppercase text-zinc-600">Focused</span><strong className="tabular-nums text-purple-300">{focusedMinutes.toFixed(1)}m</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-600">Recovery breaks</span><strong className="tabular-nums text-cyan-300">{breakMinutes.toFixed(1)}m</strong></div>
+              </div>
+              {phases.length > 0 && <div className="mt-4 flex h-2 gap-1 overflow-hidden rounded-full bg-zinc-900" aria-label="Session phase timeline">{phases.map((phase) => <span key={phase.id} title={`${phase.type.replace("_", " ")} - round ${phase.round}`} className={`min-w-1 flex-1 rounded-full ${phase.type === "focus" ? "bg-purple-500" : "bg-cyan-400"} ${phase.status === "completed" ? "opacity-100" : "opacity-40"}`} />)}</div>}
+              <div className="mt-2 flex items-center gap-3 text-[10px] text-zinc-600"><span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-purple-500" />Focus</span><span className="flex items-center gap-1"><Coffee className="h-3 w-3 text-cyan-400" />Break</span>{session.project && <span className="ml-auto truncate">{session.project.name}</span>}</div>
+            </section>
+
+            <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-500"><Shield className="h-4 w-4 text-emerald-400" />Enforcement outcome</h3>
+                <span className="text-[10px] uppercase text-zinc-600">{session.enforcement?.replace("_", " ") || "observe"}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div><span className="block text-[10px] uppercase text-zinc-600">Stopped</span><strong className="tabular-nums text-emerald-300">{blockedCount}</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-600">Failed</span><strong className={`tabular-nums ${blockFailureCount ? "text-rose-300" : "text-zinc-400"}`}>{blockFailureCount}</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-600">Overrides</span><strong className="tabular-nums text-amber-300">{metrics.overrideCount ?? 0}</strong></div>
+              </div>
+              <p className="mt-4 truncate text-[10px] text-zinc-600">{enforcementEvents.length ? `${enforcementEvents.length} desktop enforcement attempt${enforcementEvents.length === 1 ? "" : "s"} recorded` : interventions.length ? `${interventions.length} intervention${interventions.length === 1 ? "" : "s"} recorded` : "No protocol violations detected"}</p>
+            </section>
+          </div>
+
           {/* Adherence & Violations */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -280,6 +349,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
                             {inv.windowTitle && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span className="truncate"><span className="text-zinc-400 font-medium">Window:</span> {inv.windowTitle}</span></div>}
                             {inv.domain && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Domain:</span> {inv.domain}</span></div>}
                             {inv.reason && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Reason:</span> {inv.reason}</span></div>}
+                            {inv.resolution && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><CheckCircle2 className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Resolution:</span> {inv.resolution.replace("_", " ")}</span></div>}
                             {inv.durationMs !== undefined && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><Timer className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Duration:</span> {Math.round(inv.durationMs / 1000)}s</span></div>}
                           </div>
                         )}

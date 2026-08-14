@@ -27,6 +27,7 @@ const maxAttempts = retryDelaysMs.length + 1;
 const requestTimeoutMs = 8_000;
 let dispatcherTimer: NodeJS.Timeout | null = null;
 let processing = false;
+const webhooksEnabled = false;
 
 function requiredText(value: unknown, label: string, max = 200) {
   const text = typeof value === "string" ? value.trim() : "";
@@ -174,6 +175,7 @@ export async function dispatchWebhookEvent(
   data: unknown,
   idempotencySeed: string = randomUUID()
 ) {
+  if (!webhooksEnabled) return { queued: 0 };
   const endpoints = await prisma.webhookEndpoint.findMany({ where: { userId, active: true, events: { has: event } } });
   if (!endpoints.length) return { queued: 0 };
   const occurredAt = new Date().toISOString();
@@ -319,6 +321,7 @@ export async function retryWebhookDelivery(userId: string, deliveryId: string) {
 }
 
 export function startWebhookDispatcher() {
+  if (!webhooksEnabled) return;
   if (dispatcherTimer) return;
   void processDueWebhookDeliveries();
   dispatcherTimer = setInterval(() => void processDueWebhookDeliveries(), 15_000);

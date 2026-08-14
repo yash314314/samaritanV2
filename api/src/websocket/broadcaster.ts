@@ -123,6 +123,7 @@ import {
   
   export function emitDeepWorkStarted(userId: string, session: {
     id: string;
+    projectId?: string | null;
     goal: string | null;
     plannedMinutes: number;
     enforcement: string;
@@ -131,6 +132,18 @@ import {
     allowedDomains?: string[];
     blockedApps?: string[];
     blockedDomains?: string[];
+    timerMode: string;
+    focusMinutes: number;
+    shortBreakMinutes: number;
+    longBreakMinutes: number;
+    totalRounds: number;
+    currentRound: number;
+    currentPhase: string;
+    phaseStartedAt: Date;
+    phaseEndsAt: Date | null;
+    pausedAt: Date | null;
+    ambientSound: string;
+    ambientVolume: number;
   }) {
     broadcastToDashboards(userId, "deepwork:started", session);
     broadcastToDesktop(userId, "deepwork:started", session);
@@ -141,7 +154,7 @@ import {
         plannedMinutes: session.plannedMinutes,
         startedAt: session.startedAt,
         enforcement: session.enforcement,
-        remainingSeconds: session.plannedMinutes * 60,
+        remainingSeconds: session.focusMinutes * 60,
       },
       updatedAt: new Date(),
     });
@@ -149,7 +162,7 @@ import {
   
   export function emitDeepWorkEnded(userId: string, sessionId: string, result: any) {
     broadcastToDashboards(userId, "deepwork:ended", { sessionId, result });
-    broadcastToDesktop(userId, "deepwork:ended", { sessionId });
+    broadcastToDesktop(userId, "deepwork:ended", { sessionId, result });
     emitWidgetStateUpdate(userId, { focus: null, updatedAt: new Date() });
   }
   
@@ -163,13 +176,24 @@ import {
     distractionMs: number;
     idleMs: number;
     interruptionMs?: number;
+    timerMode: string;
+    currentPhase: string;
+    currentRound: number;
+    totalRounds: number;
+    paused: boolean;
+    phaseStartedAt: Date;
+    phaseEndsAt: Date | null;
+    phaseElapsedSeconds: number;
+    phaseRemainingSeconds: number;
+    elapsedSeconds: number;
+    enforcementActive: boolean;
   }) {
-    broadcastToSession(userId, sessionId, "deepwork:state", state);
+    broadcastToSession(userId, sessionId, "deepwork:state", { sessionId, ...state });
     broadcastToDesktop(userId, "deepwork:state", { sessionId, ...state });
     emitWidgetStateUpdate(userId, {
       focusState: {
         sessionId,
-        remainingSeconds: Math.max(0, Math.round(state.remainingMinutes * 60)),
+        remainingSeconds: state.phaseRemainingSeconds,
         focusScore: state.focusScore,
         productivityScore: state.productivityScore,
         violationCount: state.violationCount,
@@ -186,7 +210,7 @@ import {
     idle: boolean;
     appName: string | null;
   }) {
-    broadcastToSession(userId, sessionId, "deepwork:minute", minuteLog);
+    broadcastToSession(userId, sessionId, "deepwork:minute", { sessionId, ...minuteLog });
   }
   
   export function emitDeepWorkExpired(userId: string, sessionId: string) {

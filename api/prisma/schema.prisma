@@ -95,12 +95,28 @@ model AppPattern {
 model DeepWorkSession {
   id             String    @id @default(uuid())
   userId         String
+  projectId      String?
+  project        Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   goal           String?
   plannedMinutes Int
   startedAt      DateTime  @default(now())
   endedAt        DateTime?
   status         String // active | completed | abandoned
   enforcement    String // observe | warn | require_reason | block
+
+  timerMode             String   @default("countdown") // countdown | pomodoro
+  focusMinutes          Int      @default(25)
+  shortBreakMinutes     Int      @default(5)
+  longBreakMinutes      Int      @default(15)
+  totalRounds           Int      @default(1)
+  currentRound          Int      @default(1)
+  currentPhase          String   @default("focus") // focus | short_break | long_break
+  phaseStartedAt        DateTime @default(now())
+  phaseEndsAt           DateTime?
+  pausedAt              DateTime?
+  pausedRemainingSeconds Int?
+  ambientSound          String   @default("none")
+  ambientVolume         Float    @default(0.35)
 
   allowedApps    String[]
   allowedDomains String[]
@@ -116,8 +132,29 @@ model DeepWorkSession {
   productivityScore Float               @default(0)
   interventions     FocusIntervention[]
   minuteLogs        DeepWorkMinuteLog[]
+  phases            DeepWorkPhase[]
   createdAt         DateTime            @default(now())
   lastViolationAt   DateTime?
+
+  @@index([userId, startedAt])
+  @@index([projectId, startedAt])
+}
+
+model DeepWorkPhase {
+  id             String          @id @default(uuid())
+  deepWorkId     String
+  deepWork       DeepWorkSession @relation(fields: [deepWorkId], references: [id], onDelete: Cascade)
+  type           String
+  round          Int
+  plannedSeconds Int
+  actualSeconds  Int             @default(0)
+  pausedSeconds  Int             @default(0)
+  status         String          @default("active") // active | completed | skipped | abandoned
+  startedAt      DateTime        @default(now())
+  endedAt        DateTime?
+
+  @@index([deepWorkId, startedAt])
+  @@index([deepWorkId, round, type])
 }
 
 model FocusIntervention {
@@ -135,6 +172,8 @@ model FocusIntervention {
 
   action     String
   reason     String?
+  resolution String?
+  resolvedAt DateTime?
   durationMs Int?
 
   @@index([deepWorkId])
@@ -176,11 +215,13 @@ model Project {
   id             String   @id @default(uuid())
   userId         String
   name           String
+  description    String?
   icon           String?
   color          String   @default("#8b5cf6")
   weeklyHourGoal Float    @default(10)
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   rules            ProjectRule[]
   time             ProjectTime[]
@@ -188,6 +229,7 @@ model Project {
   events           CalendarEvent[]
   calendarSessions CalendarSession[]
   activities       Activity[]
+  deepWorkSessions DeepWorkSession[]
 }
 
 model ProjectRule {
@@ -383,6 +425,7 @@ model DistractionBlockEvent {
   id          String   @id @default(uuid())
   userId      String
   ruleId      String?
+  deepWorkId  String?
   targetType  String
   target      String
   appName     String
@@ -397,6 +440,7 @@ model DistractionBlockEvent {
 
   @@index([userId, occurredAt])
   @@index([ruleId, occurredAt])
+  @@index([deepWorkId, occurredAt])
   @@index([userId, outcome])
 }
 
@@ -516,26 +560,46 @@ model ProjectTime {
 }
 
 model Goal {
-  id          String    @id @default(uuid())
+  id          String         @id @default(uuid())
   userId      String
   title       String
   description String?
-  type        String    @default("focus_minutes")
+  type        String         @default("focus_minutes")
   unit        String?
   target      Float
-  period      String    @default("daily")
+  period      String         @default("daily")
   startDate   DateTime?
   endDate     DateTime?
-  priority    String    @default("medium")
-  progress    Float     @default(0)
+  priority    String         @default("medium")
+  progress    Float          @default(0)
   completedAt DateTime?
   projectId   String?
-  project     Project?  @relation(fields: [projectId], references: [id])
-  active      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
+  project     Project?       @relation(fields: [projectId], references: [id])
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  snapshots   GoalProgress[]
 
   @@index([userId])
   @@index([active, period])
+}
+
+model GoalProgress {
+  id          String    @id @default(uuid())
+  goalId      String
+  goal        Goal      @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  periodEnd   DateTime
+  progress    Float     @default(0)
+  target      Float
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([goalId, periodStart])
+  @@index([goalId, periodStart])
+  @@index([completed, periodEnd])
 }
 
 model Rating {

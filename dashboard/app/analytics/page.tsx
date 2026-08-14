@@ -14,9 +14,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer,
-  Area,
-  AreaChart,
 } from "recharts";
 import {
   Clock,
@@ -27,7 +24,6 @@ import {
   Calendar,
   ChevronDown,
   Activity,
-  Zap,
   BrainCircuit,
   Flame,
   AlertTriangle,
@@ -49,6 +45,14 @@ import AppCategoryTags from "../../components/AppCategoryTags";
 const API_BASE = "http://localhost:4000";
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 const MAX_SANE_DAILY_SECONDS = 20 * 3600;
+const HEATMAP_HOURS = Array.from({ length: 24 }, (_, index) => index);
+type AnalyticsRange = "today" | "7d" | "30d";
+
+const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string; shortLabel: string; days: number }> = [
+  { value: "today", label: "Today", shortLabel: "Today", days: 1 },
+  { value: "7d", label: "Last 7 Days", shortLabel: "7 days", days: 7 },
+  { value: "30d", label: "Last 30 Days", shortLabel: "30 days", days: 30 },
+];
 
 // ═══════════════════════════════════════════════════════════
 //  TIME UTILS
@@ -59,6 +63,14 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 function toISTDateString(d = new Date()): string {
   const ist = new Date(d.getTime() + IST_OFFSET_MS);
   return ist.toISOString().split("T")[0];
+}
+
+function analyticsRange(value: AnalyticsRange) {
+  const option = ANALYTICS_RANGES.find((range) => range.value === value) ?? ANALYTICS_RANGES[0];
+  const to = toISTDateString();
+  const fromDate = new Date(`${to}T00:00:00Z`);
+  fromDate.setUTCDate(fromDate.getUTCDate() - option.days + 1);
+  return { ...option, from: fromDate.toISOString().slice(0, 10), to };
 }
 
 /** hh:mm:ss from seconds */
@@ -102,11 +114,11 @@ interface ValidationResult {
   warning?: string;
 }
 
-function validateDuration(seconds: number, label: string): ValidationResult {
+function validateDuration(seconds: number, label: string, days = 1): ValidationResult {
   if (!isFinite(seconds)) return { valid: false, warning: `${label}: non-numeric` };
   if (seconds < 0) return { valid: false, warning: `${label}: negative value` };
-  if (seconds > MAX_SANE_DAILY_SECONDS) {
-    return { valid: false, warning: `${label}: ${formatShortDuration(seconds)} exceeds 20h` };
+  if (seconds > MAX_SANE_DAILY_SECONDS * days) {
+    return { valid: false, warning: `${label}: ${formatShortDuration(seconds)} exceeds ${20 * days}h for this range` };
   }
   return { valid: true };
 }
@@ -210,7 +222,7 @@ interface DashboardResponse {
   intents: IntentHeatmapItem[];
   burnout: BurnoutRisk;
   streak: StreakData;
-  meta: { generatedAt: string; system: string };
+  meta: { generatedAt: string; system: string; days?: number | null };
 }
 
 interface DailyAnalytics {
@@ -265,26 +277,6 @@ interface HeatmapBucket {
 type HeatmapDay = Record<number, HeatmapBucket>;
 type HeatmapResponse = Record<string, HeatmapDay>;
 
-interface FocusTrendBucket {
-  index: number;
-  hour: number;
-  minute: number;
-  label: string;
-  start: string;
-  end: string;
-  duration: number;
-  focus: number;
-}
-
-interface DailySummary {
-  date: string;
-  deepWorkHours: number;
-  focusScore: number;
-  longestFocusBlockMinutes: number;
-  totalActivities: number;
-  dominantIntent: string;
-}
-
 // ═══════════════════════════════════════════════════════════
 //  TIMELINE TYPES — matches /analytics/timeline output format
 // ═══════════════════════════════════════════════════════════
@@ -323,36 +315,36 @@ const TimeRangeSelector = ({
   value,
   onChange,
 }: {
-  value: string;
-  onChange: (val: string) => void;
+  value: AnalyticsRange;
+  onChange: (val: AnalyticsRange) => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const ranges = ["Today", "Last 7 Days", "Last 30 Days"];
+  const selected = analyticsRange(value);
 
   return (
-    <div className="relative">
+    <div className="relative z-[110]">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
       >
         <Calendar className="w-4 h-4" />
-        {value}
+        {selected.label}
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg z-50">
-          {ranges.map((range) => (
+        <div className="absolute right-0 z-[120] mt-2 w-44 rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/80">
+          {ANALYTICS_RANGES.map((range) => (
             <button
-              key={range}
+              key={range.value}
               onClick={() => {
-                onChange(range);
+                onChange(range.value);
                 setIsOpen(false);
               }}
               className={`w-full text-left px-4 py-2 text-sm hover:bg-zinc-800 first:rounded-t-lg last:rounded-b-lg text-zinc-300 ${
-                value === range ? "bg-zinc-800 font-medium" : ""
+                value === range.value ? "bg-purple-500/15 font-medium text-purple-300" : ""
               }`}
             >
-              {range}
+              {range.label}
             </button>
           ))}
         </div>
@@ -374,16 +366,6 @@ const EmptyState = ({ message }: { message: string }) => (
     <p className="text-sm">{message}</p>
   </div>
 );
-
-const ValidationBadge = ({ result }: { result: ValidationResult }) => {
-  if (result.valid) return null;
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
-      <ShieldAlert className="w-3 h-3" />
-      {result.warning}
-    </span>
-  );
-};
 
 // ═══════════════════════════════════════════════════════════
 //  HEATMAP TOOLTIP — robust floating detail card
@@ -483,26 +465,34 @@ const HeatmapTooltipCard = ({
 
 const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
   const byHour = useMemo(() => {
-    const map = new Map<number, TimelineSession[]>();
-    sessions.forEach((s) => {
+    const map = new Map<string, TimelineSession[]>();
+    [...sessions]
+      .sort((left, right) => new Date(right.start).getTime() - new Date(left.start).getTime())
+      .slice(0, 250)
+      .forEach((s) => {
       const d = new Date(new Date(s.start).getTime() + IST_OFFSET_MS);
       const h = d.getUTCHours();
-      if (!map.has(h)) map.set(h, []);
-      map.get(h)!.push(s);
-    });
-    return new Map([...map.entries()].sort((a, b) => b[0] - a[0]));
+      const date = d.toISOString().slice(0, 10);
+      const key = `${date}|${String(h).padStart(2, "0")}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+      });
+    return new Map([...map.entries()].sort((a, b) => b[0].localeCompare(a[0])));
   }, [sessions]);
 
   if (sessions.length === 0) return <EmptyState message="No timeline data available" />;
 
   return (
-    <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
-      {[...byHour.entries()].map(([hour, hourSessions]) => {
+    <div className="space-y-4">
+      {sessions.length > 250 && <p className="text-xs text-zinc-600">Showing the newest 250 of {sessions.length} sessions in this range.</p>}
+      {[...byHour.entries()].map(([period, hourSessions]) => {
+        const [date, hourText] = period.split("|");
+        const hour = Number(hourText);
         const sortedSessions = [...hourSessions].sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
         const totalMs = sortedSessions.reduce((sum, s) => sum + s.duration, 0);
         const uniqueApps = [...new Set(sortedSessions.map((s) => s.appName))];
         return (
-          <div key={hour} className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/30">
+          <div key={period} className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/30">
             <div className="bg-zinc-900/80 px-4 py-3 flex items-center justify-between border-b border-zinc-800">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center border border-zinc-700">
@@ -511,7 +501,7 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">{sortedSessions.length} sessions</p>
+                  <p className="text-sm font-medium text-zinc-200">{date} · {sortedSessions.length} sessions</p>
                   <p className="text-xs text-zinc-500">
                     {formatHMS(totalMs / 1000)} total • {uniqueApps.length} apps
                   </p>
@@ -627,7 +617,7 @@ const HourlyBreakdown = ({ sessions }: { sessions: TimelineSession[] }) => {
 
 const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
   const dates = useMemo(() => Object.keys(data).sort(), [data]);
-  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const hours = HEATMAP_HOURS;
 
   // Find min/max across all data to normalize colors
   const { minScore, maxScore } = useMemo(() => {
@@ -648,7 +638,7 @@ const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
     // If all same, force range
     if (min === max) return { minScore: 0, maxScore: Math.max(max, 1) };
     return { minScore: min, maxScore: max };
-  }, [data, dates]);
+  }, [data, dates, hours]);
 
   const getColor = (score: number) => {
     if (!isFinite(score)) return "bg-zinc-900";
@@ -708,7 +698,7 @@ const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
               </div>
             ))}
           </div>
-          {dates.slice(-7).map((date) => (
+          {dates.map((date) => (
             <div key={date} className="flex items-center py-0.5">
               <div className="w-16 flex-shrink-0 text-xs text-zinc-500 pr-2">
                 {date.slice(5)}
@@ -775,8 +765,9 @@ const HeatmapGrid = ({ data }: { data: HeatmapResponse }) => {
 
 export default function AnalyticsPage() {
   const userId = USER_ID;
-  const [timeRange, setTimeRange] = useState("Today");
-  const [activeTab, setActiveTab] = useState<"overview" | "focus" | "heatmap">("overview");
+  const [timeRange, setTimeRange] = useState<AnalyticsRange>("today");
+  const [activeTab, setActiveTab] = useState<"overview" | "heatmap">("overview");
+  const selectedRange = analyticsRange(timeRange);
 
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -784,8 +775,6 @@ export default function AnalyticsPage() {
 
   const [daily, setDaily] = useState<DailyAnalytics | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapResponse>({});
-  const [focusTrend, setFocusTrend] = useState<FocusTrendBucket[]>([]);
-  const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
   const [timeline, setTimeline] = useState<TimelineSession[] | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -797,10 +786,15 @@ export default function AnalyticsPage() {
   // ── Fetch dashboard ──
   useEffect(() => {
     let cancelled = false;
-    setDashboardLoading(true);
-    setDashboardError(null);
+    const days = analyticsRange(timeRange).days;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setDashboardLoading(true);
+        setDashboardError(null);
+      }
+    });
 
-    fetcher<DashboardResponse>(`${API_BASE}/analytics/dashboard?userId=${userId}`)
+    fetcher<DashboardResponse>(`${API_BASE}/analytics/dashboard?userId=${userId}&days=${days}`)
       .then((data) => {
         if (!cancelled) setDashboard(data);
       })
@@ -814,41 +808,33 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [userId, refreshVersion]);
+  }, [userId, timeRange, refreshVersion]);
 
   // ── Fetch tab data ──
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setValidations([]);
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setLoading(true);
+        setError(null);
+        setValidations([]);
+      }
+    });
 
-    const istToday = toISTDateString();
+    const range = analyticsRange(timeRange);
 
     const promises: Promise<void>[] = [];
 
-    if (activeTab === "overview" || activeTab === "focus") {
+    if (activeTab === "overview") {
       promises.push(
-        fetcher<DailyAnalytics>(`${API_BASE}/analytics/daily?userId=${userId}&date=${istToday}`)
+        fetcher<DailyAnalytics>(`${API_BASE}/analytics/daily?userId=${userId}&from=${range.from}&to=${range.to}`)
           .then((d) => {
             if (!cancelled) {
-              const vActive = validateDuration(d.totalActiveSeconds, "Active time");
-              const vIdle = validateDuration(d.totalIdleSeconds, "Idle time");
+              const vActive = validateDuration(d.totalActiveSeconds, "Active time", range.days);
+              const vIdle = validateDuration(d.totalIdleSeconds, "Idle time", range.days);
               setValidations((prev) => [...prev, vActive, vIdle]);
               setDaily(d);
             }
-          })
-          .catch(() => {}),
-        fetcher<FocusTrendBucket[]>(
-          `${API_BASE}/analytics/daily-focus-trend?userId=${userId}&date=${istToday}&bucketMinutes=60`
-        )
-          .then((d) => {
-            if (!cancelled) setFocusTrend(d);
-          })
-          .catch(() => {}),
-        fetcher<DailySummary>(`${API_BASE}/analytics/daily-summary?userId=${userId}&date=${istToday}`)
-          .then((d) => {
-            if (!cancelled) setDailySummary(d);
           })
           .catch(() => {})
       );
@@ -856,13 +842,13 @@ export default function AnalyticsPage() {
 
     if (activeTab === "heatmap") {
       promises.push(
-        fetcher<HeatmapResponse>(`${API_BASE}/analytics/heatmap?userId=${userId}`)
+        fetcher<HeatmapResponse>(`${API_BASE}/analytics/heatmap?userId=${userId}&from=${range.from}&to=${range.to}`)
           .then((d) => {
             if (!cancelled) setHeatmap(d);
           })
           .catch(() => {}),
         // Fetch timeline for exact activity timestamps
-        fetcher<TimelineSession[]>(`${API_BASE}/analytics/timeline?userId=${userId}&date=${istToday}`)
+        fetcher<TimelineSession[]>(`${API_BASE}/analytics/timeline?userId=${userId}&from=${range.from}&to=${range.to}`)
           .then((d) => {
             if (!cancelled) setTimeline(d);
           })
@@ -877,7 +863,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userId, refreshVersion]);
+  }, [activeTab, userId, timeRange, refreshVersion]);
 
   // ── Derived chart data ──
   const appUsageChart = useMemo(() => {
@@ -1005,7 +991,7 @@ export default function AnalyticsPage() {
   return (
     <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
-      <div className="samaritan-card mb-3 shrink-0">
+      <div className="samaritan-card relative z-[100] mb-3 shrink-0 !overflow-visible">
         <div className="w-full px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1022,7 +1008,6 @@ export default function AnalyticsPage() {
             {(
               [
                 { id: "overview", label: "Overview", icon: BarChart3 },
-                { id: "focus", label: "Focus", icon: Focus },
                 { id: "heatmap", label: "Heatmap", icon: Thermometer },
               ] as const
             ).map((tab) => (
@@ -1043,7 +1028,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="min-h-0 w-full flex-1 overflow-hidden px-4 py-1 sm:px-5">
+      <div className="relative z-0 min-h-0 w-full flex-1 overflow-hidden px-4 py-1 sm:px-5">
         {/* ── Validation Warnings ── */}
         {validations.some((v) => !v.valid) && (
           <div className="mb-6 space-y-2">
@@ -1092,7 +1077,7 @@ export default function AnalyticsPage() {
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <h2 className="text-sm font-semibold text-zinc-100">Performance Intelligence</h2>
                           <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-purple-300">
-                            Live today + 7 days
+                            {selectedRange.label}
                           </span>
                         </div>
                         <p className="mt-1 text-sm leading-5 text-zinc-400">
@@ -1111,9 +1096,11 @@ export default function AnalyticsPage() {
                       )}
                       <div className="min-w-0">
                         <p className="text-xs font-medium text-zinc-300">
-                          {dashboard.comparison.change > 0 ? "+" : ""}{round1(dashboard.comparison.change)} focus points vs yesterday
+                          {timeRange === "today"
+                            ? `${dashboard.comparison.change > 0 ? "+" : ""}${round1(dashboard.comparison.change)} focus points vs yesterday`
+                            : `${selectedRange.label} performance aggregate`}
                         </p>
-                        <p className="mt-0.5 text-xs leading-4 text-zinc-500">{dashboard.comparison.reason}</p>
+                        <p className="mt-0.5 text-xs leading-4 text-zinc-500">{timeRange === "today" ? dashboard.comparison.reason : `Charts and allocations use ${selectedRange.from} through ${selectedRange.to}.`}</p>
                       </div>
                     </div>
                   </div>
@@ -1211,12 +1198,12 @@ export default function AnalyticsPage() {
 
                   <div className="grid min-w-0 grid-cols-2 divide-x divide-y divide-zinc-800 sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
                     {[
-                      ["7-day focus", `${round0(dashboard.weekly.weeklyFocusScore)}%`],
-                      ["7-day productivity", `${round0(averageWeeklyProductivity)}%`],
+                      [`${selectedRange.shortLabel} focus`, `${round0(dashboard.weekly.weeklyFocusScore)}%`],
+                      [`${selectedRange.shortLabel} productivity`, `${round0(averageWeeklyProductivity)}%`],
                       ["Deep work share", `${round0(dashboard.weekly.weeklyDeepWorkRatio)}%`],
                       ["Communication", `${round0(dashboard.weekly.weeklyCommunicationRatio)}%`],
                       ["Peak hour", dashboard.weekly.peakProductiveHour === null ? "—" : `${dashboard.weekly.peakProductiveHour.toString().padStart(2, "0")}:00`],
-                      ["Tracked this week", formatShortDuration(weeklyTrackedMinutes * 60)],
+                      ["Tracked in range", formatShortDuration(weeklyTrackedMinutes * 60)],
                     ].map(([label, value]) => (
                       <div key={label} className="min-w-0 px-4 py-3">
                         <p className="truncate text-[11px] uppercase text-zinc-600">{label}</p>
@@ -1228,7 +1215,7 @@ export default function AnalyticsPage() {
 
                   <Card className="col-span-12 isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <SectionTitle icon={TrendingUp} title="Weekly Growth Trend" />
+                      <SectionTitle icon={TrendingUp} title={`${selectedRange.label} Growth Trend`} />
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className="rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-purple-300">
                           Focus {round0(dashboard.weekly.weeklyFocusScore)}%
@@ -1351,7 +1338,7 @@ export default function AnalyticsPage() {
                     </Card>
 
                     <Card className="isolate flex h-[360px] min-h-[360px] w-full shrink-0 flex-col p-4">
-                      <SectionTitle icon={BarChart3} title="App Usage Today" />
+                      <SectionTitle icon={BarChart3} title={`App Usage · ${selectedRange.shortLabel}`} />
                       <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-3 pr-2">
                         {appUsageChart.map((app) => (
                           <div key={app.name} className="flex items-center gap-3">
@@ -1480,78 +1467,11 @@ export default function AnalyticsPage() {
             {/* ═══════════════════════════════════════════════════
                   FOCUS
                 ═══════════════════════════════════════════════════ */}
-            {activeTab === "focus" && (
-              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
-                {dailySummary && (
-                  <div className="col-span-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Card className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-purple-500/10 rounded-lg">
-                          <Zap className="w-5 h-5 text-purple-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-zinc-500">Deep Work</p>
-                          <p className="text-lg font-bold text-zinc-100">{round1(dailySummary.deepWorkHours)}h</p>
-                        </div>
-                      </div>
-                    </Card>
-                    <Card className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-purple-500/10 rounded-lg">
-                          <Focus className="w-5 h-5 text-purple-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-zinc-500">Focus Score</p>
-                          <p className="text-lg font-bold text-zinc-100">{round0(dailySummary.focusScore)}%</p>
-                        </div>
-                      </div>
-                    </Card>
-                    <Card className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-purple-500/10 rounded-lg">
-                          <Timer className="w-5 h-5 text-purple-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-zinc-500">Longest Block</p>
-                          <p className="text-lg font-bold text-zinc-100">{dailySummary.longestFocusBlockMinutes}m</p>
-                        </div>
-                      </div>
-                    </Card>
-                  </div>
-                )}
-
-                <Card className="dashboard-grid-card col-span-12 min-h-[430px] p-4">
-                  <SectionTitle icon={Activity} title="Hourly Focus Trend (IST)" />
-                  <ResponsiveContainer width="100%" height={380}>
-                    <AreaChart data={focusTrend}>
-                      <defs>
-                        <linearGradient id="focusGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                      <XAxis dataKey="label" stroke={chartAxisColor} fontSize={12} />
-                      <YAxis domain={[0, 100]} stroke={chartAxisColor} fontSize={12} />
-                      <Tooltip
-                        contentStyle={chartTooltipStyle}
-                        formatter={(value) => [
-                          typeof value === "number" ? `${round0(value)}%` : "—",
-                          "Focus",
-                        ]}
-                      />
-                      <Area type="monotone" dataKey="focus" stroke="#a855f7" fill="url(#focusGrad)" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </Card>
-              </div>
-            )}
-
             {/* ═══════════════════════════════════════════════════
                   HEATMAP
                 ═══════════════════════════════════════════════════ */}
             {activeTab === "heatmap" && (
-              <div className="dashboard-scroll-panel grid min-h-0 grid-cols-12 gap-3 pr-1">
+              <div className="dashboard-scroll-panel grid h-full min-h-0 auto-rows-max grid-cols-12 content-start gap-3 overflow-y-auto pb-2 pr-1">
                 <Card className="dashboard-grid-card col-span-12 min-h-[420px] p-4">
                   <SectionTitle icon={Thermometer} title="Activity Heatmap (IST Hours)" />
                   <p className="text-sm text-zinc-500 mb-4">
@@ -1561,7 +1481,7 @@ export default function AnalyticsPage() {
                 </Card>
 
                 {/* ── Recent Hourly Breakdown — exact timeline logs grouped by IST hour ── */}
-                <Card className="dashboard-scroll-panel col-span-12 min-h-[320px] p-4">
+                <Card className="col-span-12 min-h-[320px] p-4">
                   <SectionTitle icon={Clock} title="Recent Hourly Breakdown" />
                   <p className="text-sm text-zinc-500 mb-4">
                     Timeline sessions grouped by hour with nested tracks, pages, and exact timestamps.

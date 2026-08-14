@@ -11,17 +11,25 @@ import DeepWorkReadinessCard from "@/components/focus/DeepWorkReadinessCard";
 import DeepWorkResultPanel from "@/components/focus/DeepWorkResultPanel";
 import DistractionBlockerCard from "@/components/focus/DistractionBlockerCard";
 import { breaksApi, focusApi } from "@/lib/api";
-import { getWsClient } from "@/lib/ws";
+import { getWsClient, useWsMessage } from "@/lib/ws";
 import { useInterventionAlerts, useLiveDeepWork } from "@/lib/useWs";
 
 type FocusConfig = {
   goal?: string;
+  projectId?: string | null;
   plannedMinutes: number;
   enforcement: "observe" | "warn" | "block" | "require_reason";
   allowedApps?: string[];
   allowedDomains?: string[];
   blockedApps?: string[];
   blockedDomains?: string[];
+  timerMode?: "countdown" | "pomodoro";
+  focusMinutes?: number;
+  shortBreakMinutes?: number;
+  longBreakMinutes?: number;
+  totalRounds?: number;
+  ambientSound?: "none" | "white" | "pink" | "brown" | "rain";
+  ambientVolume?: number;
 };
 
 type ModalFocusConfig = Omit<FocusConfig, "enforcement"> & {
@@ -107,6 +115,7 @@ export default function FocusPage() {
   const [extensionPrompt, setExtensionPrompt] = useState<{ sessionId: string; planned: number; actual: number; goal: string } | null>(null);
   const [resultSessionId, setResultSessionId] = useState<string | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const endingSessionIdRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -148,6 +157,22 @@ export default function FocusPage() {
         distractionMs: liveDeepWork.distractionMs,
         idleMs: liveDeepWork.idleMs,
         interruptionMs: liveDeepWork.interruptionMs,
+        timerMode: liveDeepWork.timerMode,
+        focusMinutes: liveDeepWork.focusMinutes,
+        shortBreakMinutes: liveDeepWork.shortBreakMinutes,
+        longBreakMinutes: liveDeepWork.longBreakMinutes,
+        currentPhase: liveDeepWork.currentPhase,
+        currentRound: liveDeepWork.currentRound,
+        totalRounds: liveDeepWork.totalRounds,
+        paused: liveDeepWork.paused,
+        phaseStartedAt: liveDeepWork.phaseStartedAt,
+        phaseEndsAt: liveDeepWork.phaseEndsAt,
+        phaseElapsedSeconds: liveDeepWork.phaseElapsedSeconds,
+        phaseRemainingSeconds: liveDeepWork.phaseRemainingSeconds,
+        elapsedSeconds: liveDeepWork.elapsedSeconds,
+        enforcementActive: liveDeepWork.enforcementActive,
+        ambientSound: liveDeepWork.ambientSound || prev?.ambientSound,
+        ambientVolume: liveDeepWork.ambientVolume ?? prev?.ambientVolume,
       }));
       return;
     }
@@ -170,6 +195,22 @@ export default function FocusPage() {
     liveDeepWork.distractionMs,
     liveDeepWork.idleMs,
     liveDeepWork.interruptionMs,
+    liveDeepWork.timerMode,
+    liveDeepWork.focusMinutes,
+    liveDeepWork.shortBreakMinutes,
+    liveDeepWork.longBreakMinutes,
+    liveDeepWork.currentPhase,
+    liveDeepWork.currentRound,
+    liveDeepWork.totalRounds,
+    liveDeepWork.paused,
+    liveDeepWork.phaseStartedAt,
+    liveDeepWork.phaseEndsAt,
+    liveDeepWork.phaseElapsedSeconds,
+    liveDeepWork.phaseRemainingSeconds,
+    liveDeepWork.elapsedSeconds,
+    liveDeepWork.enforcementActive,
+    liveDeepWork.ambientSound,
+    liveDeepWork.ambientVolume,
     load,
   ]);
 
@@ -194,6 +235,14 @@ export default function FocusPage() {
     };
   }, [activeSession?.id, load]);
 
+  useWsMessage<{ sessionId: string }>("deepwork:ended", ({ sessionId }) => {
+    if (endingSessionIdRef.current === sessionId) return;
+    setActiveSession((previous: any) => previous?.id === sessionId ? null : previous);
+    setExtensionPrompt(null);
+    setResultSessionId(sessionId);
+    void load();
+  });
+
   const handleStartConfig = async (config: ModalFocusConfig) => {
     try {
       const payload: FocusConfig = {
@@ -211,6 +260,7 @@ export default function FocusPage() {
   };
 
   const finishSession = async (id: string, status: "completed" | "abandoned") => {
+    endingSessionIdRef.current = id;
     // The session may have already auto-completed/expired on the backend
     // (timer or external end). End it if possible, but never let that block the
     // rest of the flow — otherwise the overlay can get stuck.
@@ -237,6 +287,7 @@ export default function FocusPage() {
 
     if (!session) {
       setResultSessionId(id);
+      endingSessionIdRef.current = null;
       return;
     }
 
@@ -254,6 +305,7 @@ export default function FocusPage() {
     } else {
       setResultSessionId(id);
     }
+    endingSessionIdRef.current = null;
   };
 
   const handleExtend = async (extraMinutes: number) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { History, ChevronRight } from "lucide-react";
+import { History, ChevronRight, TimerReset } from "lucide-react";
 
 interface DeepWorkSession {
   id: string;
@@ -12,6 +12,10 @@ interface DeepWorkSession {
   productivityScore?: number;
   startedAt: string;
   endedAt?: string | null;
+  timerMode?: string;
+  currentRound?: number;
+  totalRounds?: number;
+  focusedMinutes?: number;
 }
 
 interface DeepWorkHistoryCardProps {
@@ -63,13 +67,16 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
                       {session.goal || "Deep work session"}
                     </p>
                     <p className="text-[10px] text-zinc-600 mt-0.5">
-                      {formatDate(session.startedAt)} · {session.plannedMinutes}m
+                      {formatDate(session.startedAt)} | {session.focusedMinutes ?? session.plannedMinutes}m focused
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 shrink-0 mt-0.5" />
                 </div>
                 <div className="flex items-center gap-3 mt-1.5 text-[10px]">
                   <span className={`capitalize ${statusColor(session.status)}`}>{session.status}</span>
+                  {session.timerMode === "pomodoro" && (
+                    <span className="flex items-center gap-1 text-purple-400"><TimerReset className="h-3 w-3" />{session.currentRound ?? 1}/{session.totalRounds ?? 1} rounds</span>
+                  )}
                   {(session.finalFocusScore != null || session.focusScore != null) && (
                     <span className="text-zinc-500 font-mono">
                       Focus {Math.round(session.finalFocusScore ?? session.focusScore ?? 0)}

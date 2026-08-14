@@ -1,9 +1,12 @@
 import { prisma } from "../prisma";
 import { getISTDayRange } from "../utils/time";
 import type { Request, Response } from "express";
-export async function getAssistantInsights(userId: string) {
+export async function getAssistantInsights(userId: string, days?: number) {
 
-  const { start, end } = getISTDayRange();
+  const today = getISTDayRange();
+  const safeDays = days === undefined ? 1 : Math.min(30, Math.max(1, Math.floor(days)));
+  const start = new Date(today.start.getTime() - (safeDays - 1) * 24 * 60 * 60 * 1000);
+  const end = today.end;
 
   const activities = await prisma.activity.findMany({
     where: {
@@ -317,15 +320,16 @@ function generateFocusReason(today:any,yesterday:any){
   return insights.join(" and ");
 
 }
-export async function getWeeklyGrowthTrend(userId:string){
+export async function getWeeklyGrowthTrend(userId:string, rangeDays = 7){
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const safeDays = Math.min(30, Math.max(1, Math.floor(rangeDays)));
   const nowIST = new Date(Date.now() + IST_OFFSET_MS);
   const todayStartIST = Date.UTC(
     nowIST.getUTCFullYear(),
     nowIST.getUTCMonth(),
     nowIST.getUTCDate()
   );
-  const firstDayIST = todayStartIST - 6 * 24 * 60 * 60 * 1000;
+  const firstDayIST = todayStartIST - (safeDays - 1) * 24 * 60 * 60 * 1000;
   const queryStart = new Date(firstDayIST - IST_OFFSET_MS);
   const queryEnd = new Date(todayStartIST + 24 * 60 * 60 * 1000 - IST_OFFSET_MS);
 
@@ -350,7 +354,7 @@ export async function getWeeklyGrowthTrend(userId:string){
   };
 
   const days = new Map<string, GrowthDay>();
-  for (let index = 0; index < 7; index++) {
+  for (let index = 0; index < safeDays; index++) {
     const day = new Date(firstDayIST + index * 24 * 60 * 60 * 1000);
     const date = day.toISOString().slice(0, 10);
     days.set(date, {
@@ -401,10 +405,18 @@ export async function getWeeklyGrowthTrend(userId:string){
   }));
 
 }
-export async function getIntentHeatmap(userId:string){
+export async function getIntentHeatmap(userId:string, days?: number){
+
+  const today = getISTDayRange();
+  const rangeStart = days === undefined
+    ? undefined
+    : new Date(today.start.getTime() - (Math.min(30, Math.max(1, Math.floor(days))) - 1) * 24 * 60 * 60 * 1000);
 
   const activities = await prisma.activity.findMany({
-    where:{ session:{ userId } }
+    where:{
+      session:{ userId },
+      ...(rangeStart ? { startTime: { gte: rangeStart, lt: today.end } } : {}),
+    }
   });
 
   const map:Record<string,{
@@ -443,12 +455,20 @@ export async function getIntentHeatmap(userId:string){
 
 }
 
-export async function getBurnoutRisk(userId:string){
+export async function getBurnoutRisk(userId:string, days?: number){
+
+  const today = getISTDayRange();
+  const rangeStart = days === undefined
+    ? undefined
+    : new Date(today.start.getTime() - (Math.min(30, Math.max(1, Math.floor(days))) - 1) * 24 * 60 * 60 * 1000);
 
   const sessions = await prisma.session.findMany({
-    where:{ userId },
+    where:{
+      userId,
+      ...(rangeStart ? { startTime: { gte: rangeStart, lt: today.end } } : {}),
+    },
     orderBy:{ startTime:"desc" },
-    take:10
+    take: days === undefined ? 10 : 500,
   });
 
   if(sessions.length===0){
@@ -644,11 +664,11 @@ export async function getDailyFocusTrend(
     };
   });
 }
-export async function getWeeklyInsights(userId: string) {
+export async function getWeeklyInsights(userId: string, days = 7) {
 
   const now = new Date();
   const weekStart = new Date();
-  weekStart.setDate(now.getDate() - 7);
+  weekStart.setDate(now.getDate() - Math.min(30, Math.max(1, Math.floor(days))) + 1);
 
   const activities = await prisma.activity.findMany({
     where: {
@@ -720,7 +740,9 @@ export async function getWeeklyInsights(userId: string) {
   };
 }
 
-export async function getDashboard(userId: string) {
+export async function getDashboard(userId: string, days?: number) {
+
+  const scopedDays = days === undefined ? undefined : Math.min(30, Math.max(1, Math.floor(days)));
 
   const [
     assistant,
@@ -731,12 +753,12 @@ export async function getDashboard(userId: string) {
     burnout,
     streak
   ] = await Promise.all([
-    getAssistantInsights(userId),
-    getWeeklyInsights(userId),
+    getAssistantInsights(userId, scopedDays),
+    getWeeklyInsights(userId, scopedDays ?? 7),
     getDailyComparison(userId),
-    getWeeklyGrowthTrend(userId),
-    getIntentHeatmap(userId),
-    getBurnoutRisk(userId),
+    getWeeklyGrowthTrend(userId, scopedDays ?? 7),
+    getIntentHeatmap(userId, scopedDays),
+    getBurnoutRisk(userId, scopedDays),
     getDeepWorkStreak(userId)
   ]);
 
@@ -750,7 +772,8 @@ export async function getDashboard(userId: string) {
     streak,
     meta:{
       generatedAt:new Date(),
-      system:"samaritan-intelligence"
+      system:"samaritan-intelligence",
+      days: scopedDays ?? null,
     }
   };
 }

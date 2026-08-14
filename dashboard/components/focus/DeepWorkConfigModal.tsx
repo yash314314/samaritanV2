@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { getUserId, projectsApi } from "@/lib/api";
 import {
   X,
   Target,
@@ -27,7 +28,9 @@ import {
   Mail,
   Calendar,
   ChevronDown,
-  Trash2,
+  FolderKanban,
+  TimerReset,
+  Volume2,
 } from "lucide-react";
 
 const APP_CATALOG = [
@@ -109,12 +112,20 @@ interface Props {
   onClose: () => void;
   onStart: (config: {
     goal: string;
+    projectId?: string | null;
     plannedMinutes: number;
     enforcement: string;
     allowedApps: string[];
     allowedDomains: string[];
     blockedApps: string[];
     blockedDomains: string[];
+    timerMode: "countdown" | "pomodoro";
+    focusMinutes: number;
+    shortBreakMinutes: number;
+    longBreakMinutes: number;
+    totalRounds: number;
+    ambientSound: "none" | "white" | "pink" | "brown" | "rain";
+    ambientVolume: number;
   }) => void;
   defaultDuration?: number;
 }
@@ -123,6 +134,8 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   const [duration, setDuration] = useState(defaultDuration);
   const [customDuration, setCustomDuration] = useState("");
   const [goal, setGoal] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; color: string }>>([]);
   const [enforcement, setEnforcement] = useState("warn");
   const [allowedApps, setAllowedApps] = useState<string[]>([]);
   const [blockedApps, setBlockedApps] = useState<string[]>([]);
@@ -130,6 +143,18 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [domainInput, setDomainInput] = useState({ allow: "", block: "" });
   const [showEnforcementDropdown, setShowEnforcementDropdown] = useState(false);
+  const [timerMode, setTimerMode] = useState<"countdown" | "pomodoro">("pomodoro");
+  const [focusMinutes, setFocusMinutes] = useState(25);
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(5);
+  const [longBreakMinutes, setLongBreakMinutes] = useState(15);
+  const [totalRounds, setTotalRounds] = useState(4);
+  const [ambientSound, setAmbientSound] = useState<"none" | "white" | "pink" | "brown" | "rain">("brown");
+  const [ambientVolume, setAmbientVolume] = useState(0.3);
+
+  useEffect(() => {
+    if (!open) return;
+    projectsApi.list(getUserId()).then((data) => setProjects(data as Array<{ id: string; name: string; color: string }>)).catch(console.error);
+  }, [open]);
 
   const toggleApp = useCallback((name: string, list: string[], setList: (v: string[]) => void) => {
     if (list.includes(name)) setList(list.filter(n => n !== name));
@@ -158,15 +183,25 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   }, []);
 
   const handleStart = () => {
-    const finalDuration = duration || Number(customDuration) || 60;
+    const finalDuration = timerMode === "pomodoro"
+      ? focusMinutes * totalRounds
+      : duration || Number(customDuration) || 60;
     onStart({
       goal: goal || "Deep work session",
+      projectId: projectId || null,
       plannedMinutes: finalDuration,
       enforcement,
       allowedApps,
       allowedDomains,
       blockedApps,
       blockedDomains,
+      timerMode,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
+      totalRounds,
+      ambientSound,
+      ambientVolume,
     });
   };
 
@@ -207,7 +242,15 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
             />
           </div>
 
-          {/* Duration */}
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500">Timer system</label>
+            <div className="grid grid-cols-2 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+              <button type="button" onClick={() => setTimerMode("pomodoro")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm transition ${timerMode === "pomodoro" ? "bg-purple-500/20 text-purple-300" : "text-zinc-500 hover:text-zinc-300"}`}><TimerReset className="h-4 w-4" /> Pomodoro</button>
+              <button type="button" onClick={() => setTimerMode("countdown")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm transition ${timerMode === "countdown" ? "bg-purple-500/20 text-purple-300" : "text-zinc-500 hover:text-zinc-300"}`}><Clock className="h-4 w-4" /> Countdown</button>
+            </div>
+          </div>
+
+          {timerMode === "countdown" ? <>
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Duration
@@ -256,6 +299,42 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   </span>
                 </button>
               ))}
+            </div>
+          </div>
+          </> : <div>
+            <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Pomodoro cycle</label><span className="text-[11px] text-purple-300">{focusMinutes * totalRounds}m focused</span></div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <TimerInput label="Focus" value={focusMinutes} min={5} max={120} onChange={setFocusMinutes} />
+              <TimerInput label="Short break" value={shortBreakMinutes} min={1} max={30} onChange={setShortBreakMinutes} />
+              <TimerInput label="Long break" value={longBreakMinutes} min={1} max={60} onChange={setLongBreakMinutes} />
+              <TimerInput label="Rounds" value={totalRounds} min={1} max={12} onChange={setTotalRounds} suffix="" />
+            </div>
+            <div className="mt-3 flex gap-1.5" aria-label="Pomodoro presets">
+              {[{ label: "Classic", values: [25, 5, 15, 4] }, { label: "Long focus", values: [50, 10, 20, 3] }, { label: "Sprint", values: [15, 3, 10, 4] }].map((preset) => <button key={preset.label} type="button" onClick={() => { setFocusMinutes(preset.values[0]); setShortBreakMinutes(preset.values[1]); setLongBreakMinutes(preset.values[2]); setTotalRounds(preset.values[3]); }} className="rounded-md border border-zinc-800 px-2.5 py-1.5 text-[10px] text-zinc-500 hover:border-purple-500/30 hover:text-purple-300">{preset.label}</button>)}
+            </div>
+          </div>}
+
+          <div>
+            <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Ambient sound</label><span className="text-[10px] text-zinc-600">Generated locally</span></div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {(["none", "white", "pink", "brown", "rain"] as const).map((sound) => <button key={sound} type="button" onClick={() => setAmbientSound(sound)} className={`rounded-md border px-2 py-2 text-[11px] capitalize transition ${ambientSound === sound ? "border-purple-500/40 bg-purple-500/10 text-purple-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}>{sound}</button>)}
+            </div>
+            {ambientSound !== "none" && <div className="mt-3 flex items-center gap-3"><Volume2 className="h-4 w-4 text-zinc-600" /><input aria-label="Ambient sound volume" type="range" min={0} max={1} step={0.05} value={ambientVolume} onChange={(event) => setAmbientVolume(Number(event.target.value))} className="min-w-0 flex-1 accent-purple-500" /><span className="w-9 text-right text-xs tabular-nums text-zinc-500">{Math.round(ambientVolume * 100)}%</span></div>}
+          </div>
+
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase text-zinc-500">Project</label>
+            <div className="relative">
+              <FolderKanban className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+              <select
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+                className="h-11 w-full appearance-none rounded-lg border border-zinc-800 bg-zinc-950 pl-10 pr-9 text-sm text-zinc-200 outline-none focus:border-purple-500/50"
+              >
+                <option value="">No project</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
             </div>
           </div>
 
@@ -496,7 +575,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
               </button>
               <button
                 onClick={handleStart}
-                disabled={!duration && !customDuration}
+                disabled={timerMode === "countdown" && !duration && !customDuration}
                 className="flex items-center gap-2 rounded-lg bg-purple-500 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-purple-500/20 transition-all hover:bg-purple-400 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Clock className="h-4 w-4" />
@@ -508,4 +587,8 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
       </div>
     </div>
   );
+}
+
+function TimerInput({ label, value, min, max, onChange, suffix = "m" }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void; suffix?: string }) {
+  return <label className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"><span className="block text-[10px] text-zinc-600">{label}</span><span className="mt-1 flex items-center gap-1"><input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value) || min)))} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-zinc-200 outline-none" /><span className="text-[10px] text-zinc-600">{suffix}</span></span></label>;
 }

@@ -25,7 +25,7 @@ export function clearApiCache() {
 
 function isCacheableGet(endpoint: string): boolean {
   // Never cache live session/status endpoints (their responses are time-sensitive).
-  return !/(\/active|\/status|\/next-suggestion|\/distraction-blocks|\/webhooks)/.test(endpoint);
+  return !/(\/active|\/status|\/next-suggestion|\/distraction-blocks)/.test(endpoint);
 }
 
 // â”€â”€â”€ UNIFIED REQUEST HELPER â”€â”€â”€
@@ -71,16 +71,28 @@ async function request(endpoint: string, init: RequestInit = {}) {
 export const focusApi = {
   start: (data: {
     goal?: string;
+    projectId?: string | null;
     plannedMinutes: number;
     enforcement: "observe" | "warn" | "block" | "require_reason";
     allowedApps?: string[];
     allowedDomains?: string[];
     blockedApps?: string[];
     blockedDomains?: string[];
+    timerMode?: "countdown" | "pomodoro";
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
+    totalRounds?: number;
+    ambientSound?: "none" | "white" | "pink" | "brown" | "rain";
+    ambientVolume?: number;
   }) => api.post("/focus/start", { userId: USER_ID, ...data }),
 
   end: (id: string, status: "completed" | "abandoned") =>
     api.post(`/focus/${id}/end`, { userId: USER_ID, status }),
+
+  pause: (id: string) => api.post(`/focus/${id}/pause`, { userId: USER_ID }),
+  resume: (id: string) => api.post(`/focus/${id}/resume`, { userId: USER_ID }),
+  skipBreak: (id: string) => api.post(`/focus/${id}/skip-break`, { userId: USER_ID }),
 
   getActive: () => api.get(`/focus/active?userId=${USER_ID}`),
   getActiveStatus: () => api.get(`/focus/active/status?userId=${USER_ID}`),
@@ -88,7 +100,7 @@ export const focusApi = {
   getResult: (id: string) => api.get(`/focus/${id}/result?userId=${USER_ID}`),
   
   resolveIntervention: (id: string, reason: string, action?: string) =>
-    api.post(`/focus/interventions/${id}/resolve`, { reason, action }),
+    api.post(`/focus/interventions/${id}/resolve`, { userId: USER_ID, reason, action }),
 };
 
 // â”€â”€â”€ LEGACY FETCH WRAPPERS â”€â”€â”€
@@ -117,7 +129,7 @@ export function endDeepWorkSession(id: string, userId: string, status = "complet
 export function resolveFocusIntervention(id: string, reason?: string, action = "allowed_once") {
   return request(`/focus/interventions/${id}/resolve`, {
     method: "POST",
-    body: JSON.stringify({ reason, action })
+    body: JSON.stringify({ userId: USER_ID, reason, action })
   });
 }
 
@@ -185,34 +197,33 @@ export const fetchHeatmap = async (
 
 // â”€â”€â”€ PROJECTS API â”€â”€â”€
 export const projectsApi = {
-  list: (userId: string) => request(`/api/projects?userId=${userId}`),
-  create: (data: { userId: string; name: string; icon?: string; color?: string; weeklyHourGoal?: number }) =>
-    request("/api/projects", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: string, data: { name?: string; icon?: string; color?: string; weeklyHourGoal?: number; active?: boolean }) =>
-    request(`/api/projects/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-  delete: (id: string) =>
-    request(`/api/projects/${id}`, {
-      method: "DELETE",
-    }),
+  list: (userId: string, includeArchived = false) =>
+    request(`/api/projects?${new URLSearchParams({ userId, ...(includeArchived ? { includeArchived: "true" } : {}) })}`),
+  dashboard: (id: string, userId: string, days = 14) =>
+    request(`/api/projects/${id}/dashboard?${new URLSearchParams({ userId, days: String(days) })}`),
+  unassigned: (userId: string, days = 7) =>
+    request(`/api/projects/unassigned?${new URLSearchParams({ userId, days: String(days) })}`),
+  assignActivities: (data: { userId: string; activityIds: string[]; projectId?: string | null; remember?: boolean }) =>
+    request("/api/projects/activities/assign", { method: "POST", body: JSON.stringify(data) }),
+  create: (data: { userId: string; name: string; description?: string; icon?: string; color?: string; weeklyHourGoal?: number }) =>
+    request("/api/projects", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: { userId?: string; name?: string; description?: string; icon?: string; color?: string; weeklyHourGoal?: number; active?: boolean }) =>
+    request(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/api/projects/${id}`, { method: "DELETE" }),
+  restore: (id: string, userId: string) =>
+    request(`/api/projects/${id}/restore`, { method: "POST", body: JSON.stringify({ userId }) }),
 };
 
 export const projectRulesApi = {
   list: (projectId: string) => request(`/api/projects/${projectId}/rules`),
   create: (projectId: string, data: { appName?: string; domain?: string; titleKeyword?: string; matchType?: string }) =>
-    request(`/api/projects/${projectId}/rules`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+    request(`/api/projects/${projectId}/rules`, { method: "POST", body: JSON.stringify(data) }),
+  update: (projectId: string, ruleId: string, data: { appName?: string; domain?: string; titleKeyword?: string; matchType?: string }) =>
+    request(`/api/projects/${projectId}/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(data) }),
+  test: (projectId: string, data: { appName: string; domain?: string; windowTitle?: string }) =>
+    request(`/api/projects/${projectId}/rules/test`, { method: "POST", body: JSON.stringify(data) }),
   delete: (projectId: string, ruleId: string) =>
-    request(`/api/projects/${projectId}/rules/${ruleId}`, {
-      method: "DELETE",
-    }),
+    request(`/api/projects/${projectId}/rules/${ruleId}`, { method: "DELETE" }),
 };
 
 // â”€â”€â”€ CALENDAR API â”€â”€â”€
@@ -358,11 +369,19 @@ export const calendarApi = {
 
 // â”€â”€â”€ GOALS API â”€â”€â”€
 export const goalsApi = {
-  list: (userId: string, period?: string) => {
+  list: (userId: string, period?: string, includeArchived = false) => {
     const params = new URLSearchParams({ userId });
     if (period) params.append("period", period);
+    if (includeArchived) params.append("includeArchived", "true");
     return request(`/api/goals?${params}`);
   },
+  dashboard: (userId: string, period?: string) => {
+    const params = new URLSearchParams({ userId });
+    if (period) params.append("period", period);
+    return request(`/api/goals/dashboard?${params}`);
+  },
+  history: (id: string, userId: string, periods = 14) =>
+    request(`/api/goals/${id}/history?${new URLSearchParams({ userId, periods: String(periods) })}`),
   create: (data: {
     userId: string;
     title: string;
@@ -401,6 +420,8 @@ export const goalsApi = {
     request(`/api/goals/${id}`, {
       method: "DELETE",
     }),
+  restore: (id: string, userId: string) =>
+    request(`/api/goals/${id}/restore`, { method: "POST", body: JSON.stringify({ userId }) }),
 };
 
 // â”€â”€â”€ RATINGS API â”€â”€â”€
@@ -473,36 +494,5 @@ export const distractionBlocksApi = {
     }),
   delete: (id: string) => request(`/api/distraction-blocks/${id}?${new URLSearchParams({ userId: USER_ID })}`, {
     method: "DELETE",
-  }),
-};
-
-export const webhooksApi = {
-  events: () => request("/api/webhooks/events"),
-  list: () => request(`/api/webhooks?${new URLSearchParams({ userId: USER_ID })}`),
-  create: (data: { name: string; targetUrl: string; events: string[]; active?: boolean }) =>
-    request("/api/webhooks", {
-      method: "POST",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
-    }),
-  update: (id: string, data: { name?: string; targetUrl?: string; events?: string[]; active?: boolean }) =>
-    request(`/api/webhooks/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
-    }),
-  delete: (id: string) => request(`/api/webhooks/${id}?${new URLSearchParams({ userId: USER_ID })}`, {
-    method: "DELETE",
-  }),
-  test: (id: string) => request(`/api/webhooks/${id}/test`, {
-    method: "POST",
-    body: JSON.stringify({ userId: USER_ID }),
-  }),
-  rotateSecret: (id: string) => request(`/api/webhooks/${id}/rotate-secret`, {
-    method: "POST",
-    body: JSON.stringify({ userId: USER_ID }),
-  }),
-  deliveries: (id: string) => request(`/api/webhooks/${id}/deliveries?${new URLSearchParams({ userId: USER_ID })}`),
-  retry: (id: string) => request(`/api/webhooks/deliveries/${id}/retry`, {
-    method: "POST",
-    body: JSON.stringify({ userId: USER_ID }),
   }),
 };

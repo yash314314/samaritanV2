@@ -3,12 +3,17 @@ import { prisma } from '../prisma';
 import { getCurrentProjectWeek } from '../services/projectTimeService';
 import { emitProjectChanged } from '../websocket/broadcaster';
 import { dispatchWebhookEvent } from '../services/webhookService';
+import {
+  assignActivitiesToProject,
+  getProjectDashboard,
+  getUnassignedProjectActivities,
+} from '../services/projectTrackingService';
 
 const router = Router();
 
 // GET /api/projects?userId=...
 router.get('/', async (req, res) => {
-  const { userId } = req.query;
+  const { userId, includeArchived } = req.query;
   
   if (!userId || typeof userId !== 'string') {
     return res.status(400).json({ error: 'Missing userId' });
@@ -17,13 +22,13 @@ router.get('/', async (req, res) => {
   try {
     const [projects, week] = await Promise.all([
       prisma.project.findMany({
-        where: { userId, active: true },
+        where: { userId, ...(includeArchived === 'true' ? {} : { active: true }) },
         include: {
           rules: true,
           goals: { where: { active: true } },
           _count: { select: { events: true, time: true, calendarSessions: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ active: 'desc' }, { updatedAt: 'desc' }],
       }),
       getCurrentProjectWeek(userId),
     ]);
@@ -50,9 +55,55 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/unassigned', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
+  try {
+    res.json(await getUnassignedProjectActivities(userId, Number(req.query.days) || 7));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch unassigned activity';
+    res.status(400).json({ error: message });
+  }
+});
+
+router.post('/activities/assign', async (req, res) => {
+  const { userId, activityIds, projectId, remember } = req.body;
+  if (!userId || !Array.isArray(activityIds)) return res.status(400).json({ error: 'Provide userId and activityIds' });
+  try {
+    res.json(await assignActivitiesToProject(userId, activityIds.map(String), projectId || null, Boolean(remember)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to assign activities';
+    res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
+  }
+});
+
+router.get('/:id/dashboard', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
+  try {
+    res.json(await getProjectDashboard(userId, req.params.id, Number(req.query.days) || 14));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load project dashboard';
+    res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
+  }
+});
+
+router.post('/:id/restore', async (req, res) => {
+  const { userId } = req.body;
+  try {
+    const project = await prisma.project.findFirst({ where: { id: req.params.id, ...(userId ? { userId } : {}) } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const restored = await prisma.project.update({ where: { id: project.id }, data: { active: true } });
+    emitProjectChanged(restored.userId, 'updated', { project: restored });
+    res.json(restored);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to restore project' });
+  }
+});
+
 // POST /api/projects
 router.post('/', async (req, res) => {
-  const { userId, name, icon, color, weeklyHourGoal } = req.body;
+  const { userId, name, description, icon, color, weeklyHourGoal } = req.body;
   
   if (!userId || !name) {
     return res.status(400).json({ error: 'Missing required fields: userId, name' });
@@ -62,10 +113,11 @@ router.post('/', async (req, res) => {
     const project = await prisma.project.create({
       data: {
         userId,
-        name,
+        name: String(name).trim().slice(0, 100),
+        description: typeof description === 'string' ? description.trim().slice(0, 500) || null : null,
         icon: icon || null,
         color: color || '#8b5cf6',
-        weeklyHourGoal: weeklyHourGoal || 10,
+        weeklyHourGoal: Math.max(0, Math.min(168, Number(weeklyHourGoal ?? 10))),
       },
     });
     emitProjectChanged(userId, 'created', { project });
@@ -81,16 +133,19 @@ router.post('/', async (req, res) => {
 // PATCH /api/projects/:id
 router.patch('/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, icon, color, weeklyHourGoal, active } = req.body;
+  const { name, description, icon, color, weeklyHourGoal, active, userId } = req.body;
 
   try {
+    const existing = await prisma.project.findFirst({ where: { id, ...(userId ? { userId } : {}) } });
+    if (!existing) return res.status(404).json({ error: 'Project not found' });
     const project = await prisma.project.update({
-      where: { id },
+      where: { id: existing.id },
       data: {
-        ...(name && { name }),
+        ...(name && { name: String(name).trim().slice(0, 100) }),
+        ...(description !== undefined && { description: typeof description === 'string' ? description.trim().slice(0, 500) || null : null }),
         ...(icon !== undefined && { icon }),
         ...(color && { color }),
-        ...(weeklyHourGoal !== undefined && { weeklyHourGoal }),
+        ...(weeklyHourGoal !== undefined && { weeklyHourGoal: Math.max(0, Math.min(168, Number(weeklyHourGoal))) }),
         ...(active !== undefined && { active }),
       },
     });
@@ -109,11 +164,11 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const project = await prisma.project.delete({ where: { id } });
+    const project = await prisma.project.update({ where: { id }, data: { active: false } });
     emitProjectChanged(project.userId, 'deleted', { id });
     void dispatchWebhookEvent(project.userId, 'project.changed', { action: 'deleted', id }, `${id}:deleted`)
       .catch((error) => console.error('Project webhook dispatch failed:', error));
-    res.json({ success: true });
+    res.json({ success: true, archived: true });
   } catch (error) {
     console.error('Project deletion error:', error);
     res.status(500).json({ error: 'Failed to delete project' });

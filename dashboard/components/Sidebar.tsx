@@ -9,8 +9,7 @@ import {
   Timer,
   Target,
   Calendar as CalendarIcon,
-  Goal,
-  Webhook
+  Goal
 } from "lucide-react";
 
 const navItems = [
@@ -20,8 +19,7 @@ const navItems = [
   { name: "Focus Protocol", path: "/focus", icon: Timer },
   { name: "Projects", path: "/projects", icon: Target },
   { name: "Calendar", path: "/calendar", icon: CalendarIcon },
-  { name: "Goals", path: "/goals", icon: Goal },
-  { name: "Webhooks", path: "/webhooks", icon: Webhook }
+  { name: "Goals", path: "/goals", icon: Goal }
 ];
 
 export default function Sidebar() {

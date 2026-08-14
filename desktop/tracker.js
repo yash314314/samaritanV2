@@ -94,6 +94,8 @@ function includesRule(rules, value) {
 
 function shouldPreemptivelyBlock(context) {
   if (!activeDeepWorkRef || activeDeepWorkRef.enforcement !== "block") return false;
+  if (activeDeepWorkRef.currentPhase && activeDeepWorkRef.currentPhase !== "focus") return false;
+  if (activeDeepWorkRef.paused) return false;
 
   const blockedApps = activeDeepWorkRef.blockedApps || [];
   const blockedDomains = activeDeepWorkRef.blockedDomains || [];
@@ -137,11 +139,12 @@ function enforceBlockIfNeeded(context) {
     console.log(`[Samaritan] Block enforcement could not terminate ${context.app}: ${result.reason}`);
   }
 
-  if (persistentRule) {
+  if (persistentRule || deepWorkBlocked) {
     reportDistractionBlock({
-      ruleId: persistentRule.id,
-      targetType: persistentRule.targetType,
-      target: persistentRule.target,
+      ruleId: persistentRule?.id || null,
+      deepWorkId: deepWorkBlocked ? activeDeepWorkRef?.id || null : null,
+      targetType: persistentRule?.targetType || "app",
+      target: persistentRule?.target || context.app,
       appName: context.app,
       domain: context.domain || null,
       windowTitle: context.title || null,
@@ -154,7 +157,7 @@ function enforceBlockIfNeeded(context) {
       new Notification({
         title: result.killed ? "Distraction blocked" : "Block attempt failed",
         body: result.killed
-          ? `${context.app} matched ${persistentRule.target}.`
+          ? `${context.app} matched ${persistentRule?.target || "the active focus protocol"}.`
           : `${context.app}: ${result.reason}`,
         urgency: result.killed ? "normal" : "critical",
       }).show();

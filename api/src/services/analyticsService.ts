@@ -39,8 +39,10 @@ function getISTDateKey(date: Date): string {
 
 // ─── Daily Analytics ────────────────────────────────────
 
-export async function getDailyAnalytics(userId: string, date?: string) {
-  const { start, end } = getISTDayRange(date);
+export async function getDailyAnalytics(userId: string, date?: string, toDate?: string) {
+  const { start } = getISTDayRange(date);
+  const { end } = getISTDayRange(toDate ?? date);
+  if (end <= start) throw new Error("Invalid analytics date range");
 
   const [sessions, protectedWork] = await Promise.all([
     prisma.session.findMany({
@@ -163,7 +165,8 @@ export async function getDailyAnalytics(userId: string, date?: string) {
 
   const now = new Date();
   const totalDeepWorkSeconds = protectedWork.reduce((sum, session) => {
-    const effectiveEnd = session.endedAt ?? (now < end ? now : end);
+    const recordedEnd = session.endedAt ?? (now < end ? now : end);
+    const effectiveEnd = new Date(Math.min(recordedEnd.getTime(), end.getTime()));
     return sum + Math.max(0, (effectiveEnd.getTime() - session.startedAt.getTime()) / 1000);
   }, 0);
 

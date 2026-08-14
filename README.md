@@ -301,16 +301,25 @@ Deep work supports four levels:
 
 Protocol decisions consider explicit blocked apps/domains, optional allow lists, and distracting categories or intents. The Electron tracker performs preemptive block enforcement locally to avoid waiting for a backend round trip. The API still records interventions and broadcasts session state.
 
+Sessions support either a single countdown or Pomodoro cycles with configurable focus, short-break, long-break, and round durations. Timer state is authoritative in the API: pause, resume, phase changes, break skipping, and completion are broadcast immediately to the dashboard and desktop tracker. Enforcement is suspended while paused or on a break. White, pink, brown, and rain-style ambient sounds are generated locally in the browser through Web Audio, so no media service or downloaded audio files are required.
+
+End reports separate focused time from recovery breaks, preserve every phase, include intervention resolutions, and reconcile desktop process-termination successes and failures. Run `npm run verify:deep-work` from `api/` to exercise the full lifecycle and all four enforcement mappings against the local test database.
+
 Use `block` carefully. Broad process names can terminate every matching process, and elevated or protected applications may resist termination.
 
 ## Projects, Calendar, and Goals
 
 - Project rules can match application name, domain, or title keyword.
 - Matching activities receive a `projectId` automatically.
+- The Projects workbench shows daily trends, source allocation, top apps/categories, focus quality, linked goals, and recent activity.
+- Unassigned activities can be corrected in bulk; remembered corrections create future app/domain rules.
+- Projects are archived instead of hard-deleted so historical attribution remains intact.
 - Calendar events can be created manually or imported from ICS content or a URL.
 - Calendar overlays compare scheduled events with tracked activity.
-- Goals can track duration, sessions, focus, productivity, or other configured units.
-- Goal progress is recalculated and broadcast after new activity.
+- Goals track focus minutes, productive minutes, project time, hours, or completed focus sessions.
+- Goal periods use the configured calendar timezone and retain progress snapshots for pace, forecasts, history, and streaks.
+- Deep-work sessions can be linked to projects, allowing project-specific focus and session goals.
+- Goal progress is recalculated and broadcast after new activity or focus completion.
 - Project time is aggregated nightly at 2:00 AM in `Asia/Kolkata`.
 
 ## REST API Overview
@@ -322,11 +331,11 @@ All endpoints are served from `http://localhost:4000`.
 | Health | `GET /health` |
 | Activity | `POST /activity`, `POST /activity/session`, `POST /activity/reviews` |
 | Analytics | `GET /analytics/daily`, `/timeline`, `/heatmap`, `/daily-focus-trend`, `/readiness` |
-| Deep work | `GET /focus/active`, `GET /focus/history`, `POST /focus/start`, `POST /focus/:id/end` |
+| Deep work | `GET /focus/active`, `GET /focus/active/status`, `GET /focus/history`, `GET /focus/:id/result`, `POST /focus/start`, `POST /focus/:id/pause`, `POST /focus/:id/resume`, `POST /focus/:id/skip-break`, `POST /focus/:id/end` |
 | Interventions | `POST /focus/interventions/:id/resolve` |
-| Projects | CRUD under `/api/projects` and project rules under `/api/projects/:projectId/rules` |
+| Projects | CRUD, `/unassigned`, `/activities/assign`, `/:id/dashboard`, and rules under `/:projectId/rules` |
 | Calendar | CRUD, import, and overlay under `/api/calendar` |
-| Goals | CRUD under `/api/goals` |
+| Goals | CRUD, `/dashboard`, and `/:id/history` under `/api/goals` |
 | Ratings | Create and list under `/api/ratings` |
 
 Most endpoints require `userId` in the query string or request body. There is currently no authentication layer.
@@ -355,6 +364,8 @@ Starting the API also starts:
 - One-minute deep-work logging and state pushes
 - Nightly project-time aggregation at 2:00 AM IST
 
+Outbound webhooks are disabled. The API does not mount `/api/webhooks`, queue event deliveries, or run the webhook dispatcher.
+
 Run only one API instance locally unless duplicate timers and scheduled jobs are explicitly desired.
 
 ## Useful Development Commands
@@ -368,6 +379,7 @@ npm run bootstrap:user
 npm run seed:patterns
 npm run reclassify:activities
 npm run simulate:deepwork
+npm run verify:project-goals
 npx tsc --noEmit
 npx prisma studio
 ```

@@ -25,7 +25,8 @@
     "verify:smart-breaks": "ts-node src/scripts/verifySmartBreaks.ts",
     "verify:distraction-blocker": "ts-node src/scripts/verifyDistractionBlocker.ts",
     "verify:widget": "ts-node src/scripts/verifyWidgetState.ts",
-    "verify:webhooks": "ts-node src/scripts/verifyWebhooks.ts",
+    "verify:project-goals": "ts-node src/scripts/verifyProjectGoalTracking.ts",
+    "verify:deep-work": "ts-node src/scripts/verifyDeepWorkPomodoro.ts",
     "gaandfaad_daroga": "ts-node src/seed.ts"
   },
   "keywords": [],

@@ -22,14 +22,15 @@ const router = Router();
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ EXISTING ROUTES Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 router.get("/daily", async (req, res) => {
-  const { userId, date } = req.query;
+  const { userId, date, from, to } = req.query;
   if (!userId || typeof userId !== "string") {
     return res.status(400).json({ error: "Missing userId" });
   }
   try {
     const daily = await getDailyAnalytics(
       userId,
-      typeof date === "string" ? date : undefined
+      typeof from === "string" ? from : typeof date === "string" ? date : undefined,
+      typeof to === "string" ? to : undefined,
     );
     const streak = await getDeepWorkStreak(userId);
     res.json({ ...daily, ...streak });
@@ -79,12 +80,14 @@ router.get("/heatmap", async (req, res) => {
 });
 
 router.get("/dashboard", async (req, res) => {
-  const { userId } = req.query;
+  const { userId, days } = req.query;
   if (!userId || typeof userId !== "string") {
     return res.status(400).json({ error: "Missing userId" });
   }
   try {
-    const data = await getDashboard(userId);
+    const parsedDays = days === undefined ? undefined : Math.min(30, Math.max(1, Math.floor(Number(days))));
+    if (days !== undefined && !Number.isFinite(parsedDays)) return res.status(400).json({ error: "Invalid days scope" });
+    const data = await getDashboard(userId, parsedDays);
     res.json(data);
   } catch (error) {
     console.error("Dashboard analytics error:", error);

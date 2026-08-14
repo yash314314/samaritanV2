@@ -1,7 +1,14 @@
 const { execFileSync } = require("child_process");
 const os = require("os");
+const path = require("path");
 
 const isWindows = os.platform() === "win32";
+
+const PROTECTED_EXECUTABLES = new Set([
+  "system", "system idle process", "registry", "smss.exe", "csrss.exe",
+  "wininit.exe", "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe",
+  "dwm.exe", "explorer.exe", "taskhostw.exe", "node.exe", "electron.exe",
+]);
 
 const ALLOWED_EXECUTABLES = new Set([
   "chrome.exe",
@@ -183,19 +190,27 @@ function resultFromError(prefix, exeName, err) {
   };
 }
 
-function killProcessByPid(appName, pid) {
-  const validation = validateKillableApp(appName);
-  if (!validation.ok) {
-    return { killed: false, exeName: validation.exeName, reason: validation.reason };
-  }
-
+function killProcessByPid(appName, pid, processPath = null) {
   const numericPid = Number(pid);
   if (!Number.isInteger(numericPid) || numericPid <= 0) {
-    return { killed: false, exeName: validation.exeName, reason: "Invalid process id" };
+    return { killed: false, exeName: null, reason: "Invalid process id" };
   }
 
   if (numericPid === process.pid) {
-    return { killed: false, exeName: validation.exeName, reason: "Refusing to terminate Samaritan itself" };
+    return { killed: false, exeName: null, reason: "Refusing to terminate Samaritan itself" };
+  }
+
+  const observedExe = path.basename(String(processPath || appName || "")).toLowerCase();
+  const observedApp = String(appName || "").toLowerCase().trim();
+  const normalizedPath = String(processPath || "").toLowerCase();
+  if (!observedApp || REJECT_PATTERN.test(observedApp)) {
+    return { killed: false, exeName: observedExe || null, reason: "Invalid observed application" };
+  }
+  if (PROTECTED_EXECUTABLES.has(observedExe) || PROTECTED_EXECUTABLES.has(observedApp)) {
+    return { killed: false, exeName: observedExe || null, reason: `Protected process ${observedExe || observedApp}` };
+  }
+  if (normalizedPath.includes("\\windows\\system32\\")) {
+    return { killed: false, exeName: observedExe || null, reason: "Refusing to terminate a Windows system process" };
   }
 
   try {
@@ -214,11 +229,11 @@ function killProcessByPid(appName, pid) {
 
     return {
       killed: true,
-      exeName: validation.exeName,
+      exeName: observedExe || null,
       reason: `Successfully terminated pid ${numericPid}`,
     };
   } catch (err) {
-    return resultFromError(`pid ${numericPid}`, validation.exeName, err);
+    return resultFromError(`pid ${numericPid}`, observedExe || null, err);
   }
 }
 
@@ -262,7 +277,7 @@ function killProcessByName(appName) {
 function killProcess(target) {
   const appName = target?.appName || target?.name;
   if (target?.pid) {
-    const pidResult = killProcessByPid(appName, target.pid);
+    const pidResult = killProcessByPid(appName, target.pid, target.path);
     if (pidResult.killed) return pidResult;
     console.log(`[TaskKill] PID kill skipped: ${pidResult.reason}. Falling back to image name.`);
   }
