@@ -1,6 +1,5 @@
 const API_BASE = process.env.API_BASE || "http://localhost:4000";
-const USER_ID =
-  process.env.USER_ID || "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
+const USER_ID = process.env.USER_ID as string;
 
 type ActivityInput = {
   app: string;
