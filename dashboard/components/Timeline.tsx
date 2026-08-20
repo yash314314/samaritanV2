@@ -107,6 +107,8 @@ export default function Timeline({ userId, date }: any) {
 
     if(!containerRef.current) return;
 
+    if (!e.ctrlKey && !e.metaKey) return;
+
     e.preventDefault();
 
     const container = containerRef.current;
@@ -217,9 +219,10 @@ export default function Timeline({ userId, date }: any) {
         Timeline
       </h2>
 
-      <div
-        ref={containerRef}
+        <div
+          ref={containerRef}
         className="w-full max-w-full overflow-x-auto"
+        title="Use Ctrl + mouse wheel to zoom the timeline."
         onMouseMove={(e) => {
           tooltipPosRef.current = { x: e.clientX, y: e.clientY };
           scheduleTooltipMove();

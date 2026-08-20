@@ -9,7 +9,8 @@ import {
   Timer,
   Target,
   Calendar as CalendarIcon,
-  Goal
+  Goal,
+  Settings
 } from "lucide-react";
 
 const navItems = [
@@ -28,30 +29,12 @@ export default function Sidebar() {
 
   return (
 
-    <aside
-      className="
-        relative
-        z-40
-        h-screen
-        min-h-screen
-        w-16
-        shrink-0
-        bg-[#0c0c0c]
-        border-r
-        border-zinc-800
-        flex
-        flex-col
-      "
-    >
+    <aside className="sticky top-0 z-40 flex h-screen w-[72px] shrink-0 flex-col border-r border-white/10 bg-[#0B0B0D]">
 
       {/* HEADER */}
-      <div className="h-16 flex items-center justify-center border-b border-zinc-800">
+      <div className="flex h-20 items-center justify-center border-b border-white/10">
         <span
-          className="
-            flex h-8 w-8 items-center justify-center rounded-lg
-            bg-purple-500/15 border border-purple-500/30
-            text-purple-300 font-semibold text-sm
-          "
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#202024] text-sm font-semibold text-zinc-100 shadow-lg shadow-black/25"
           aria-hidden
         >
           S
@@ -59,7 +42,7 @@ export default function Sidebar() {
       </div>
 
       {/* NAVIGATION */}
-      <nav className="flex-1 px-2 py-6 space-y-2">
+      <nav className="flex-1 space-y-2 px-3 py-5">
 
         {navItems.map((item) => {
 
@@ -78,12 +61,12 @@ export default function Sidebar() {
                 justify-center
                 px-3
                 py-3
-                rounded-lg
+                rounded-xl
                 transition-colors
                 ${
                   isActive
-                    ? "bg-zinc-900 text-white"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                    ? "bg-[#202024] text-zinc-100 ring-1 ring-white/10"
+                    : "text-zinc-500 hover:bg-[#18181B] hover:text-zinc-200"
                 }
               `}
             >
@@ -92,7 +75,7 @@ export default function Sidebar() {
               <Icon
                 size={20}
                 className={`shrink-0 ${
-                  isActive ? "text-purple-400" : ""
+                  isActive ? "text-[#A78BFA]" : ""
                 }`}
               />
 
@@ -106,8 +89,8 @@ export default function Sidebar() {
                   whitespace-nowrap
                   rounded-md
                   border
-                  border-zinc-800
-                  bg-[#16161a]
+                  border-white/10
+                  bg-[#18181B]
                   px-3
                   py-1.5
                   text-sm
@@ -131,8 +114,8 @@ export default function Sidebar() {
       </nav>
 
       {/* FOOTER */}
-      <div className="p-3 border-t border-zinc-800 text-[10px] text-zinc-500 text-center">
-        v1.0
+      <div className="border-t border-white/10 p-3 text-center text-zinc-500">
+        <Settings className="mx-auto h-4 w-4" />
       </div>
 
     </aside>

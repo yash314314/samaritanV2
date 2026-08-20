@@ -208,9 +208,9 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="samaritan-card relative w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="samaritan-card relative my-0 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden sm:my-4 sm:max-h-[calc(100dvh-2rem)]">
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur px-6 py-4">
           <div className="flex items-center gap-3">
@@ -227,7 +227,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
           </button>
         </div>
 
-        <div className="space-y-6 p-6">
+        <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
           {/* Objective */}
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -556,7 +556,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur px-6 py-4">
+        <div className="shrink-0 border-t border-zinc-800 bg-zinc-900/95 px-4 py-4 backdrop-blur sm:px-6">
           <div className="flex items-center justify-between">
             <div className="text-xs text-zinc-500">
               {enforcement !== "observe" && (

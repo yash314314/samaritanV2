@@ -5,6 +5,7 @@ import { AppProvider } from "../context/AppContext";
 import { WsProvider } from "../components/WsProvider";
 import ElectronFocusBridge from "../components/ElectronFocusBridge";
 import SmartBreakController from "../components/SmartBreakController";
+import PageScrollBridge from "../components/PageScrollBridge";
 
 export default function RootLayout({
   children
@@ -16,14 +17,15 @@ export default function RootLayout({
       <body>
         <AppProvider>
           <WsProvider>
-            <div className="flex h-screen min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+            <div className="flex min-h-screen bg-[#050506] text-zinc-100">
               <ElectronFocusBridge />
               <SmartBreakController />
+              <PageScrollBridge />
               <Sidebar />
 
-              <main className="flex min-w-0 flex-1 flex-col overflow-hidden p-4 lg:p-5">
+              <main className="flex min-w-0 flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
                 <TopBar />
-                <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+                <div className="min-h-0 flex-1 pb-8">{children}</div>
               </main>
 
             </div>
