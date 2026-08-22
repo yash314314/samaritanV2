@@ -268,7 +268,7 @@ export function CalendarTimeGrid({
       </div>
 
       <div
-        className="relative grid min-h-0 select-none overflow-hidden"
+        className="relative grid min-h-0 select-none overflow-y-auto"
         style={{ gridTemplateColumns: `48px repeat(${days.length}, minmax(0, 1fr))` }}
       >
         <div className="relative bg-black">
