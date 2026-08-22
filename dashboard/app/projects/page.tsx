@@ -199,8 +199,8 @@ export default function ProjectsPage() {
               {loading ? <div className="flex h-40 items-center justify-center"><LoaderCircle className="animate-spin text-purple-400" size={20} /></div> : projects.length === 0 ? <div className="flex h-48 flex-col items-center justify-center gap-2 text-zinc-600"><FolderKanban size={26} /><span className="text-sm">No projects</span></div> : projects.map((project) => (
                 <button key={project.id} type="button" aria-current={selectedId === project.id ? "true" : undefined} onClick={() => { setSelectedId(project.id); setTab("overview"); setSelectedActivities([]); }} className={`flex w-full items-center gap-3 border-b border-zinc-900 px-4 py-3 text-left transition ${!project.active ? "opacity-55" : ""} ${selectedId === project.id ? "bg-purple-500/10" : "hover:bg-zinc-950"}`}>
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold" style={{ backgroundColor: `${project.color}20`, color: project.color }}>{project.icon || project.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-sm text-zinc-200">{project.name}</span><span className="mt-0.5 block text-[11px] text-zinc-600">{project.active ? `${hours(project.timeSummary?.weekMinutes)} this week` : "Archived"}</span></span>
-                  <span className="text-[10px] font-medium" style={{ color: project.color }}>{project.timeSummary?.progressPercent || 0}%</span>
+                  <span className="min-w-0 flex-1 overflow-hidden"><span className="block truncate text-sm text-zinc-200">{project.name}</span><span className="mt-0.5 block truncate text-[11px] text-zinc-600">{project.active ? `${hours(project.timeSummary?.weekMinutes)} this week` : "Archived"}</span></span>
+                  <span className="shrink-0 text-[10px] font-medium" style={{ color: project.color }}>{project.timeSummary?.progressPercent || 0}%</span>
                 </button>
               ))}
             </div>
