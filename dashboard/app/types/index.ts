@@ -83,6 +83,7 @@ export interface DeepWorkSession {
       enforcement: string;
       focusScore: number;
       violationCount: number;
+      startedAt?: string;
     };
   }
   

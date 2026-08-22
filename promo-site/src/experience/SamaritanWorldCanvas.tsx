@@ -93,31 +93,35 @@ export const SamaritanWorldCanvas: React.FC<SamaritanWorldCanvasProps> = ({ scro
       ringGroup.add(ringMesh);
     });
 
-    // 4. Environment 2 & 3: 3D Spatial Activity Blocks & Calendar Grid
+    // 4. Environment 2 & 3: 3D Spatial Activity & Image Panels
     const blocksGroup = new THREE.Group();
     scene.add(blocksGroup);
     blocksGroupRef.current = blocksGroup;
 
-    const activityData = [
-      { name: 'Cursor IDE', duration: 4.5, color: 0x6366f1, initialPos: [-12, 3, -6] },
-      { name: 'Figma Design Tokens', duration: 2.0, color: 0xec4899, initialPos: [-5, -2, -12] },
-      { name: 'Architecture Review', duration: 1.5, color: 0x10b981, initialPos: [2, 4, -18] },
-      { name: 'API Refactor Session', duration: 3.0, color: 0x3b82f6, initialPos: [9, -1, -24] },
-      { name: 'Calendar Timeblock', duration: 2.5, color: 0xf59e0b, initialPos: [15, 2, -30] }
+    const textureLoader = new THREE.TextureLoader();
+    const imagePanels = [
+      { texture: '/images/product/samaritan-dashboard-overview.png', pos: [-14, 4, -8], rot: [0.1, 0.4, -0.05] },
+      { texture: '/images/product/samaritan-projects-workbench.png', pos: [14, -3, -12], rot: [-0.15, -0.4, 0.05] },
+      { texture: '/images/product/samaritan-analytics-insights.png', pos: [-12, -6, -18], rot: [0.2, 0.3, 0.1] },
+      { texture: '/images/product/samaritan-deep-work-session.png', pos: [12, 6, -22], rot: [-0.1, -0.3, -0.08] },
+      { texture: '/images/product/samaritan-calendar-timeblocking.png', pos: [0, 8, -28], rot: [0.25, 0, 0] }
     ];
 
     const activityMeshes: THREE.Mesh[] = [];
-    activityData.forEach((act) => {
-      const boxGeo = new THREE.BoxGeometry(3.6, 1.8, 1.2);
-      const boxMat = new THREE.MeshStandardMaterial({
-        color: act.color,
-        roughness: 0.25,
-        metalness: 0.55,
-        emissive: act.color,
-        emissiveIntensity: 0.25
+    imagePanels.forEach((panel) => {
+      const planeGeo = new THREE.PlaneGeometry(6.4, 4.0);
+      const texture = textureLoader.load(panel.texture);
+      const planeMat = new THREE.MeshStandardMaterial({
+        map: texture,
+        side: THREE.DoubleSide,
+        roughness: 0.2,
+        metalness: 0.4,
+        transparent: true,
+        opacity: 0.85
       });
-      const mesh = new THREE.Mesh(boxGeo, boxMat);
-      mesh.position.set(act.initialPos[0], act.initialPos[1], act.initialPos[2]);
+      const mesh = new THREE.Mesh(planeGeo, planeMat);
+      mesh.position.set(panel.pos[0], panel.pos[1], panel.pos[2]);
+      mesh.rotation.set(panel.rot[0], panel.rot[1], panel.rot[2]);
       blocksGroup.add(mesh);
       activityMeshes.push(mesh);
     });
