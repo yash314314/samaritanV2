@@ -45,6 +45,15 @@ app.get('/health', (req, res) => {
   res.json({ status: "OK", ws: true });
 });
 
+// Global error handling middleware
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled API Error:", err);
+  const status = typeof err.status === "number" ? err.status : 500;
+  res.status(status).json({
+    error: err.message || "Internal server error",
+  });
+});
+
 // Attach WebSocket server to same HTTP server
 initWebSocket(server);
 

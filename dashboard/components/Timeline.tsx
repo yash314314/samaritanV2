@@ -32,9 +32,23 @@ export default function Timeline({ userId, date }: any) {
     setCalendarEvents(Array.isArray(overlayData) ? overlayData : []);
   }, [userId, date]);
 
-  useEffect(()=>{
-    loadTimeline().catch((err) => console.error("Timeline fetch failed:", err));
-  },[loadTimeline]);
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      const [timelineData, overlayData] = await Promise.all([
+        fetchTimeline(userId, undefined, undefined, date),
+        calendarApi.overlay(userId, date, date).catch(() => []),
+      ]);
+      if (isMounted) {
+        setData(Array.isArray(timelineData) ? timelineData : []);
+        setCalendarEvents(Array.isArray(overlayData) ? overlayData : []);
+      }
+    };
+    load().catch((err) => console.error("Timeline fetch failed:", err));
+    return () => {
+      isMounted = false;
+    };
+  }, [userId, date]);
 
   useRealtimeRefresh(loadTimeline, {
     events: [

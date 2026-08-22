@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   endDeepWorkSession,
   fetchActiveDeepWorkSession,
 } from "@/lib/api";
-import { Brain, Gauge, Target, Flame, Clock, Activity, AlertTriangle, CheckCircle2, StopCircle } from "lucide-react";
+import { Brain, Gauge, Flame, Clock, Activity, AlertTriangle, CheckCircle2, StopCircle } from "lucide-react";
 
 interface DeepWorkSession {
   id?: string;

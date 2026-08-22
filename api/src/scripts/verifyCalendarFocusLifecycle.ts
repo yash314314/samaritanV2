@@ -35,7 +35,7 @@ async function main() {
     assert.ok(firstDeepWork && "enforcement" in firstDeepWork);
     deepWorkIds.push(firstDeepWork.id);
     assert.equal(firstDeepWork.enforcement, "block");
-    assert.deepEqual(firstDeepWork.allowedApps, ["Cursor", "Terminal"]);
+    assert.deepEqual(firstDeepWork.allowedApps, ["cursor", "terminal"]);
     assert.deepEqual(firstDeepWork.blockedDomains, ["youtube.com", "reddit.com"]);
 
     const linkedEvent = await prisma.calendarEvent.findUniqueOrThrow({ where: { id: firstEvent.id } });

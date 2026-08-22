@@ -1,18 +1,12 @@
-"use client"
+"use client";
 
-import useSWR from "swr"
-import { fetchTimeline } from "@/lib/api"
+interface RibbonItem {
+  duration: number;
+  appName: string;
+  intent?: string;
+}
 
-const USER = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4"
-
-export default function TimelineRibbon() {
-
-  const date = new Date().toISOString().split("T")[0]
-
-  const { data } = useSWR(
-    "timeline",
-    () => fetchTimeline(USER, undefined, undefined, date)
-  )
+export default function TimelineRibbon({ data }: { data?: RibbonItem[] }) {
 
   if (!data) return null
 
@@ -25,7 +19,7 @@ export default function TimelineRibbon() {
 
       <div className="flex">
 
-        {data.map((a:any, i:number) => (
+        {data.map((a: RibbonItem, i: number) => (
 
           <div
             key={i}

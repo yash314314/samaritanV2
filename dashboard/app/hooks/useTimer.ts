@@ -2,23 +2,22 @@
 
 import { useState, useEffect } from "react";
 
-export function useTimer(targetMinutes: number, startedAt: string) {
+export function useTimer(targetMinutes: number, startedAt?: string) {
   const [elapsed, setElapsed] = useState(0);
   const [remaining, setRemaining] = useState(targetMinutes * 60);
 
   useEffect(() => {
+    if (!startedAt) return;
     const start = new Date(startedAt).getTime();
-    
-    const tick = () => {
+
+    const interval = setInterval(() => {
       const now = Date.now();
       const elapsedSec = Math.floor((now - start) / 1000);
       const remainingSec = Math.max(0, targetMinutes * 60 - elapsedSec);
       setElapsed(elapsedSec);
       setRemaining(remainingSec);
-    };
+    }, 1000);
 
-    tick();
-    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [targetMinutes, startedAt]);
 

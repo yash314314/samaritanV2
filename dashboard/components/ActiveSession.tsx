@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useActiveSession } from "@/app/hooks/useActiveSession";
 import { useTimer } from "@/app/hooks/useTimer";
 import { focusApi } from "@/lib/api";
@@ -7,8 +8,17 @@ import { useRouter } from "next/navigation";
 import { Timer, StopCircle, AlertTriangle, Shield, Eye, ShieldCheck } from "lucide-react";
 
 export function ActiveSession() {
-  const { data: status, loading, refetch } = useActiveSession();
+  const { data: status, loading } = useActiveSession();
   const router = useRouter();
+
+  const session = status?.session;
+  const plannedMinutes = session?.plannedMinutes ?? 25;
+  const startedAt = session?.startedAt;
+
+  const { remainingFormatted, elapsedFormatted, isExpired } = useTimer(
+    plannedMinutes,
+    startedAt
+  );
 
   if (loading) {
     return (
@@ -19,13 +29,7 @@ export function ActiveSession() {
     );
   }
 
-  if (!status?.active || !status.session) return null;
-
-  const session = status.session;
-  const { remainingFormatted, elapsedFormatted, isExpired } = useTimer(
-    session.plannedMinutes,
-    new Date(Date.now() - session.elapsedMinutes * 60000).toISOString()
-  );
+  if (!status?.active || !session) return null;
 
   const handleEnd = async (endStatus: "completed" | "abandoned") => {
     try {

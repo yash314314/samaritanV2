@@ -20,15 +20,19 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-router.get("/timeline", async (req, res) => {
+router.get("/timeline", async (req, res, next) => {
   const { userId, date } = req.query;
 
   if (!userId || !date) {
     return res.status(400).json({ error: "Missing params" });
   }
 
-  const timeline = await getTimeline(userId as string, date as string);
-  res.json(timeline);
+  try {
+    const timeline = await getTimeline(userId as string, date as string);
+    res.json(timeline);
+  } catch (err) {
+    next(err);
+  }
 });
 router.post("/session", async (req, res) => {
   try {

@@ -40,7 +40,7 @@ export function useRealtimeRefresh(
   const mountedRef = useRef(true);
 
   const eventsKey = events.join("|");
-  const eventSet = useMemo(() => new Set(events), [eventsKey]);
+  const eventSet = useMemo(() => new Set(eventsKey ? eventsKey.split("|") : []), [eventsKey]);
 
   useEffect(() => {
     refreshRef.current = onRefresh;
