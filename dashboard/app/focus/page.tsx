@@ -1,26 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Shield, Timer, Zap } from "lucide-react";
+import { Loader2, Timer, Zap } from "lucide-react";
 
-import DeepWorkActiveOverlay from "@/components/intelligence/DeepWorkActiveOverlay";
-import DeepWorkConfigModal from "@/components/intelligence/DeepWorkConfigModal";
-import DeepWorkExtensionPrompt from "@/components/intelligence/DeepWorkExtensionPrompt";
-import DeepWorkHistoryCard from "@/components/intelligence/DeepWorkHistoryCard";
-import DeepWorkReadinessCard from "@/components/intelligence/DeepWorkReadinessCard";
-import DeepWorkResultPanel from "@/components/intelligence/DeepWorkResultPanel";
-import { focusApi } from "@/lib/api";
-import { getWsClient } from "@/lib/ws";
+import DeepWorkActiveOverlay from "@/components/focus/DeepWorkActiveOverlay";
+import DeepWorkConfigModal from "@/components/focus/DeepWorkConfigModal";
+import DeepWorkExtensionPrompt from "@/components/focus/DeepWorkExtensionPrompt";
+import DeepWorkHistoryCard from "@/components/focus/DeepWorkHistoryCard";
+import DeepWorkReadinessCard from "@/components/focus/DeepWorkReadinessCard";
+import DeepWorkResultPanel from "@/components/focus/DeepWorkResultPanel";
+import DistractionBlockerCard from "@/components/focus/DistractionBlockerCard";
+import { breaksApi, focusApi } from "@/lib/api";
+import { getWsClient, useWsMessage } from "@/lib/ws";
 import { useInterventionAlerts, useLiveDeepWork } from "@/lib/useWs";
 
 type FocusConfig = {
   goal?: string;
+  projectId?: string | null;
   plannedMinutes: number;
   enforcement: "observe" | "warn" | "block" | "require_reason";
   allowedApps?: string[];
   allowedDomains?: string[];
   blockedApps?: string[];
   blockedDomains?: string[];
+  timerMode?: "countdown" | "pomodoro";
+  focusMinutes?: number;
+  shortBreakMinutes?: number;
+  longBreakMinutes?: number;
+  totalRounds?: number;
+  ambientSound?: "none" | "white" | "pink" | "brown" | "rain";
+  ambientVolume?: number;
 };
 
 type ModalFocusConfig = Omit<FocusConfig, "enforcement"> & {
@@ -40,12 +49,12 @@ function computeProtocolReadiness(activeSession: any, history: any[]) {
       (Date.now() - new Date(activeSession.startedAt).getTime()) / 60000
     );
     return {
-      score: 80,
+      score: 0,
       factors: {
-        timeOfDay: 75,
-        recentPattern: 80,
-        burnoutRisk: 80,
-        lastSessionQuality: 85,
+        timeOfDay: 0,
+        recentPattern: 0,
+        burnoutRisk: 0,
+        lastSessionQuality: 0,
       },
       recommendedDuration: activeSession.plannedMinutes || 60,
       bestWindow: null,
@@ -61,16 +70,18 @@ function computeProtocolReadiness(activeSession: any, history: any[]) {
   const recent = history.filter((session) => session.status !== "active").slice(0, 5);
   const completionRate = recent.length
     ? (recent.filter((session) => session.status === "completed").length / recent.length) * 100
-    : 60;
+    : 0;
   const avgFocus = recent.length
-    ? recent.reduce((sum, session) => sum + (session.finalFocusScore ?? session.focusScore ?? 60), 0) / recent.length
-    : 65;
+    ? recent.reduce((sum, session) => sum + (session.finalFocusScore ?? session.focusScore ?? 0), 0) / recent.length
+    : 0;
 
   const now = new Date();
   const hour = now.getHours();
   const timeOfDay = hour >= 9 && hour <= 11 ? 85 : hour >= 14 && hour <= 17 ? 75 : hour >= 7 && hour <= 21 ? 60 : 30;
   const recentPattern = Math.round((completionRate + avgFocus) / 2);
-  const score = Math.round((timeOfDay + recentPattern + 75 + avgFocus) / 4);
+  const score = recent.length
+    ? Math.round((timeOfDay + recentPattern + 75 + avgFocus) / 4)
+    : 0;
 
   const riskFactors: string[] = [];
   if (completionRate < 50 && recent.length >= 3) riskFactors.push("Recent sessions were often abandoned");
@@ -104,6 +115,7 @@ export default function FocusPage() {
   const [extensionPrompt, setExtensionPrompt] = useState<{ sessionId: string; planned: number; actual: number; goal: string } | null>(null);
   const [resultSessionId, setResultSessionId] = useState<string | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const endingSessionIdRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -145,6 +157,22 @@ export default function FocusPage() {
         distractionMs: liveDeepWork.distractionMs,
         idleMs: liveDeepWork.idleMs,
         interruptionMs: liveDeepWork.interruptionMs,
+        timerMode: liveDeepWork.timerMode,
+        focusMinutes: liveDeepWork.focusMinutes,
+        shortBreakMinutes: liveDeepWork.shortBreakMinutes,
+        longBreakMinutes: liveDeepWork.longBreakMinutes,
+        currentPhase: liveDeepWork.currentPhase,
+        currentRound: liveDeepWork.currentRound,
+        totalRounds: liveDeepWork.totalRounds,
+        paused: liveDeepWork.paused,
+        phaseStartedAt: liveDeepWork.phaseStartedAt,
+        phaseEndsAt: liveDeepWork.phaseEndsAt,
+        phaseElapsedSeconds: liveDeepWork.phaseElapsedSeconds,
+        phaseRemainingSeconds: liveDeepWork.phaseRemainingSeconds,
+        elapsedSeconds: liveDeepWork.elapsedSeconds,
+        enforcementActive: liveDeepWork.enforcementActive,
+        ambientSound: liveDeepWork.ambientSound || prev?.ambientSound,
+        ambientVolume: liveDeepWork.ambientVolume ?? prev?.ambientVolume,
       }));
       return;
     }
@@ -167,6 +195,22 @@ export default function FocusPage() {
     liveDeepWork.distractionMs,
     liveDeepWork.idleMs,
     liveDeepWork.interruptionMs,
+    liveDeepWork.timerMode,
+    liveDeepWork.focusMinutes,
+    liveDeepWork.shortBreakMinutes,
+    liveDeepWork.longBreakMinutes,
+    liveDeepWork.currentPhase,
+    liveDeepWork.currentRound,
+    liveDeepWork.totalRounds,
+    liveDeepWork.paused,
+    liveDeepWork.phaseStartedAt,
+    liveDeepWork.phaseEndsAt,
+    liveDeepWork.phaseElapsedSeconds,
+    liveDeepWork.phaseRemainingSeconds,
+    liveDeepWork.elapsedSeconds,
+    liveDeepWork.enforcementActive,
+    liveDeepWork.ambientSound,
+    liveDeepWork.ambientVolume,
     load,
   ]);
 
@@ -191,28 +235,65 @@ export default function FocusPage() {
     };
   }, [activeSession?.id, load]);
 
+  useWsMessage<{ sessionId: string }>("deepwork:ended", ({ sessionId }) => {
+    if (endingSessionIdRef.current === sessionId) return;
+    setActiveSession((previous: any) => previous?.id === sessionId ? null : previous);
+    setExtensionPrompt(null);
+    setResultSessionId(sessionId);
+    void load();
+  });
+
   const handleStartConfig = async (config: ModalFocusConfig) => {
-    const payload: FocusConfig = {
-      ...config,
-      enforcement: normalizeEnforcement(config.enforcement),
-    };
-    const res = await focusApi.start(payload);
-    setPendingConfig(payload);
-    setActiveSession(res.data);
-    setConfigOpen(false);
-    await load();
+    try {
+      const payload: FocusConfig = {
+        ...config,
+        enforcement: normalizeEnforcement(config.enforcement),
+      };
+      const res = await focusApi.start(payload);
+      setPendingConfig(payload);
+      setActiveSession(res.data);
+      setConfigOpen(false);
+      await load();
+    } catch (err) {
+      console.error("Failed to start deep work session:", err);
+    }
   };
 
   const finishSession = async (id: string, status: "completed" | "abandoned") => {
-    await focusApi.end(id, status);
-    const res = await focusApi.getResult(id);
-    const session = res.data?.session || res.data;
-    const actualMin = session.endedAt
-      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000)
-      : 0;
+    endingSessionIdRef.current = id;
+    // The session may have already auto-completed/expired on the backend
+    // (timer or external end). End it if possible, but never let that block the
+    // rest of the flow — otherwise the overlay can get stuck.
+    try {
+      await focusApi.end(id, status);
+    } catch (err) {
+      console.warn("Session end failed (may have already ended):", err);
+    }
 
     setActiveSession(null);
     await load();
+
+    // Fetch the result; fall back to the history item if the result endpoint
+    // isn't available (e.g. it was already cleaned up).
+    let session: any = null;
+    try {
+      const res = await focusApi.getResult(id);
+      session = res.data?.session || res.data || null;
+    } catch (err) {
+      console.warn("Session result unavailable, falling back to history:", err);
+      const ended = history.find((h) => h.id === id);
+      session = ended || null;
+    }
+
+    if (!session) {
+      setResultSessionId(id);
+      endingSessionIdRef.current = null;
+      return;
+    }
+
+    const actualMin = session.endedAt
+      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000)
+      : 0;
 
     if (status === "abandoned" || actualMin < session.plannedMinutes * 0.8) {
       setExtensionPrompt({
@@ -224,32 +305,42 @@ export default function FocusPage() {
     } else {
       setResultSessionId(id);
     }
+    endingSessionIdRef.current = null;
   };
 
   const handleExtend = async (extraMinutes: number) => {
-    const baseConfig = pendingConfig || {
-      goal: extensionPrompt?.goal || "Extended session",
-      enforcement: "warn",
-      allowedApps: [],
-      allowedDomains: [],
-      blockedApps: [],
-      blockedDomains: [],
-    };
+    try {
+      const baseConfig = pendingConfig || {
+        goal: extensionPrompt?.goal || "Extended session",
+        enforcement: "warn",
+        allowedApps: [],
+        allowedDomains: [],
+        blockedApps: [],
+        blockedDomains: [],
+      };
 
-    const res = await focusApi.start({
-      ...baseConfig,
-      goal: baseConfig.goal || extensionPrompt?.goal || "Extended session",
-      plannedMinutes: extraMinutes,
-    } as FocusConfig);
+      const res = await focusApi.start({
+        ...baseConfig,
+        goal: baseConfig.goal || extensionPrompt?.goal || "Extended session",
+        plannedMinutes: extraMinutes,
+      } as FocusConfig);
 
-    setActiveSession(res.data);
-    setExtensionPrompt(null);
-    await load();
+      setActiveSession(res.data);
+      setExtensionPrompt(null);
+      await load();
+    } catch (err) {
+      console.error("Failed to extend session:", err);
+    }
   };
 
   const readiness = computeProtocolReadiness(activeSession, history);
 
-  if (loading) {
+  const hasAnything = !!(activeSession || history.length > 0);
+
+  // Only block the very first paint before anything has loaded. Once some data
+  // exists we keep showing the last content while refreshes happen in the
+  // background (via websocket + the 15s status poll) — no more blank flashes.
+  if (loading && !hasAnything) {
     return (
       <div className="flex h-64 items-center justify-center gap-3 text-zinc-500">
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -259,15 +350,15 @@ export default function FocusPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+      <div className="samaritan-card flex items-center justify-between gap-4 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10">
-            <Timer className="h-6 w-6 text-purple-400" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10">
+            <Timer className="h-5 w-5 text-purple-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-zinc-100">Focus Protocol</h1>
-            <p className="text-sm text-zinc-500">
+            <h1 className="text-xl font-bold text-zinc-100">Focus Protocol</h1>
+            <p className="text-xs text-zinc-500">
               Configure, enforce, and review protected deep-work sessions
             </p>
           </div>
@@ -281,14 +372,14 @@ export default function FocusPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        <div className="xl:col-span-4">
+      <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="min-h-0 xl:col-span-4">
           <DeepWorkReadinessCard data={readiness} onOpenConfig={() => setConfigOpen(true)} />
         </div>
-        <div className="xl:col-span-4">
-          <EnforcementGuide />
+        <div className="min-h-0 xl:col-span-4">
+          <DistractionBlockerCard focusActive={Boolean(activeSession)} />
         </div>
-        <div className="xl:col-span-4">
+        <div className="min-h-0 xl:col-span-4">
           <DeepWorkHistoryCard sessions={history} onViewResult={setResultSessionId} />
         </div>
       </div>
@@ -317,9 +408,18 @@ export default function FocusPage() {
           actualMinutes={extensionPrompt.actual}
           goal={extensionPrompt.goal}
           onExtend={handleExtend}
-          onBreak={() => {
-            setResultSessionId(extensionPrompt.sessionId);
-            setExtensionPrompt(null);
+          onBreak={async () => {
+            try {
+              await breaksApi.start({
+                reason: "Recovery after a deep work session",
+                recommendedMinutes: 10,
+              });
+            } catch (error) {
+              console.error("Could not start recovery break", error);
+            } finally {
+              setResultSessionId(extensionPrompt.sessionId);
+              setExtensionPrompt(null);
+            }
           }}
         />
       )}
@@ -334,32 +434,6 @@ export default function FocusPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function EnforcementGuide() {
-  const levels = [
-    { label: "Observe", value: "observe", detail: "Log distractions without interrupting you." },
-    { label: "Warn", value: "warn", detail: "Show a warning notification and dashboard alert." },
-    { label: "Require Reason", value: "require_reason", detail: "Ask for justification and record the reason." },
-    { label: "Block", value: "block", detail: "Force a blocking overlay until compliant activity resumes." },
-  ];
-
-  return (
-    <div className="h-full rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-      <div className="mb-4 flex items-center gap-2">
-        <Shield className="h-4 w-4 text-rose-400" />
-        <h2 className="text-sm font-semibold text-zinc-300">Enforcement Levels</h2>
-      </div>
-      <div className="space-y-3">
-        {levels.map((level) => (
-          <div key={level.value} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-xs font-semibold text-zinc-200">{level.label}</div>
-            <div className="mt-1 text-xs text-zinc-500">{level.detail}</div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

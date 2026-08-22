@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import LiveClock from "./LiveClock";
 import RecentActivity from "./RecentActivity";
-import PeakWindow from "./PeakWindow";
+import { useCurrentActivity } from "../lib/useWs";
 
 function formatScore(value: any) {
   const n = Number(value ?? 0);
@@ -58,7 +59,7 @@ function scoreTone(value: number, inverted = false) {
   };
 }
 
-function ScoreCard({
+function MetricRow({
   label,
   value,
   inverted = false
@@ -71,26 +72,21 @@ function ScoreCard({
   const tone = scoreTone(score, inverted);
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase text-zinc-500">
-            {label}
-          </div>
-
-          <div className={`text-xl font-semibold ${tone.text}`}>
-            {score.toFixed(0)}
-          </div>
+    <div className="group py-3 first:pt-0 last:pb-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] uppercase text-zinc-500">{label}</div>
+          <div className="text-[11px] text-zinc-600">{tone.label}</div>
         </div>
 
-        <div className="text-[11px] text-zinc-500">
-          {tone.label}
+        <div className={`tabular-nums text-2xl font-semibold leading-none ${tone.text}`}>
+          {score.toFixed(0)}
         </div>
       </div>
 
-      <div className="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/80">
         <div
-          className={`h-full ${tone.bar}`}
+          className={`h-full rounded-full ${tone.bar} transition-all duration-700 ease-out group-hover:brightness-125`}
           style={{ width: `${score}%` }}
         />
       </div>
@@ -98,7 +94,7 @@ function ScoreCard({
   );
 }
 
-function StatLine({
+function StatPill({
   label,
   value
 }: {
@@ -106,16 +102,16 @@ function StatLine({
   value: any;
 }) {
   return (
-    <div className="flex justify-between gap-3 text-xs">
-      <span className="text-zinc-500">{label}</span>
-      <span className="text-zinc-200 font-medium truncate">
+    <div className="min-w-0 rounded-md bg-zinc-950/70 px-2.5 py-2">
+      <div className="truncate text-[10px] uppercase text-zinc-600">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-medium text-zinc-200">
         {value}
-      </span>
+      </div>
     </div>
   );
 }
 
-function deriveRead(daily: any, intelligence: any) {
+function deriveRead(daily: any) {
   const focus = formatScore(daily?.averageFocusScore);
   const burnout = formatScore(daily?.averageBurnoutScore);
   const entropy = formatScore(daily?.averageEntropyScore);
@@ -136,118 +132,137 @@ function deriveRead(daily: any, intelligence: any) {
     return "Low focus signal. Start with one constrained work block.";
   }
 
-  return intelligence?.suggestion ?? "Work pattern stable. Maintain structure.";
+  return "Work pattern stable. Maintain structure.";
 }
 
 export default function MetricsPanel({
   daily,
-  timeline,
-  intelligence
+  timeline
 }: any) {
   const focusScore = formatScore(daily?.averageFocusScore);
   const burnoutScore = formatScore(daily?.averageBurnoutScore);
   const entropyScore = formatScore(daily?.averageEntropyScore);
 
-  const recent = Array.isArray(timeline) ? timeline : [];
-  const currentActivity = recent[recent.length - 1];
+  const liveActivity = useCurrentActivity();
+  const [signalClock, setSignalClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSignalClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const observedAt = liveActivity?.observedAt
+    ? new Date(liveActivity.observedAt).getTime()
+    : 0;
+  const hasLiveSignal = Boolean(
+    liveActivity &&
+    Number.isFinite(observedAt) &&
+    signalClock - observedAt <= 3000
+  );
+  const currentAppName = hasLiveSignal ? liveActivity?.appName : null;
+  const activitySubtitle = hasLiveSignal
+    ? liveActivity?.windowTitle || "Active window"
+    : "Waiting for live foreground activity";
 
   return (
-    <div className="bg-[#141414] p-5 rounded-xl border border-[#262626] h-full flex flex-col gap-5 min-h-0">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-100">
-            Samaritan
-          </h2>
+    <div className="samaritan-card h-full min-h-0 overflow-hidden p-5">
+      <div className="relative flex h-full min-h-0 flex-col">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold tracking-normal text-zinc-100">
+              Samaritan
+            </h2>
 
-          <div className="text-[11px] text-zinc-500">
-            Intelligence layer active
+            <div className="mt-0.5 text-[11px] text-zinc-500">
+              Focus tracker active
+            </div>
+          </div>
+
+          <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Online
+          </span>
+        </div>
+
+        <div className="mt-5 rounded-lg bg-zinc-950/70 p-4 ring-1 ring-white/5 transition-colors duration-300 hover:bg-zinc-950">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <p className="text-[11px] uppercase text-zinc-500">
+              Current Time
+            </p>
+            <span className="text-[10px] text-zinc-600">IST</span>
+          </div>
+          <LiveClock />
+        </div>
+
+        <div className="mt-4 border-t border-zinc-900 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-[11px] uppercase text-zinc-500">
+              Current State
+            </p>
+            <span className={`text-[10px] ${hasLiveSignal ? "text-emerald-400" : "text-zinc-600"}`}>
+              {hasLiveSignal ? "Live" : "Standby"}
+            </span>
+          </div>
+
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-purple-400 shadow-[0_0_18px_rgba(168,85,247,0.75)] animate-pulse" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-zinc-100">
+                {currentAppName ?? "No active activity"}
+              </div>
+              <div className="mt-1 max-h-10 overflow-hidden break-words text-xs leading-relaxed text-zinc-500">
+                {activitySubtitle}
+              </div>
+            </div>
           </div>
         </div>
 
-        <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Online
-        </span>
-      </div>
+        <div className="mt-4 border-t border-zinc-900 pt-4">
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-xs uppercase text-zinc-400">
+              Today
+            </p>
+            <span className="text-[10px] text-zinc-600">0-100</span>
+          </div>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-        <p className="text-[11px] text-zinc-500 uppercase mb-1">
-          Current Time
-        </p>
-        <LiveClock />
-      </div>
-
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-        <p className="text-[11px] text-zinc-500 uppercase mb-2">
-          Current State
-        </p>
-
-        <div className="text-sm font-medium text-zinc-200 truncate">
-          {currentActivity?.appName ?? "No active activity"}
+          <div className="divide-y divide-zinc-900">
+            <MetricRow label="Focus" value={focusScore} />
+            <MetricRow label="Burnout" value={burnoutScore} inverted />
+            <MetricRow label="Entropy" value={entropyScore} inverted />
+          </div>
         </div>
 
-        <div className="text-xs text-zinc-500 truncate mt-1">
-          {currentActivity?.items?.at(-1)?.title ?? "Waiting for signal"}
+        <div className="mt-4 border-t border-zinc-900 pt-4">
+          <p className="mb-2 text-xs uppercase text-zinc-400">
+            Load
+          </p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <StatPill label="Tracked" value={formatDuration(daily?.totalActiveSeconds)} />
+            <StatPill label="Idle" value={formatDuration(daily?.totalIdleSeconds)} />
+            <StatPill label="Switches" value={daily?.totalSwitches ?? 0} />
+            <StatPill label="Deep" value={daily?.deepWorkSessions ?? 0} />
+          </div>
         </div>
-      </div>
 
-      <div>
-        <p className="text-xs text-zinc-400 uppercase mb-2">
-          Today
-        </p>
+        <div className="mt-4 border-t border-zinc-900 pt-4">
+          <p className="mb-2 text-xs uppercase text-zinc-400">
+            Samaritan Read
+          </p>
 
-        <div className="grid grid-cols-1 gap-2">
-          <ScoreCard label="Focus" value={focusScore} />
-          <ScoreCard label="Burnout" value={burnoutScore} inverted />
-          <ScoreCard label="Entropy" value={entropyScore} inverted />
+          <p className="text-xs leading-relaxed text-zinc-300">
+            {deriveRead(daily)}
+          </p>
         </div>
-      </div>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 space-y-2">
-        <p className="text-xs text-zinc-400 uppercase">
-          Load
-        </p>
+        <div className="mt-4 min-h-0 flex-1 border-t border-zinc-900 pt-4">
+          <p className="mb-2 text-xs uppercase text-zinc-400">
+            Recent Activity
+          </p>
 
-        <StatLine
-          label="Tracked"
-          value={formatDuration(daily?.totalActiveSeconds)}
-        />
-
-        <StatLine
-          label="Idle"
-          value={formatDuration(daily?.totalIdleSeconds)}
-        />
-
-        <StatLine
-          label="Switches"
-          value={daily?.totalSwitches ?? 0}
-        />
-
-        <StatLine
-          label="Deep sessions"
-          value={daily?.deepWorkSessions ?? 0}
-        />
-      </div>
-
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-        <p className="text-xs text-zinc-400 uppercase mb-2">
-          Samaritan Read
-        </p>
-
-        <p className="text-xs leading-relaxed text-zinc-300">
-          {deriveRead(daily, intelligence)}
-        </p>
-      </div>
-
-      <PeakWindow data={intelligence} />
-
-      <div className="min-h-0 flex-1">
-        <p className="text-xs text-zinc-400 uppercase mb-2">
-          Recent Activity
-        </p>
-
-        <div className="max-h-72 overflow-y-auto pr-1">
-          <RecentActivity data={timeline} />
+          <div className="max-h-72 overflow-y-auto pr-1">
+            <RecentActivity data={timeline} />
+          </div>
         </div>
       </div>
     </div>

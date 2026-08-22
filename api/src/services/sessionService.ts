@@ -4,7 +4,13 @@ import { recalculateSessionMetrics } from "./activityService"
 import { evaluateDeepWorkActivity } from "./deepWorkService";
 import { classifyActivity } from "./contextClassifier";
 import { resolveActivityIcon } from "./iconResolver";
+import { tagActivityToProject } from "./projectTagger";
 import { emitActivityCreated, emitSessionMetricsUpdated } from "../websocket/broadcaster";
+import { emitGoalProgress } from "../websocket/broadcaster";
+import { updateAndEmitGoalProgress } from "./goalProgressService";
+import { reconcileCalendarActivity } from "./calendarTrackingService";
+import { evaluateSmartBreak } from "./smartBreakService";
+import { updateWidgetPersistedActivity } from "./widgetStateService";
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_SESSION_DURATION = 2 * 60 * 60 * 1000;
@@ -63,12 +69,25 @@ export async function createActivityFromTracker(data: {
     ? await prisma.activity.findUnique({ where: { id: data.id } })
     : null;
 
-  const classification = await classifyActivity(data.app, data.title);
   const icon = resolveActivityIcon({
     appName: data.app,
     url: data.url,
     domain: data.domain
   });
+  const classification = await classifyActivity(
+    data.app,
+    data.title,
+    data.domain ?? icon.domain ?? data.url ?? null
+  );
+
+  // Auto-tag activity to project based on matching rules
+  const tagResult = await tagActivityToProject(
+    data.userId,
+    data.app,
+    data.domain ?? icon.domain ?? null,
+    data.title
+  );
+  const projectId = tagResult.projectId;
 
   const normalizedApp = data.app.toLowerCase();
   const shouldPreferResolvedIcon =
@@ -87,7 +106,8 @@ export async function createActivityFromTracker(data: {
         where: { id: data.id },
         update: {
           endTime: data.endTime,
-          duration: data.duration
+          duration: data.duration,
+          projectId: projectId ?? undefined,
         },
         create: {
           id: data.id,
@@ -105,7 +125,8 @@ export async function createActivityFromTracker(data: {
           confidence: classification.confidence,
           iconUrl: finalIconUrl,
           domain: data.domain ?? icon.domain,
-          url: data.url ?? null
+          url: data.url ?? null,
+          projectId: projectId ?? null,
         }
       })
     : await prisma.activity.create({
@@ -124,7 +145,8 @@ export async function createActivityFromTracker(data: {
           confidence: classification.confidence,
           iconUrl: finalIconUrl,
           domain: data.domain ?? icon.domain,
-          url: data.url ?? null
+          url: data.url ?? null,
+          projectId: projectId ?? null,
         }
       });
 
@@ -157,6 +179,17 @@ export async function createActivityFromTracker(data: {
 
   // ─── WebSocket broadcast ───
   emitActivityCreated(data.userId, activity);
+  updateWidgetPersistedActivity(data.userId, activity).catch((error) => {
+    console.error("[WidgetState] Persisted activity update failed", error);
+  });
+
+  reconcileCalendarActivity(data.userId, activity).catch((error) => {
+    console.error("[CalendarTracking] Activity reconciliation failed", error);
+  });
+
+  evaluateSmartBreak(data.userId).catch((error) => {
+    console.error("[SmartBreak] Activity evaluation failed", error);
+  });
 
   const updatedSession = await prisma.session.findUnique({
     where: { id: session.id },
@@ -173,6 +206,9 @@ export async function createActivityFromTracker(data: {
   if (updatedSession) {
     emitSessionMetricsUpdated(data.userId, session.id, updatedSession);
   }
+
+  const goals = await updateAndEmitGoalProgress(data.userId);
+  emitGoalProgress(data.userId, goals);
 
   return {
     activity,

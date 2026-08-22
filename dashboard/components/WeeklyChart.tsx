@@ -16,7 +16,7 @@ export default function WeeklyChart({ data, comparison }: any) {
 
   if (chartData.length === 0) {
     return (
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+      <div className="samaritan-card p-6">
         <h2 className="text-sm font-semibold text-zinc-300">
           Weekly Focus Trend
         </h2>
@@ -32,7 +32,7 @@ export default function WeeklyChart({ data, comparison }: any) {
 
   return (
 
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+    <div className="samaritan-card p-6">
 
       <h2 className="text-sm font-semibold text-zinc-300 mb-4">
         Weekly Focus Trend

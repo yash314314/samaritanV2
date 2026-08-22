@@ -1,9 +1,12 @@
 import { prisma } from "../prisma";
 import { getISTDayRange } from "../utils/time";
 import type { Request, Response } from "express";
-export async function getAssistantInsights(userId: string) {
+export async function getAssistantInsights(userId: string, days?: number) {
 
-  const { start, end } = getISTDayRange();
+  const today = getISTDayRange();
+  const safeDays = days === undefined ? 1 : Math.min(30, Math.max(1, Math.floor(days)));
+  const start = new Date(today.start.getTime() - (safeDays - 1) * 24 * 60 * 60 * 1000);
+  const end = today.end;
 
   const activities = await prisma.activity.findMany({
     where: {
@@ -58,7 +61,7 @@ export async function getAssistantInsights(userId: string) {
 
   const weightedFocus =
     activities.reduce(
-      (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+      (s,a)=>s+getBaseFocus(a)*a.duration,
       0
     ) / totalDuration;
 
@@ -240,7 +243,7 @@ export async function getDailyComparison(userId: string) {
 
     const weightedFocus =
       activities.reduce(
-        (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+        (s,a)=>s+getBaseFocus(a)*a.duration,
         0
       ) / totalDuration;
 
@@ -317,64 +320,103 @@ function generateFocusReason(today:any,yesterday:any){
   return insights.join(" and ");
 
 }
-export async function getWeeklyGrowthTrend(userId:string){
-
-  const start = new Date();
-  start.setDate(start.getDate()-7);
+export async function getWeeklyGrowthTrend(userId:string, rangeDays = 7){
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const safeDays = Math.min(30, Math.max(1, Math.floor(rangeDays)));
+  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const todayStartIST = Date.UTC(
+    nowIST.getUTCFullYear(),
+    nowIST.getUTCMonth(),
+    nowIST.getUTCDate()
+  );
+  const firstDayIST = todayStartIST - (safeDays - 1) * 24 * 60 * 60 * 1000;
+  const queryStart = new Date(firstDayIST - IST_OFFSET_MS);
+  const queryEnd = new Date(todayStartIST + 24 * 60 * 60 * 1000 - IST_OFFSET_MS);
 
   const sessions = await prisma.session.findMany({
-    where:{
+    where: {
       userId,
-      startTime:{ gte:start }
-    }
+      startTime: { gte: queryStart, lt: queryEnd }
+    },
+    include: { activities: true },
+    orderBy: { startTime: "asc" }
   });
 
-  const dayMap:Record<string,{focus:number,count:number,entropy:number}> = {};
+  type GrowthDay = {
+    date: string;
+    focusTotal: number;
+    productivityTotal: number;
+    entropyTotal: number;
+    metricWeight: number;
+    trackedMs: number;
+    deepWorkMs: number;
+    switches: number;
+  };
 
-  sessions.forEach(s=>{
+  const days = new Map<string, GrowthDay>();
+  for (let index = 0; index < safeDays; index++) {
+    const day = new Date(firstDayIST + index * 24 * 60 * 60 * 1000);
+    const date = day.toISOString().slice(0, 10);
+    days.set(date, {
+      date,
+      focusTotal: 0,
+      productivityTotal: 0,
+      entropyTotal: 0,
+      metricWeight: 0,
+      trackedMs: 0,
+      deepWorkMs: 0,
+      switches: 0
+    });
+  }
 
-    const day =
-      s.startTime.toISOString().split("T")[0];
+  for (const session of sessions) {
+    const sessionIST = new Date(session.startTime.getTime() + IST_OFFSET_MS);
+    const date = sessionIST.toISOString().slice(0, 10);
+    const bucket = days.get(date);
+    if (!bucket) continue;
 
-    if(!dayMap[day]){
-      dayMap[day] = {
-        focus:0,
-        entropy:0,
-        count:0
-      };
-    }
+    const trackedMs = session.activities.reduce(
+      (sum, activity) => sum + Math.max(0, activity.duration ?? 0),
+      0
+    );
+    if (trackedMs <= 0) continue;
 
-    dayMap[day].focus += s.focusScore;
-    dayMap[day].entropy += s.entropyScore;
-    dayMap[day].count++;
+    bucket.focusTotal += session.focusScore * trackedMs;
+    bucket.productivityTotal += session.productivityScore * trackedMs;
+    bucket.entropyTotal += session.entropyScore * trackedMs;
+    bucket.metricWeight += trackedMs;
+    bucket.trackedMs += trackedMs;
+    bucket.deepWorkMs += session.activities
+      .filter((activity) => activity.category === "deep_work")
+      .reduce((sum, activity) => sum + Math.max(0, activity.duration ?? 0), 0);
+    bucket.switches += session.switchCount;
+  }
 
-  });
-
-  const trend = Object.entries(dayMap).map(([date,d])=>({
-
-    date,
-
-    focus:
-      d.focus/d.count,
-
-    entropy:
-      d.entropy/d.count
-
+  return [...days.values()].map((day) => ({
+    date: day.date,
+    focus: day.metricWeight > 0 ? Number((day.focusTotal / day.metricWeight).toFixed(2)) : 0,
+    productivity: day.metricWeight > 0
+      ? Number((day.productivityTotal / day.metricWeight).toFixed(2))
+      : 0,
+    entropy: day.metricWeight > 0 ? Number((day.entropyTotal / day.metricWeight).toFixed(2)) : 0,
+    trackedMinutes: Number((day.trackedMs / 60000).toFixed(1)),
+    deepWorkMinutes: Number((day.deepWorkMs / 60000).toFixed(1)),
+    switches: day.switches
   }));
 
-  trend.sort((a,b)=>
-    new Date(a.date).getTime()
-    -
-    new Date(b.date).getTime()
-  );
-
-  return trend;
-
 }
-export async function getIntentHeatmap(userId:string){
+export async function getIntentHeatmap(userId:string, days?: number){
+
+  const today = getISTDayRange();
+  const rangeStart = days === undefined
+    ? undefined
+    : new Date(today.start.getTime() - (Math.min(30, Math.max(1, Math.floor(days))) - 1) * 24 * 60 * 60 * 1000);
 
   const activities = await prisma.activity.findMany({
-    where:{ session:{ userId } }
+    where:{
+      session:{ userId },
+      ...(rangeStart ? { startTime: { gte: rangeStart, lt: today.end } } : {}),
+    }
   });
 
   const map:Record<string,{
@@ -391,7 +433,7 @@ export async function getIntentHeatmap(userId:string){
     }
 
     map[intent].duration += a.duration;
-    map[intent].focus += (a.focusImpact ?? 0.5)*a.duration;
+    map[intent].focus += getBaseFocus(a)*a.duration;
 
   });
 
@@ -413,12 +455,20 @@ export async function getIntentHeatmap(userId:string){
 
 }
 
-export async function getBurnoutRisk(userId:string){
+export async function getBurnoutRisk(userId:string, days?: number){
+
+  const today = getISTDayRange();
+  const rangeStart = days === undefined
+    ? undefined
+    : new Date(today.start.getTime() - (Math.min(30, Math.max(1, Math.floor(days))) - 1) * 24 * 60 * 60 * 1000);
 
   const sessions = await prisma.session.findMany({
-    where:{ userId },
+    where:{
+      userId,
+      ...(rangeStart ? { startTime: { gte: rangeStart, lt: today.end } } : {}),
+    },
     orderBy:{ startTime:"desc" },
-    take:10
+    take: days === undefined ? 10 : 500,
   });
 
   if(sessions.length===0){
@@ -614,11 +664,11 @@ export async function getDailyFocusTrend(
     };
   });
 }
-export async function getWeeklyInsights(userId: string) {
+export async function getWeeklyInsights(userId: string, days = 7) {
 
   const now = new Date();
   const weekStart = new Date();
-  weekStart.setDate(now.getDate() - 7);
+  weekStart.setDate(now.getDate() - Math.min(30, Math.max(1, Math.floor(days))) + 1);
 
   const activities = await prisma.activity.findMany({
     where: {
@@ -648,7 +698,7 @@ export async function getWeeklyInsights(userId: string) {
 
   const weightedFocus =
     activities.reduce(
-      (s, a) => s + (a.focusImpact ?? 0.5) * a.duration,
+      (s, a) => s + getBaseFocus(a) * a.duration,
       0
     ) / totalDuration;
 
@@ -663,7 +713,7 @@ export async function getWeeklyInsights(userId: string) {
       hourMap[hour] = { score: 0, duration: 0 };
     }
 
-    hourMap[hour].score += (a.focusImpact ?? 0.5) * a.duration;
+    hourMap[hour].score += getBaseFocus(a) * a.duration;
     hourMap[hour].duration += a.duration;
 
   });
@@ -690,7 +740,9 @@ export async function getWeeklyInsights(userId: string) {
   };
 }
 
-export async function getDashboard(userId: string) {
+export async function getDashboard(userId: string, days?: number) {
+
+  const scopedDays = days === undefined ? undefined : Math.min(30, Math.max(1, Math.floor(days)));
 
   const [
     assistant,
@@ -701,12 +753,12 @@ export async function getDashboard(userId: string) {
     burnout,
     streak
   ] = await Promise.all([
-    getAssistantInsights(userId),
-    getWeeklyInsights(userId),
+    getAssistantInsights(userId, scopedDays),
+    getWeeklyInsights(userId, scopedDays ?? 7),
     getDailyComparison(userId),
-    getWeeklyGrowthTrend(userId),
-    getIntentHeatmap(userId),
-    getBurnoutRisk(userId),
+    getWeeklyGrowthTrend(userId, scopedDays ?? 7),
+    getIntentHeatmap(userId, scopedDays),
+    getBurnoutRisk(userId, scopedDays),
     getDeepWorkStreak(userId)
   ]);
 
@@ -720,7 +772,8 @@ export async function getDashboard(userId: string) {
     streak,
     meta:{
       generatedAt:new Date(),
-      system:"samaritan-intelligence"
+      system:"samaritan-intelligence",
+      days: scopedDays ?? null,
     }
   };
 }
@@ -800,7 +853,7 @@ export async function getDailySummary(userId: string, date: string) {
 
   const focusWeighted =
     activities.reduce(
-      (s,a)=>s+(a.focusImpact ?? 0.5)*a.duration,
+      (s,a)=>s+getBaseFocus(a)*a.duration,
       0
     ) / totalDuration;
 

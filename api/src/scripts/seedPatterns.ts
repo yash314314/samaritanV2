@@ -2,439 +2,233 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+type PatternSeed = {
+  appNames: string[];
+  titleRegex: string;
+  category: string;
+  intent: string;
+  focusImpact: number;
+  energyImpact?: number;
+  confidence: number;
+};
+
+function pattern(seed: PatternSeed) {
+  return seed.appNames.map((appName) => ({
+    appName,
+    titleRegex: seed.titleRegex,
+    category: seed.category,
+    intent: seed.intent,
+    focusImpact: seed.focusImpact,
+    energyImpact: seed.energyImpact ?? 0,
+    confidence: seed.confidence,
+  }));
+}
+
+const browserApps = [
+  "Google Chrome",
+  "Chrome",
+  "chrome",
+  "Microsoft Edge",
+  "Edge",
+  "msedge",
+  "Brave",
+  "Brave Browser",
+  "Avast Secure Browser",
+];
+
+const patterns = [
+  ...pattern({
+    appNames: ["Cursor", "Cursor.exe", "cursor"],
+    titleRegex: ".*",
+    category: "deep_work",
+    intent: "coding",
+    focusImpact: 0.95,
+    energyImpact: -0.1,
+    confidence: 0.95,
+  }),
+  ...pattern({
+    appNames: ["Microsoft Visual Studio Code", "Visual Studio Code", "VS Code", "Code", "Code.exe"],
+    titleRegex: ".*",
+    category: "deep_work",
+    intent: "coding",
+    focusImpact: 0.95,
+    energyImpact: -0.1,
+    confidence: 0.95,
+  }),
+  ...pattern({
+    appNames: ["Postman", "Postman.exe"],
+    titleRegex: ".*",
+    category: "deep_work",
+    intent: "api_testing",
+    focusImpact: 0.8,
+    energyImpact: -0.05,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: ["MATLAB", "Res2DInv", "GeoRose"],
+    titleRegex: ".*",
+    category: "deep_work",
+    intent: "analysis",
+    focusImpact: 0.9,
+    energyImpact: -0.05,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: ["Obsidian", "Obsidian.exe", "Codex"],
+    titleRegex: ".*",
+    category: "deep_work",
+    intent: "thinking",
+    focusImpact: 0.85,
+    energyImpact: -0.05,
+    confidence: 0.9,
+  }),
+
+  ...pattern({
+    appNames: ["Docker Desktop", "Docker", "Git", "Node.js", "Node", "XAMPP", "Miniconda", "Terminal", "Windows Terminal", "PowerShell"],
+    titleRegex: ".*",
+    category: "development_tools",
+    intent: "runtime",
+    focusImpact: 0.65,
+    confidence: 0.88,
+  }),
+
+  ...pattern({
+    appNames: ["Notion", "Notion.exe", "Notion Calendar", "Microsoft OneNote", "OneNote"],
+    titleRegex: ".*",
+    category: "productivity",
+    intent: "planning",
+    focusImpact: 0.7,
+    confidence: 0.9,
+  }),
+
+  ...pattern({
+    appNames: ["Discord", "Discord.exe", "Slack", "Slack.exe", "WhatsApp", "WhatsApp.exe", "Telegram", "Telegram.exe", "Microsoft Teams", "Teams", "Outlook"],
+    titleRegex: ".*",
+    category: "communication",
+    intent: "chat",
+    focusImpact: 0.4,
+    energyImpact: -0.05,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: ["Remote Desktop Connection", "mstsc", "AnyDesk", "TeamViewer"],
+    titleRegex: ".*",
+    category: "communication",
+    intent: "remote_work",
+    focusImpact: 0.6,
+    confidence: 0.8,
+  }),
+
+  ...pattern({
+    appNames: ["VLC media player", "VLC", "vlc"],
+    titleRegex: ".*",
+    category: "media",
+    intent: "video",
+    focusImpact: 0.2,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: ["Spotify", "Spotify.exe"],
+    titleRegex: ".*",
+    category: "media",
+    intent: "music",
+    focusImpact: 0.3,
+    confidence: 0.9,
+  }),
+
+  ...pattern({
+    appNames: ["VALORANT", "Riot Client", "Battle.net", "Steam", "Epic Games Launcher", "Zenless Zone Zero"],
+    titleRegex: ".*",
+    category: "entertainment",
+    intent: "gaming",
+    focusImpact: 0.05,
+    energyImpact: 0.25,
+    confidence: 1,
+  }),
+
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*(github|gitlab|bitbucket).*",
+    category: "deep_work",
+    intent: "coding",
+    focusImpact: 0.9,
+    confidence: 0.95,
+  }),
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*(stackoverflow|stack overflow|mdn|developer\\.mozilla|docs|documentation|openai|api reference).*",
+    category: "research",
+    intent: "documentation",
+    focusImpact: 0.72,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*(gmail|mail\\.google|outlook|calendar\\.google).*",
+    category: "communication",
+    intent: "email",
+    focusImpact: 0.42,
+    confidence: 0.85,
+  }),
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*(youtube|netflix|twitch|prime video|hotstar|episode|series|movie|stream).*",
+    category: "entertainment",
+    intent: "streaming_video",
+    focusImpact: 0.1,
+    energyImpact: 0.05,
+    confidence: 0.95,
+  }),
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*(reddit|instagram|twitter|x\\.com|facebook|linkedin).*",
+    category: "communication",
+    intent: "social_media",
+    focusImpact: 0.25,
+    energyImpact: -0.08,
+    confidence: 0.9,
+  }),
+  ...pattern({
+    appNames: browserApps,
+    titleRegex: ".*",
+    category: "research",
+    intent: "reading",
+    focusImpact: 0.6,
+    confidence: 0.7,
+  }),
+
+  ...pattern({
+    appNames: ["File Explorer", "Windows Explorer", "Explorer", "explorer"],
+    titleRegex: ".*",
+    category: "system",
+    intent: "file_management",
+    focusImpact: 0.25,
+    confidence: 0.8,
+  }),
+  ...pattern({
+    appNames: ["WinRAR", "7-Zip", "MKVToolNix"],
+    titleRegex: ".*",
+    category: "system",
+    intent: "utility",
+    focusImpact: 0.3,
+    confidence: 0.8,
+  }),
+  ...pattern({
+    appNames: ["System Idle", "Idle"],
+    titleRegex: ".*",
+    category: "idle",
+    intent: "idle",
+    focusImpact: 0,
+    energyImpact: 0.1,
+    confidence: 1,
+  }),
+];
+
 async function main() {
-
   console.log("Seeding Samaritan classifier patterns...");
-
   await prisma.appPattern.deleteMany();
-
-  await prisma.appPattern.createMany({
-    data: [
-
-      /* ------------------------------
-      DEVELOPMENT / DEEP WORK
-      ------------------------------ */
-
-      {
-        appName: "Cursor",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "coding",
-        focusImpact: 0.95,
-        energyImpact: -0.1,
-        confidence: 0.95
-      },
-
-      {
-        appName: "Microsoft Visual Studio Code",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "coding",
-        focusImpact: 0.95,
-        energyImpact: -0.1,
-        confidence: 0.95
-      },
-
-      {
-        appName: "Postman",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "api_testing",
-        focusImpact: 0.8,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-
-      {
-        appName: "MATLAB",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "analysis",
-        focusImpact: 0.9,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Res2DInv",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "geophysics",
-        focusImpact: 0.9,
-
-        confidence: 0.9
-      },
-
-      {
-        appName: "GeoRose",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "analysis",
-        focusImpact: 0.85,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Obsidian",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "thinking",
-        focusImpact: 0.85,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-      {
-        appName: "Codex",
-        titleRegex: ".*",
-        category: "deep_work",
-        intent: "thinking",
-        focusImpact: 0.95,
-        energyImpact: -0.1,
-        confidence: 0.95
-      },
-
-      /* ------------------------------
-      DEVELOPMENT INFRASTRUCTURE
-      ------------------------------ */
-
-      {
-        appName: "Docker Desktop",
-        titleRegex: ".*",
-        category: "development_tools",
-        intent: "containers",
-        focusImpact: 0.7,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Git",
-        titleRegex: ".*",
-        category: "development_tools",
-        intent: "version_control",
-        focusImpact: 0.6,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Node.js",
-        titleRegex: ".*",
-        category: "development_tools",
-        intent: "runtime",
-        focusImpact: 0.6,
-        confidence: 0.9
-      },
-
-      {
-        appName: "XAMPP",
-        titleRegex: ".*",
-        category: "development_tools",
-        intent: "local_server",
-        focusImpact: 0.6,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Miniconda",
-        titleRegex: ".*",
-        category: "development_tools",
-        intent: "python_environment",
-        focusImpact: 0.6,
-        confidence: 0.9
-      },
-
-      /* ------------------------------
-      PRODUCTIVITY
-      ------------------------------ */
-
-      {
-        appName: "Notion",
-        titleRegex: ".*",
-        category: "productivity",
-        intent: "planning",
-        focusImpact: 0.7,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Notion Calendar",
-        titleRegex: ".*",
-        category: "productivity",
-        intent: "planning",
-        focusImpact: 0.6,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Microsoft OneNote",
-        titleRegex: ".*",
-        category: "productivity",
-        intent: "notes",
-        focusImpact: 0.7,
-        confidence: 0.9
-      },
-
-      /* ------------------------------
-      COMMUNICATION
-      ------------------------------ */
-
-      {
-        appName: "Brave Browser",
-        titleRegex: ".*(Instagram|instagram\\.com).*",
-        category: "communication",
-        intent: "social_media",
-        focusImpact: 0.3,
-        energyImpact: -0.08,
-        confidence: 0.92
-      },
-      {
-        appName: "Avast Secure Browser",
-        titleRegex: ".*(Instagram|instagram\\.com).*",
-        category: "communication",
-        intent: "social_media",
-        focusImpact: 0.3,
-        energyImpact: -0.08,
-        confidence: 0.92
-      },
-      {
-        appName: "Discord",
-        titleRegex: ".*",
-        category: "communication",
-        intent: "chat",
-        focusImpact: 0.4,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-      {
-        appName: "WhatsApp",
-        titleRegex: ".*",
-        category: "communication",
-        intent: "chat",
-        focusImpact: 0.4,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-      {
-        appName: "Telegram",
-        titleRegex: ".*",
-        category: "communication",
-        intent: "chat",
-        focusImpact: 0.4,
-        energyImpact: -0.05,
-        confidence: 0.9
-      },
-      {
-        appName: "Remote Desktop Connection",
-        titleRegex: ".*",
-        category: "communication",
-        intent: "remote_work",
-        focusImpact: 0.6,
-        confidence: 0.8
-      },
-
-      /* ------------------------------
-      MEDIA
-      ------------------------------ */
-
-      {
-        appName: "VLC media player",
-        titleRegex: ".*",
-        category: "media",
-        intent: "video",
-        focusImpact: 0.2,
-        confidence: 0.9
-      },
-      
-      {
-        appName: "Spotify",
-        titleRegex: ".*",
-        category: "entertainment",
-        intent: "music",
-        focusImpact: 0.3,
-        confidence: 0.9
-      },
-      
-      {
-        appName: "Microsoft Edge",
-        titleRegex: ".*(Netflix|netflix\\.com).*",
-        category: "entertainment",
-        intent: "streaming_video",
-        focusImpact: 0.15,
-        energyImpact: 0.05,
-        confidence: 0.95
-      },
-      
-      {
-        appName: "Brave Browser",
-        titleRegex: ".*(Netflix|netflix\\.com).*",
-        category: "entertainment",
-        intent: "streaming_video",
-        focusImpact: 0.15,
-        energyImpact: 0.05,
-        confidence: 0.95
-      },
-      
-      {
-        appName: "Microsoft Edge",
-        titleRegex: ".*(movie|movies|watch|stream|episode|series).*",
-        category: "entertainment",
-        intent: "video_streaming",
-        focusImpact: 0.15,
-        energyImpact: 0.05,
-        confidence: 0.7
-      },
-      
-      {
-        appName: "Brave Browser",
-        titleRegex: ".*(movie|movies|watch|stream|episode|series).*",
-        category: "entertainment",
-        intent: "video_streaming",
-        focusImpact: 0.15,
-        energyImpact: 0.05,
-        confidence: 0.7
-      },
-      /* ------------------------------
-      ENTERTAINMENT / GAMING
-      ------------------------------ */
-
-      {
-        appName: "VALORANT",
-        titleRegex: ".*",
-        category: "entertainment",
-        intent: "gaming",
-        focusImpact: 0.05,
-        energyImpact: 0.3,
-        confidence: 1
-      },
-
-      {
-        appName: "Zenless Zone Zero",
-        titleRegex: ".*",
-        category: "entertainment",
-        intent: "gaming",
-        focusImpact: 0.05,
-        confidence: 1
-      },
-
-      {
-        appName: "Battle.net",
-        titleRegex: ".*",
-        category: "entertainment",
-        intent: "gaming",
-        focusImpact: 0.1,
-        confidence: 1
-      },
-
-      {
-        appName: "Riot Client",
-        titleRegex: ".*",
-        category: "entertainment",
-        intent: "gaming",
-        focusImpact: 0.1,
-        confidence: 1
-      },
-
-      /* ------------------------------
-      BROWSER INTELLIGENCE
-      ------------------------------ */
-
-      {
-        appName: "Google Chrome",
-        titleRegex: ".*github.*",
-        category: "deep_work",
-        intent: "coding",
-        focusImpact: 0.9,
-        confidence: 0.95
-      },
-
-      {
-        appName: "Google Chrome",
-        titleRegex: ".*stackoverflow.*",
-        category: "research",
-        intent: "debugging",
-        focusImpact: 0.7,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Google Chrome",
-        titleRegex: ".*docs.*",
-        category: "research",
-        intent: "documentation",
-        focusImpact: 0.7,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Google Chrome",
-        titleRegex: ".*youtube.*",
-        category: "entertainment",
-        intent: "video",
-        focusImpact: 0.1,
-        confidence: 0.9
-      },
-
-      {
-        appName: "Google Chrome",
-        titleRegex: ".*",
-        category: "research",
-        intent: "reading",
-        focusImpact: 0.6,
-        confidence: 0.7
-      },
-
-      {
-        appName: "Brave",
-        titleRegex: ".*",
-        category: "research",
-        intent: "reading",
-        focusImpact: 0.6,
-        confidence: 0.7
-      },
-
-      {
-        appName: "Microsoft Edge",
-        titleRegex: ".*",
-        category: "research",
-        intent: "reading",
-        focusImpact: 0.6,
-        confidence: 0.7
-      },
-
-      /* ------------------------------
-      SYSTEM / IGNORE
-      ------------------------------ */
-
-      {
-        appName: "WinRAR",
-        titleRegex: ".*",
-        category: "system",
-        intent: "file_management",
-        focusImpact: 0.3,
-        confidence: 0.8
-      },
-
-      {
-        appName: "MKVToolNix",
-        titleRegex: ".*",
-        category: "system",
-        intent: "media_processing",
-        focusImpact: 0.3,
-        confidence: 0.8
-      },
-      {
-        appName: "System Idle",
-        titleRegex: ".*",
-        category: "system",
-        intent: "idle",
-        focusImpact: 0,
-        energyImpact: 0.1,
-        confidence: 1
-      },
-
-    ]
-  });
-
-  console.log("Classifier patterns seeded.");
+  await prisma.appPattern.createMany({ data: patterns });
+  console.log(`Classifier patterns seeded: ${patterns.length}`);
 }
 
 main()

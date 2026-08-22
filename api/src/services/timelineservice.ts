@@ -1,25 +1,35 @@
 import { prisma } from "../prisma";
-import { getISTDayRange } from "../utils/time";
+import { getBaseFocus, getActivityProductivityScore } from "./metricEngine";
 
+const IST_OFFSET = "+05:30";
+
+function dateRange(from: string, to = from) {
+  const start = new Date(`${from}T00:00:00${IST_OFFSET}`);
+  const inclusiveEnd = new Date(`${to}T00:00:00${IST_OFFSET}`);
+  const end = new Date(inclusiveEnd.getTime() + 24 * 60 * 60 * 1000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return { start, end };
+}
 
 export async function getTimeline(userId: string, date?: string, from?: string, to?: string) {
   // Build where clause
   const where: any = {
     session: { userId },
   };
+  let range: { start: Date; end: Date } | null = null;
 
-  if (from && to) {
-    where.startTime = {
-      gte: new Date(from + "T00:00:00"),
-      lt: new Date(to + "T23:59:59.999"),
-    };
+  if (from || to) {
+    range = dateRange(from ?? to!, to ?? from!);
   } else if (date) {
-    const target = new Date(date + "T00:00:00");
-    const nextDay = new Date(target);
-    nextDay.setDate(nextDay.getDate() + 1);
+    range = dateRange(date);
+  }
+
+  if (range) {
     where.startTime = {
-      gte: target,
-      lt: nextDay,
+      lt: range.end,
+    };
+    where.endTime = {
+      gt: range.start,
     };
   }
 
@@ -38,10 +48,26 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
   let currentSession: any = null;
 
   for (const activity of activities) {
+    const activityStart = activity.startTime;
+    const activityEnd = activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration);
+    const clippedStart = range
+      ? new Date(Math.max(activityStart.getTime(), range.start.getTime()))
+      : activityStart;
+    const clippedEnd = range
+      ? new Date(Math.min(activityEnd.getTime(), range.end.getTime()))
+      : activityEnd;
+    const clippedDuration = Math.max(0, clippedEnd.getTime() - clippedStart.getTime());
+    if (clippedDuration <= 0) continue;
+
+    const activityFocusScore = getBaseFocus(activity) * 100;
+    const activityProductivityScore = getActivityProductivityScore(activity);
+
     if (
       !currentSession ||
       currentSession.appName !== activity.appName ||
-      new Date(activity.startTime).getTime() - new Date(currentSession.end).getTime() > 60000 // 1 min gap = new session
+      currentSession.category !== (activity.category ?? "unknown") ||
+      currentSession.intent !== (activity.intent ?? "unknown") ||
+      clippedStart.getTime() - new Date(currentSession.end).getTime() > 60000 // 1 min gap = new session
     ) {
       if (currentSession) sessions.push(currentSession);
       currentSession = {
@@ -49,25 +75,66 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
         iconUrl: activity.iconUrl,
         domain: activity.domain,
         url: activity.url,
-        start: activity.startTime,
-        end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
+        start: clippedStart,
+        end: clippedEnd,
         duration: 0,
         category: activity.category ?? "unknown",
+        intent: activity.intent ?? "unknown",
+        confidence: activity.confidence ?? 0,
+        focusImpact: activity.focusImpact ?? 0.25,
+        focusScore: activityFocusScore,
+        productivityScore: activityProductivityScore,
+        activityIds: [],
         items: [],
       };
     }
 
-    currentSession.end = activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration);
+    currentSession.end = clippedEnd;
     currentSession.duration = new Date(currentSession.end).getTime() - new Date(currentSession.start).getTime();
+    currentSession.activityIds.push(activity.id);
     currentSession.items.push({
+      id: activity.id,
       title: activity.windowTitle ?? activity.appName,
       iconUrl: activity.iconUrl,
       domain: activity.domain,
       url: activity.url,
-      start: activity.startTime,
-      end: activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration),
-      duration: activity.duration,
+      category: activity.category ?? "unknown",
+      intent: activity.intent ?? "unknown",
+      confidence: activity.confidence ?? 0,
+      focusImpact: activity.focusImpact ?? 0.25,
+      focusScore: activityFocusScore,
+      productivityScore: activityProductivityScore,
+      start: clippedStart,
+      end: clippedEnd,
+      duration: clippedDuration,
     });
+
+    currentSession.confidence = Math.min(
+      currentSession.confidence,
+      activity.confidence ?? 0
+    );
+    const weightedDuration = currentSession.items.reduce(
+      (sum: number, item: any) => sum + Number(item.duration ?? 0),
+      0
+    );
+    currentSession.focusImpact = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.focusImpact ?? 0.25) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activity.focusImpact ?? 0.25;
+    currentSession.focusScore = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.focusScore ?? 0) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activityFocusScore;
+    currentSession.productivityScore = weightedDuration > 0
+      ? currentSession.items.reduce(
+          (sum: number, item: any) => sum + Number(item.productivityScore ?? 0) * Number(item.duration ?? 0),
+          0
+        ) / weightedDuration
+      : activityProductivityScore;
   }
 
   if (currentSession) sessions.push(currentSession);

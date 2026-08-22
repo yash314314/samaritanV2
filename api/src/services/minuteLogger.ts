@@ -1,7 +1,7 @@
 import { prisma } from "../prisma";
 import { evaluateProtocol, pushDeepWorkState } from "./deepWorkService";
-import { isIdleActivity, getBaseFocus, getActivityProductivityScore } from "./metricEngine";
-import { emitDeepWorkMinute, emitDeepWorkState } from "../websocket/broadcaster";
+import { isIdleActivity } from "./metricEngine";
+import { emitDeepWorkMinute } from "../websocket/broadcaster";
 
 export function startMinuteLogger() {
   console.log("[MinuteLogger] Started");
@@ -34,6 +34,11 @@ async function logMinuteForSession(sessionId: string) {
   });
 
   if (!session || session.status !== "active") return;
+
+  if (session.currentPhase !== "focus" || session.pausedAt) {
+    await pushDeepWorkState(session.userId, sessionId);
+    return;
+  }
 
   const nextMinuteIndex = session.minuteLogs.length;
 

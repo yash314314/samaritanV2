@@ -1,18 +1,124 @@
 @import "tailwindcss";
 
-:root {
-  --bg-dark: #0B0B0F;
-  --card-dark: #14141A;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
-  --purple-accent: #7C3AED;
-  --pink-accent: #EC4899;
-  --blue-accent: #3B82F6;
+:root {
+  --soft-bg: #050506;
+  --soft-surface: #18181B;
+  --soft-surface-raised: #202024;
+  --soft-text: #F4F4F5;
+  --soft-muted: #A1A1AA;
+  --soft-border: rgba(255, 255, 255, 0.09);
+  --soft-border-strong: rgba(255, 255, 255, 0.14);
+  --soft-blue: #6D8BFF;
+  --soft-violet: #A78BFA;
+}
+
+html {
+  background: var(--soft-bg);
 }
 
 body {
-  background-color: var(--bg-dark);
-  color: white;
+  background-color: var(--soft-bg);
+  color: var(--soft-text);
   font-family: system-ui, sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@layer components {
+  .dashboard-page {
+    min-height: 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    background: transparent;
+  }
+
+  .dashboard-page :where(div, section, article, aside, header, footer, main, form) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dashboard-surface {
+    min-height: 100%;
+    width: 100%;
+    max-width: 90rem;
+    margin: 0 auto;
+    overflow: visible;
+  }
+
+  .dashboard-scroll-panel {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-y: visible;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .dashboard-grid-card {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .samaritan-card {
+    position: relative;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible !important;
+    border: 1px solid var(--soft-border);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, var(--soft-surface-raised), var(--soft-surface));
+    color: var(--soft-text);
+    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.03) inset, 0 16px 42px rgba(0, 0, 0, 0.28);
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms ease;
+  }
+
+  .samaritan-card::before {
+    content: none;
+  }
+
+  .samaritan-card:hover {
+    border-color: var(--soft-border-strong);
+    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.04) inset, 0 18px 48px rgba(0, 0, 0, 0.34);
+  }
+
+  .rize-card {
+    border: 1px solid var(--soft-border);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, var(--soft-surface-raised), var(--soft-surface));
+    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.03) inset, 0 16px 42px rgba(0, 0, 0, 0.28);
+  }
+}
+
+@keyframes calendar-bar-rise {
+  from { opacity: 0; transform: scaleY(0); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes calendar-width-in {
+  from { opacity: 0; transform: scaleX(0); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes webhook-row-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.webhook-row-enter {
+  animation: webhook-row-enter 220ms ease-out both;
 }
 /* ===========================
    Square Tile Calendar (Fixed)
@@ -50,7 +156,7 @@ body {
 
    * {
     scrollbar-width: thin;
-    scrollbar-color: #2a2a2a #14141A;
+    scrollbar-color: #3F3F46 #111113;
   }
   
   /* Chrome / Edge / Safari */
@@ -61,13 +167,13 @@ body {
   }
   
   ::-webkit-scrollbar-track {
-    background: #14141A;
+    background: #111113;
   }
   
   ::-webkit-scrollbar-thumb {
-    background: #2a2a2a;
+    background: #3F3F46;
     border-radius: 8px;
-    border: 2px solid #14141A;
+    border: 2px solid #111113;
   }
   /* Heatmap specific scrollbar */
 
@@ -86,6 +192,48 @@ body {
 
 .heatmap-scroll::-webkit-scrollbar-thumb:hover {
   background: #3a3a3a;
+}
+
+@keyframes calendar-reminder-enter {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes calendar-bell {
+  0%, 100% { transform: rotate(0deg); }
+  15% { transform: rotate(12deg); }
+  30% { transform: rotate(-10deg); }
+  45% { transform: rotate(6deg); }
+  60% { transform: rotate(0deg); }
+}
+
+@keyframes smart-break-enter {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes smart-break-breathe {
+  0%, 100% { transform: scale(0.94); box-shadow: 0 0 35px rgba(168, 85, 247, 0.08); }
+  50% { transform: scale(1.04); box-shadow: 0 0 75px rgba(168, 85, 247, 0.2); }
+}
+
+.smart-break-enter {
+  animation: smart-break-enter 220ms ease-out both;
+}
+
+.smart-break-breathe {
+  animation: smart-break-breathe 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smart-break-enter,
+  .smart-break-breathe {
+    animation: none;
+  }
+}
+
+.calendar-reminder-enter {
+  animation: calendar-reminder-enter 220ms ease-out both;
 }
   ::-webkit-scrollbar-thumb:hover {
     background: #3a3a3a;

@@ -18,13 +18,13 @@ export default function SummaryCards({ data }: any) {
   function Card({ title, value }: any) {
   
     return (
-      <div className="bg-white p-6 shadow rounded">
+      <div className="samaritan-card p-6">
   
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-zinc-500">
           {title}
         </p>
   
-        <p className="text-3xl font-bold">
+        <p className="text-3xl font-bold text-zinc-100">
           {value}
         </p>
   

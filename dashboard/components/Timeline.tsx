@@ -1,25 +1,67 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { fetchTimeline } from "../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchTimeline, calendarApi } from "../lib/api";
+import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
+import { CATEGORY_COLORS } from "../lib/categoryColors";
 
 export default function Timeline({ userId, date }: any) {
 
   const [data,setData] = useState<any[]>([]);
+  const [calendarEvents,setCalendarEvents] = useState<any[]>([]);
   const [tooltip,setTooltip] = useState<any>(null);
-  const [mouse,setMouse] = useState({x:0,y:0});
   const [zoom,setZoom] = useState(1);
 
   const zoomRef = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const tooltipElRef = useRef<HTMLDivElement | null>(null);
+  const tooltipPosRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
 
   const baseWidth = 1400;
 
   /* ---------------- FETCH DATA ---------------- */
 
-  useEffect(()=>{
-    fetchTimeline(userId,date).then(setData);
-  },[userId,date]);
+  const loadTimeline = useCallback(async () => {
+    const [timelineData, overlayData] = await Promise.all([
+      fetchTimeline(userId, undefined, undefined, date),
+      calendarApi.overlay(userId, date, date).catch(() => []),
+    ]);
+
+    setData(Array.isArray(timelineData) ? timelineData : []);
+    setCalendarEvents(Array.isArray(overlayData) ? overlayData : []);
+  }, [userId, date]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      const [timelineData, overlayData] = await Promise.all([
+        fetchTimeline(userId, undefined, undefined, date),
+        calendarApi.overlay(userId, date, date).catch(() => []),
+      ]);
+      if (isMounted) {
+        setData(Array.isArray(timelineData) ? timelineData : []);
+        setCalendarEvents(Array.isArray(overlayData) ? overlayData : []);
+      }
+    };
+    load().catch((err) => console.error("Timeline fetch failed:", err));
+    return () => {
+      isMounted = false;
+    };
+  }, [userId, date]);
+
+  useRealtimeRefresh(loadTimeline, {
+    events: [
+      "activity:new",
+      "session:metrics",
+      "analytics:daily",
+      "calendar:changed",
+      "deepwork:started",
+      "deepwork:ended",
+      "deepwork:state",
+    ],
+    debounceMs: 500,
+  });
 
   useEffect(()=>{
     zoomRef.current = zoom;
@@ -28,33 +70,58 @@ export default function Timeline({ userId, date }: any) {
   /* ---------------- TIME CALCULATIONS ---------------- */
 
   const dayStart = new Date(date + "T00:00:00");
-  const dayEnd = new Date(date + "T23:59:59.999");
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
 
   const startMs = dayStart.getTime();
   const endMs = dayEnd.getTime();
 
   const totalRange = endMs - startMs;
 
-  /* ---------------- COLOR PALETTE ---------------- */
+  function visiblePosition(startValue: string | Date, endValue: string | Date) {
+    const rawStart = new Date(startValue).getTime();
+    const rawEnd = new Date(endValue).getTime();
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return null;
+    const start = Math.max(rawStart, startMs);
+    const end = Math.min(rawEnd, endMs);
+    if (end <= start) return null;
+    const left = Math.max(0, Math.min(100, ((start - startMs) / totalRange) * 100));
+    const width = Math.max(0, Math.min(100 - left, ((end - start) / totalRange) * 100));
+    return { left, width, rawStart, rawEnd };
+  }
 
-  const categoryColors:any = {
+  /* ---------------- TOOLTIP POSITIONING (ref-driven, no re-render) ---------------- */
 
-    deep_work:"#8b5cf6",
-    research:"#533196",
-    communication:"#06b6d4",
-    productivity:"#22c55e",
-    media:"#f59e0b",
-    entertainment:"#ec4899",
-    development_tools:"#6366f1",
-    system:"#71717a"
-  
+  const updateTooltipPos = () => {
+    const el = tooltipElRef.current;
+    if (!el) return;
+    const { x, y } = tooltipPosRef.current;
+    el.style.left = `${Math.min(x + 14, window.innerWidth - 260)}px`;
+    el.style.top = `${Math.min(y + 14, window.innerHeight - 140)}px`;
   };
+
+  const scheduleTooltipMove = () => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      updateTooltipPos();
+    });
+  };
+
+  // Position the tooltip as soon as it mounts.
+  useEffect(() => {
+    if (tooltip) updateTooltipPos();
+  }, [tooltip]);
+
+  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
 
   /* ---------------- CURSOR ZOOM ---------------- */
 
   function handleWheel(e:WheelEvent){
 
     if(!containerRef.current) return;
+
+    if (!e.ctrlKey && !e.metaKey) return;
 
     e.preventDefault();
 
@@ -112,7 +179,7 @@ export default function Timeline({ userId, date }: any) {
 
     if(!containerRef.current) return;
 
-    const start = new Date(a.start).getTime();
+    const start = Math.max(startMs, Math.min(endMs, new Date(a.start).getTime()));
 
     const newZoom = Math.min(zoomRef.current + 2,10);
     const newWidth = baseWidth * newZoom;
@@ -160,23 +227,62 @@ export default function Timeline({ userId, date }: any) {
   }
   return(
 
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+    <div className="samaritan-card flex w-full max-w-full flex-col overflow-hidden p-4">
 
       <h2 className="text-xs text-zinc-400 mb-3 uppercase">
         Timeline
       </h2>
 
-      <div
-        ref={containerRef}
-        className="overflow-x-auto"
-        onMouseMove={(e)=>setMouse({x:e.clientX,y:e.clientY})}
+        <div
+          ref={containerRef}
+        className="w-full max-w-full overflow-x-auto"
+        title="Use Ctrl + mouse wheel to zoom the timeline."
+        onMouseMove={(e) => {
+          tooltipPosRef.current = { x: e.clientX, y: e.clientY };
+          scheduleTooltipMove();
+        }}
       >
 
         <div style={{width:timelineWidth}} className="relative">
 
+          {/* CALENDAR OVERLAY LAYER */}
+
+          {calendarEvents.length > 0 && (
+            <div className="relative mb-1 h-6 overflow-hidden">
+              {calendarEvents.map((evt) => {
+                const position = visiblePosition(evt.start, evt.end);
+                if (!position) return null;
+
+                const minBlockWidthPercent = (2 / timelineWidth) * 100;
+                const visibleWidth = Math.min(100 - position.left, Math.max(position.width, minBlockWidthPercent));
+
+                return (
+                  <div
+                    key={evt.id}
+                    onMouseEnter={() => setTooltip({ appName: "Calendar", items: [{ title: evt.title, duration: position.rawEnd - position.rawStart }], category: "calendar", start: evt.start, end: evt.end, project: evt.project?.name })}
+                    onMouseLeave={() => setTooltip(null)}
+                    className="absolute h-full cursor-pointer rounded-sm flex items-center overflow-hidden"
+                    style={{
+                      left: `${position.left}%`,
+                      width: `${visibleWidth}%`,
+                      background: evt.color || "#8b5cf6",
+                      opacity: 0.7,
+                    }}
+                  >
+                    {zoom > 3 && visibleWidth > 3 && (
+                      <span className="text-[9px] text-white px-1 truncate font-medium">
+                        {evt.title}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* ACTIVITY LAYER */}
 
-          <div className="relative h-14 border border-zinc-700">
+          <div className="relative h-14 overflow-hidden border border-zinc-700">
 
             {/* GRID */}
 
@@ -195,23 +301,14 @@ export default function Timeline({ userId, date }: any) {
 
             {data.map((a,i)=>{
 
-              const start = new Date(a.start).getTime();
-              const end = new Date(a.end).getTime();
-
-              const startClamped = Math.max(start,startMs);
-              const endClamped = Math.min(end,endMs);
-
-              const left =
-                ((startClamped-startMs)/totalRange)*100;
-
-              const width =
-                ((endClamped-startClamped)/totalRange)*100;
+              const position = visiblePosition(a.start, a.end);
+              if (!position) return null;
 
                 const minBlockWidthPercent = (2 / timelineWidth) * 100;
-                const visibleWidth = Math.max(width, minBlockWidthPercent);
+                const visibleWidth = Math.min(100 - position.left, Math.max(position.width, minBlockWidthPercent));
 
               const color =
-                categoryColors[a.category] ?? "#6b7280";
+                CATEGORY_COLORS[a.category] ?? "#6b7280";
 
               return(
 
@@ -222,7 +319,7 @@ export default function Timeline({ userId, date }: any) {
                   onClick={()=>focusBlock(a)}
                   className="absolute h-full cursor-pointer flex items-center"
                   style={{
-                    left:`${left}%`,
+                    left:`${position.left}%`,
                     width:`${visibleWidth}%`,
                     background:color,
                     opacity:0.85
@@ -245,21 +342,12 @@ export default function Timeline({ userId, date }: any) {
 
           {/* CATEGORY STRIP */}
 
-          <div className="relative h-3 mt-2">
+          <div className="relative mt-2 h-3 overflow-hidden">
 
             {data.map((a,i)=>{
 
-              const start=new Date(a.start).getTime();
-              const end=new Date(a.end).getTime();
-
-              const startClamped = Math.max(start,startMs);
-              const endClamped = Math.min(end,endMs);
-
-              const left =
-                ((startClamped-startMs)/totalRange)*100;
-
-              const width =
-                ((endClamped-startClamped)/totalRange)*100;
+              const position = visiblePosition(a.start, a.end);
+              if (!position) return null;
 
               return(
 
@@ -267,11 +355,11 @@ export default function Timeline({ userId, date }: any) {
                   key={i}
                   className="absolute h-full"
                   style={{
-                    left:`${left}%`,
-                    width: `${width}%`,
-                    minWidth: width > 0 ? 1 : 0,
+                    left:`${position.left}%`,
+                    width: `${position.width}%`,
+                    minWidth: position.width > 0 ? 1 : 0,
                     background:
-                      categoryColors[a.category] ?? "#6b7280"
+                      CATEGORY_COLORS[a.category] ?? "#6b7280"
                   }}
                 />
 
@@ -315,11 +403,9 @@ export default function Timeline({ userId, date }: any) {
       {tooltip && (
 
         <div
+          ref={tooltipElRef}
           className="fixed bg-zinc-900 border border-zinc-700 text-xs p-3 rounded shadow-xl w-60 z-[9999]"
-          style={{
-            left: Math.min(mouse.x + 14, window.innerWidth - 260),
-            top: Math.min(mouse.y + 14, window.innerHeight - 140)
-          }}
+          style={{ left: 0, top: 0 }}
         >
 
           <div className="font-semibold mb-2">
@@ -338,7 +424,9 @@ export default function Timeline({ userId, date }: any) {
 
           <div className="mt-2 pt-2 border-t border-zinc-700 text-zinc-500">
 
-            <div>Category: {tooltip.category}</div>
+            {tooltip.category && <div>Category: {tooltip.category}</div>}
+
+            {tooltip.project && <div>Project: {tooltip.project}</div>}
 
             <div>
               Start: {new Date(tooltip.start).toLocaleTimeString()}
@@ -358,7 +446,7 @@ export default function Timeline({ userId, date }: any) {
 
       <div className="flex flex-wrap gap-4 mt-4 text-xs text-zinc-400">
 
-        {Object.entries(categoryColors).map(([key,color])=>(
+        {Object.entries(CATEGORY_COLORS).map(([key,color])=>(
           <div key={key} className="flex items-center gap-2">
 
             <div

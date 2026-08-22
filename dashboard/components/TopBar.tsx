@@ -22,27 +22,34 @@ export default function TopBar() {
   const iconButtonClass = `
     p-2
     rounded-lg
-    bg-zinc-900
+    bg-[#202024]
     border
-    border-zinc-800
-    hover:bg-zinc-800
+    border-white/10
+    hover:bg-[#27272A]
     transition
-    text-white
-    [&_svg]:text-white
+    text-zinc-300
+    [&_svg]:text-zinc-300
   `;
 
   return (
     <div className="
       relative
       flex
+      flex-wrap
       items-center
       justify-between
-      mb-8
-      border-b
-      border-zinc-800
-      pb-5
+      gap-3
+      mb-5
+      rounded-2xl
+      border
+      border-white/10
+      bg-[#18181B]
+      px-4
+      py-3
+      shadow-[0_16px_42px_rgba(0,0,0,0.28)]
+      shrink-0
     ">
-      <div className="flex items-center gap-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         <button
           onClick={goToPrevious}
           className={iconButtonClass}
@@ -51,7 +58,7 @@ export default function TopBar() {
           <ChevronLeft size={18} />
         </button>
 
-        <div className="text-lg font-semibold tracking-tight text-zinc-200">
+        <div className="min-w-0 text-base font-semibold tracking-tight text-zinc-100">
           {format(selectedDate, "MMMM d, yyyy")}
         </div>
 
@@ -72,7 +79,7 @@ export default function TopBar() {
         </button>
       </div>
 
-      <div className="text-xs text-zinc-500">
+      <div className="rounded-full border border-white/10 bg-[#202024] px-3 py-1 text-xs font-medium text-zinc-400">
         Samaritan Intelligence
       </div>
 
@@ -81,9 +88,9 @@ export default function TopBar() {
           absolute
           top-16
           left-0
-          bg-[#0f0f0f]
+          bg-[#18181B]
           border
-          border-zinc-800
+          border-white/10
           p-4
           rounded-xl
           shadow-2xl

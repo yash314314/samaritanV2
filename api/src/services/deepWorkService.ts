@@ -1,19 +1,23 @@
 import { prisma } from "../prisma";
 import {
-  getActivityProductivityScore,
-  getBaseFocus,
-  isIdleActivity
+  isIdleActivity,
+  updateSmoothMetricState
 } from "./metricEngine";
 import {
   emitDeepWorkStarted,
   emitDeepWorkEnded,
   emitDeepWorkState,
+  emitGoalProgress,
   emitInterventionCleared,
+  emitInterventionResolved,
   emitInterventionTriggered,
 } from "../websocket/broadcaster";
+import { updateAndEmitGoalProgress } from "./goalProgressService";
+import { dispatchWebhookEvent } from "./webhookService";
 
 type StrictFocusInput = {
   userId: string;
+  projectId?: string | null;
   goal?: string | null;
   plannedMinutes: number;
   enforcement?: string | null;
@@ -21,6 +25,13 @@ type StrictFocusInput = {
   allowedDomains?: string[];
   blockedApps?: string[];
   blockedDomains?: string[];
+  timerMode?: "countdown" | "pomodoro";
+  focusMinutes?: number;
+  shortBreakMinutes?: number;
+  longBreakMinutes?: number;
+  totalRounds?: number;
+  ambientSound?: string;
+  ambientVolume?: number;
 };
 
 type ActivityInput = {
@@ -58,6 +69,25 @@ const DISTRACTION_INTENTS = new Set([
   "video"
 ]);
 
+const ENFORCEMENT_LEVELS = new Set([
+  "observe",
+  "warn",
+  "require_reason",
+  "block"
+]);
+
+const AMBIENT_SOUNDS = new Set(["none", "white", "pink", "brown", "rain"]);
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : fallback;
+}
+
+function boundedVolume(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.35;
+}
+
 function normalize(value?: string | null) {
   return (value ?? "").toLowerCase().trim();
 }
@@ -74,18 +104,21 @@ function includesRule(rules: string[], value?: string | null) {
   return rules.some(rule => normalized.includes(rule));
 }
 
-function getDeepWorkWindowEnd(session: { startedAt: Date; plannedMinutes: number }) {
-  return new Date(session.startedAt.getTime() + session.plannedMinutes * 60 * 1000);
-}
-
 function getActivityOverlapMs(
-  session: { startedAt: Date; plannedMinutes: number },
+  session: {
+    startedAt: Date;
+    plannedMinutes: number;
+    currentPhase?: string;
+    phaseStartedAt?: Date;
+    phaseEndsAt?: Date | null;
+    pausedAt?: Date | null;
+  },
   activity?: Pick<ActivityInput, "startTime" | "endTime"> | null
 ) {
-  if (!activity) return 0;
+  if (!activity || session.pausedAt || (session.currentPhase && session.currentPhase !== "focus")) return 0;
 
-  const windowStart = session.startedAt.getTime();
-  const windowEnd = getDeepWorkWindowEnd(session).getTime();
+  const windowStart = (session.phaseStartedAt ?? session.startedAt).getTime();
+  const windowEnd = (session.phaseEndsAt ?? new Date(session.startedAt.getTime() + session.plannedMinutes * 60 * 1000)).getTime();
   const activityStart = activity.startTime.getTime();
   const activityEnd = activity.endTime.getTime();
 
@@ -97,6 +130,48 @@ function interventionAction(enforcement: string) {
   if (enforcement === "warn") return "warned";
   if (enforcement === "observe") return "observed";
   return "reason_required";
+}
+
+export function getDeepWorkTimerState(session: {
+  startedAt: Date;
+  plannedMinutes: number;
+  timerMode: string;
+  currentPhase: string;
+  currentRound: number;
+  totalRounds: number;
+  phaseStartedAt: Date;
+  phaseEndsAt: Date | null;
+  pausedAt: Date | null;
+  pausedRemainingSeconds: number | null;
+}, now = new Date()) {
+  const phaseRemainingSeconds = session.pausedAt
+    ? Math.max(0, session.pausedRemainingSeconds ?? 0)
+    : Math.max(0, Math.ceil(((session.phaseEndsAt?.getTime() ?? now.getTime()) - now.getTime()) / 1000));
+  const phaseElapsedSeconds = Math.max(
+    0,
+    Math.floor((now.getTime() - session.phaseStartedAt.getTime()) / 1000) -
+      (session.pausedAt ? Math.floor((now.getTime() - session.pausedAt.getTime()) / 1000) : 0)
+  );
+  const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - session.startedAt.getTime()) / 1000));
+  return {
+    timerMode: session.timerMode,
+    currentPhase: session.currentPhase,
+    currentRound: session.currentRound,
+    totalRounds: session.totalRounds,
+    paused: Boolean(session.pausedAt),
+    phaseStartedAt: session.phaseStartedAt,
+    phaseEndsAt: session.phaseEndsAt,
+    phaseElapsedSeconds,
+    phaseRemainingSeconds,
+    elapsedSeconds,
+    elapsedMinutes: Math.floor(elapsedSeconds / 60),
+    remainingMinutes: Math.ceil(phaseRemainingSeconds / 60),
+    enforcementActive: session.currentPhase === "focus" && !session.pausedAt,
+  };
+}
+
+function normalizeEnforcement(enforcement?: string | null) {
+  return ENFORCEMENT_LEVELS.has(enforcement ?? "") ? enforcement! : "warn";
 }
 
 export function evaluateProtocol(session: any, activity: ActivityInput) {
@@ -166,6 +241,10 @@ export function evaluateProtocol(session: any, activity: ActivityInput) {
 }
 
 export async function startDeepWorkSession(input: StrictFocusInput) {
+  if (input.projectId) {
+    const project = await prisma.project.findFirst({ where: { id: input.projectId, userId: input.userId, active: true }, select: { id: true } });
+    if (!project) throw new Error("Project not found");
+  }
   const existing = await prisma.deepWorkSession.findFirst({
     where: {
       userId: input.userId,
@@ -175,40 +254,62 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
   });
 
   if (existing) {
-    const elapsedMinutes = Math.floor(
-      (Date.now() - existing.startedAt.getTime()) / (60 * 1000)
-    );
-
-    if (elapsedMinutes > existing.plannedMinutes * 2) {
-      await prisma.deepWorkSession.update({
-        where: { id: existing.id },
-        data: {
-          status: "abandoned",
-          endedAt: new Date()
-        }
-      });
-      console.log(`[DeepWork] Auto-abandoned stale session ${existing.id}`);
-    } else {
-      return existing;
-    }
+    await advanceDeepWorkTimer(existing.id);
+    const stillActive = await prisma.deepWorkSession.findFirst({ where: { id: existing.id, status: "active" } });
+    if (stillActive) throw new Error("A deep work session is already active");
   }
+
+  const timerMode = input.timerMode === "pomodoro" ? "pomodoro" : "countdown";
+  const countdownMinutes = boundedInteger(input.plannedMinutes, 25, 1, 480);
+  const focusMinutes = timerMode === "pomodoro"
+    ? boundedInteger(input.focusMinutes ?? input.plannedMinutes, 25, 5, 120)
+    : countdownMinutes;
+  const totalRounds = timerMode === "pomodoro" ? boundedInteger(input.totalRounds, 4, 1, 12) : 1;
+  const shortBreakMinutes = boundedInteger(input.shortBreakMinutes, 5, 1, 30);
+  const longBreakMinutes = boundedInteger(input.longBreakMinutes, 15, 1, 60);
+  const plannedMinutes = timerMode === "pomodoro" ? focusMinutes * totalRounds : countdownMinutes;
+  const startedAt = new Date();
+  const phaseEndsAt = new Date(startedAt.getTime() + focusMinutes * 60_000);
+  const ambientSound = AMBIENT_SOUNDS.has(input.ambientSound ?? "") ? input.ambientSound! : "none";
 
   const session = await prisma.deepWorkSession.create({
     data: {
       userId: input.userId,
-      goal: input.goal ?? (null as any),
+      projectId: input.projectId ?? null,
+      goal: input.goal?.trim().slice(0, 240) || null,
       status: "active",
-      plannedMinutes: Math.max(1, Math.floor(input.plannedMinutes)),
-      enforcement: input.enforcement ?? "require_reason",
-      allowedApps: input.allowedApps ?? [],
-      allowedDomains: input.allowedDomains ?? [],
-      blockedApps: input.blockedApps ?? ([] as any),
-      blockedDomains: input.blockedDomains ?? ([] as any)
+      plannedMinutes,
+      startedAt,
+      enforcement: normalizeEnforcement(input.enforcement),
+      allowedApps: normalizeList(input.allowedApps),
+      allowedDomains: normalizeList(input.allowedDomains),
+      blockedApps: normalizeList(input.blockedApps),
+      blockedDomains: normalizeList(input.blockedDomains),
+      timerMode,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
+      totalRounds,
+      currentRound: 1,
+      currentPhase: "focus",
+      phaseStartedAt: startedAt,
+      phaseEndsAt,
+      ambientSound,
+      ambientVolume: boundedVolume(input.ambientVolume),
+      phases: {
+        create: {
+          type: "focus",
+          round: 1,
+          plannedSeconds: focusMinutes * 60,
+          startedAt,
+        },
+      },
     }
   });
 
   emitDeepWorkStarted(input.userId, {
     id: session.id,
+    projectId: session.projectId,
     goal: session.goal,
     plannedMinutes: session.plannedMinutes,
     enforcement: session.enforcement,
@@ -217,12 +318,31 @@ export async function startDeepWorkSession(input: StrictFocusInput) {
     allowedDomains: session.allowedDomains,
     blockedApps: session.blockedApps,
     blockedDomains: session.blockedDomains,
+    timerMode: session.timerMode,
+    focusMinutes: session.focusMinutes,
+    shortBreakMinutes: session.shortBreakMinutes,
+    longBreakMinutes: session.longBreakMinutes,
+    totalRounds: session.totalRounds,
+    currentRound: session.currentRound,
+    currentPhase: session.currentPhase,
+    phaseStartedAt: session.phaseStartedAt,
+    phaseEndsAt: session.phaseEndsAt,
+    pausedAt: session.pausedAt,
+    ambientSound: session.ambientSound,
+    ambientVolume: session.ambientVolume,
   });
 
   return session;
 }
 
 export async function getActiveDeepWorkSession(userId: string) {
+  const active = await prisma.deepWorkSession.findFirst({
+    where: { userId, status: "active" },
+    orderBy: { startedAt: "desc" },
+  });
+  if (active?.phaseEndsAt && !active.pausedAt && active.phaseEndsAt <= new Date()) {
+    await advanceDeepWorkTimer(active.id);
+  }
   return prisma.deepWorkSession.findFirst({
     where: {
       userId,
@@ -232,12 +352,150 @@ export async function getActiveDeepWorkSession(userId: string) {
       startedAt: "desc"
     },
     include: {
+      project: { select: { id: true, name: true, color: true, icon: true } },
       interventions: {
         orderBy: { detectedAt: "desc" },
         take: 10
-      }
+      },
+      phases: { orderBy: { startedAt: "asc" } },
     }
   });
+}
+
+async function emitCompletedSession(session: { id: string; userId: string; status: string; endedAt: Date | null }, reason: string) {
+  emitDeepWorkEnded(session.userId, session.id, {
+    status: session.status,
+    endedAt: session.endedAt,
+    reason,
+  });
+  const goals = await updateAndEmitGoalProgress(session.userId);
+  emitGoalProgress(session.userId, goals);
+}
+
+export async function advanceDeepWorkTimer(id: string, now = new Date(), forceBreakSkip = false) {
+  const session = await prisma.deepWorkSession.findUnique({ where: { id } });
+  if (!session || session.status !== "active" || session.pausedAt || !session.phaseEndsAt) return session;
+  if (!forceBreakSkip && session.phaseEndsAt > now) return session;
+  if (forceBreakSkip && session.currentPhase === "focus") throw new Error("Focus phases cannot be skipped");
+
+  const transitionAt = forceBreakSkip ? now : session.phaseEndsAt;
+  const activePhase = await prisma.deepWorkPhase.findFirst({
+    where: { deepWorkId: id, status: "active" },
+    orderBy: { startedAt: "desc" },
+  });
+  const actualSeconds = activePhase
+    ? Math.max(0, Math.floor((transitionAt.getTime() - activePhase.startedAt.getTime()) / 1000) - activePhase.pausedSeconds)
+    : 0;
+  const phaseStatus = forceBreakSkip ? "skipped" : "completed";
+
+  if (session.currentPhase === "focus" && session.currentRound >= session.totalRounds) {
+    const completed = await prisma.$transaction(async (tx) => {
+      if (activePhase) {
+        await tx.deepWorkPhase.update({
+          where: { id: activePhase.id },
+          data: { status: "completed", endedAt: transitionAt, actualSeconds },
+        });
+      }
+      return tx.deepWorkSession.update({
+        where: { id },
+        data: { status: "completed", endedAt: transitionAt, phaseEndsAt: transitionAt },
+      });
+    });
+    await emitCompletedSession(completed, "planned_duration");
+    return completed;
+  }
+
+  const nextIsFocus = session.currentPhase !== "focus";
+  const nextRound = nextIsFocus ? session.currentRound + 1 : session.currentRound;
+  const nextPhase = nextIsFocus
+    ? "focus"
+    : session.currentRound % 4 === 0 ? "long_break" : "short_break";
+  const nextMinutes = nextPhase === "focus"
+    ? session.focusMinutes
+    : nextPhase === "long_break" ? session.longBreakMinutes : session.shortBreakMinutes;
+  const nextEndsAt = new Date(transitionAt.getTime() + nextMinutes * 60_000);
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (activePhase) {
+      await tx.deepWorkPhase.update({
+        where: { id: activePhase.id },
+        data: { status: phaseStatus, endedAt: transitionAt, actualSeconds },
+      });
+    }
+    await tx.deepWorkPhase.create({
+      data: {
+        deepWorkId: id,
+        type: nextPhase,
+        round: nextRound,
+        plannedSeconds: nextMinutes * 60,
+        startedAt: transitionAt,
+      },
+    });
+    return tx.deepWorkSession.update({
+      where: { id },
+      data: {
+        currentPhase: nextPhase,
+        currentRound: nextRound,
+        phaseStartedAt: transitionAt,
+        phaseEndsAt: nextEndsAt,
+        pausedAt: null,
+        pausedRemainingSeconds: null,
+      },
+    });
+  });
+
+  await pushDeepWorkState(updated.userId, updated.id);
+  return updated;
+}
+
+export async function pauseDeepWorkSession(userId: string, id: string) {
+  let session = await prisma.deepWorkSession.findFirst({ where: { id, userId, status: "active" } });
+  if (!session) throw new Error("Active session not found");
+  if (session.pausedAt) return session;
+  if (session.phaseEndsAt && session.phaseEndsAt <= new Date()) {
+    await advanceDeepWorkTimer(id);
+    session = await prisma.deepWorkSession.findFirst({ where: { id, userId, status: "active" } });
+    if (!session) throw new Error("Session already completed");
+  }
+  const now = new Date();
+  const remainingSeconds = Math.max(1, Math.ceil(((session.phaseEndsAt?.getTime() ?? now.getTime()) - now.getTime()) / 1000));
+  const updated = await prisma.deepWorkSession.update({
+    where: { id },
+    data: { pausedAt: now, pausedRemainingSeconds: remainingSeconds, phaseEndsAt: null },
+  });
+  await pushDeepWorkState(userId, id);
+  return updated;
+}
+
+export async function resumeDeepWorkSession(userId: string, id: string) {
+  const session = await prisma.deepWorkSession.findFirst({ where: { id, userId, status: "active" } });
+  if (!session) throw new Error("Active session not found");
+  if (!session.pausedAt) return session;
+  const now = new Date();
+  const pausedSeconds = Math.max(0, Math.floor((now.getTime() - session.pausedAt.getTime()) / 1000));
+  const remainingSeconds = Math.max(1, session.pausedRemainingSeconds ?? 1);
+  const updated = await prisma.$transaction(async (tx) => {
+    const phase = await tx.deepWorkPhase.findFirst({ where: { deepWorkId: id, status: "active" }, orderBy: { startedAt: "desc" } });
+    if (phase) await tx.deepWorkPhase.update({ where: { id: phase.id }, data: { pausedSeconds: { increment: pausedSeconds } } });
+    return tx.deepWorkSession.update({
+      where: { id },
+      data: {
+        pausedAt: null,
+        pausedRemainingSeconds: null,
+        phaseEndsAt: new Date(now.getTime() + remainingSeconds * 1000),
+      },
+    });
+  });
+  await pushDeepWorkState(userId, id);
+  return updated;
+}
+
+export async function skipDeepWorkBreak(userId: string, id: string) {
+  const session = await prisma.deepWorkSession.findFirst({ where: { id, userId, status: "active" } });
+  if (!session) throw new Error("Active session not found");
+  if (session.pausedAt) throw new Error("Resume the timer before skipping this break");
+  if (session.currentPhase === "focus") throw new Error("Only break phases can be skipped");
+  return advanceDeepWorkTimer(id, new Date(), true);
 }
 
 export async function endDeepWorkSession(
@@ -253,85 +511,42 @@ export async function endDeepWorkSession(
     throw new Error("Session not found");
   }
 
-  if (session.status === "expired") {
-    throw new Error("Cannot modify expired session");
-  }
-
   if (session.status !== "active") {
     throw new Error("Session already ended");
   }
-
-  await writeSessionEndLog(
-    id,
-    status === "completed" ? "Session completed" : "Session abandoned"
-  );
-
-  const updated = await prisma.deepWorkSession.update({
-    where: { id },
-    data: {
-      status,
-      endedAt: new Date()
+  const finalStatus = status === "completed" ? "completed" : "abandoned";
+  const endedAt = new Date();
+  const activePhase = await prisma.deepWorkPhase.findFirst({ where: { deepWorkId: id, status: "active" }, orderBy: { startedAt: "desc" } });
+  const currentPauseSeconds = session.pausedAt ? Math.floor((endedAt.getTime() - session.pausedAt.getTime()) / 1000) : 0;
+  const actualSeconds = activePhase
+    ? Math.max(0, Math.floor((endedAt.getTime() - activePhase.startedAt.getTime()) / 1000) - activePhase.pausedSeconds - currentPauseSeconds)
+    : 0;
+  const updated = await prisma.$transaction(async (tx) => {
+    if (activePhase) {
+      await tx.deepWorkPhase.update({
+        where: { id: activePhase.id },
+        data: { status: finalStatus, endedAt, actualSeconds },
+      });
     }
+    return tx.deepWorkSession.update({
+      where: { id },
+      data: { status: finalStatus, endedAt, phaseEndsAt: endedAt, pausedAt: null, pausedRemainingSeconds: null },
+    });
   });
 
-  emitDeepWorkEnded(userId, id, {
-    status,
-    endedAt: new Date(),
-  });
+  await emitCompletedSession(updated, finalStatus === "completed" ? "manual_completion" : "abandoned");
+  void dispatchWebhookEvent(
+    userId,
+    finalStatus === "completed" ? "focus_session.completed" : "focus_session.abandoned",
+    { session: updated },
+    id
+  ).catch((error) => console.error("Focus session webhook dispatch failed:", error));
 
   return updated;
 }
 
 export async function completeDeepWorkSessionByTimer(id: string) {
-  const session = await prisma.deepWorkSession.findUnique({
-    where: { id }
-  });
-
-  if (!session || session.status !== "active") return null;
-
-  await writeSessionEndLog(id, "Planned duration completed");
-
-  const endedAt = getDeepWorkWindowEnd(session);
-  const updated = await prisma.deepWorkSession.update({
-    where: { id },
-    data: {
-      status: "completed",
-      endedAt
-    }
-  });
-
-  emitDeepWorkEnded(session.userId, id, {
-    status: "completed",
-    endedAt,
-    reason: "planned_duration"
-  });
-
-  return updated;
-}
-
-async function writeSessionEndLog(sessionId: string, reason: string) {
-  const lastLog = await prisma.deepWorkMinuteLog.findFirst({
-    where: { deepWorkId: sessionId },
-    orderBy: { minuteIndex: "desc" }
-  });
-
-  const nextMinuteIndex = lastLog ? lastLog.minuteIndex + 1 : 0;
-
-  await prisma.deepWorkMinuteLog.create({
-    data: {
-      deepWorkId: sessionId,
-      minuteIndex: nextMinuteIndex,
-      timestamp: new Date(),
-      focusScore: 0,
-      productivityScore: 0,
-      distractionFlag: false,
-      idleFlag: true,
-      appName: "System",
-      windowTitle: reason,
-      category: "system",
-      intent: "session_end"
-    }
-  });
+  return advanceDeepWorkTimer(id);
 }
 
 export async function getDeepWorkSessionHistory(userId: string) {
@@ -340,6 +555,7 @@ export async function getDeepWorkSessionHistory(userId: string) {
     orderBy: { startedAt: "desc" },
     take: 30,
     include: {
+      project: { select: { id: true, name: true, color: true, icon: true } },
       interventions: {
         orderBy: { detectedAt: "desc" },
         take: 5
@@ -347,7 +563,8 @@ export async function getDeepWorkSessionHistory(userId: string) {
       minuteLogs: {
         orderBy: { minuteIndex: "asc" },
         take: -10
-      }
+      },
+      phases: { orderBy: { startedAt: "asc" } }
     }
   });
 
@@ -373,16 +590,27 @@ export async function getDeepWorkSessionHistory(userId: string) {
     const actualMinutes = Math.floor(
       (endedAt.getTime() - session.startedAt.getTime()) / (60 * 1000)
     );
+    const focusedSeconds = session.phases
+      .filter((phase) => phase.type === "focus")
+      .reduce((sum, phase) => sum + phase.actualSeconds, 0);
 
     return {
       id: session.id,
       goal: session.goal,
+      projectId: session.projectId,
+      project: session.project,
       status: session.status,
       plannedMinutes: session.plannedMinutes,
       actualMinutes,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
       enforcement: session.enforcement,
+      timerMode: session.timerMode,
+      currentPhase: session.currentPhase,
+      currentRound: session.currentRound,
+      totalRounds: session.totalRounds,
+      focusedMinutes: Number((focusedSeconds / 60).toFixed(1)),
+      ambientSound: session.ambientSound,
       finalFocusScore: Number(session.focusScore.toFixed(2)),
       finalProductivityScore: Number(session.productivityScore.toFixed(2)),
       violationCount: session.violationCount,
@@ -404,33 +632,38 @@ export async function getDeepWorkSessionHistory(userId: string) {
 }
 
 export async function resolveFocusIntervention(
+  userId: string,
   id: string,
   reason?: string | null,
   action = "allowed_once"
 ) {
-  return prisma.focusIntervention.update({
+  const existing = await prisma.focusIntervention.findFirst({ where: { id, deepWork: { userId } } });
+  if (!existing) throw new Error("Intervention not found");
+  const updated = await prisma.focusIntervention.update({
     where: { id },
     data: {
       reason: reason ?? null,
-      action
+      resolution: action,
+      resolvedAt: new Date(),
     }
   });
+  emitInterventionResolved(userId, id, action);
+  return updated;
 }
 
 /**
  * Evaluate a deep work activity and update session metrics.
  *
- * METRIC MODEL (all values start from 0 and build up proportionally):
+ * METRIC MODEL (all values start from 0 and build through the smoothing engine):
  *
- *   focusScore = (productiveMs / totalMs) * targetFocus
- *   productivityScore = (productiveMs / totalMs) * targetProductivity
+ *   targetFocus = seeded focusImpact * 100
+ *   targetProductivity = seeded category / intent / focus weights
  *
  * This ensures:
  *   - All values start at 0
- *   - Focus/productivity rise proportionally to productive time
- *   - Distraction directly reduces focus/productivity by reducing the
- *     productive ratio
- *   - No exponential spikes — smooth proportional model
+ *   - Focus/productivity rise gradually toward each app's seeded weights
+ *   - Distraction and idle activity pull the running scores back down
+ *   - No instant jump to a neutral/default baseline
  */
 export async function evaluateDeepWorkActivity(
   userId: string,
@@ -470,56 +703,22 @@ export async function evaluateDeepWorkActivity(
   const nextProductiveMs = session.productiveMs + (productive ? duration : 0);
   const nextDistractionMs = session.distractionMs + (distraction ? duration : 0);
   const nextIdleMs = session.idleMs + (idle ? duration : 0);
-  const totalMs = nextProductiveMs + nextDistractionMs + nextIdleMs;
 
-  // Compute focus/productivity as weighted averages based on time ratios
-  // All values start from 0 and build up proportionally
-  let nextFocusScore = 0;
-  let nextProductivityScore = 0;
-
-  if (totalMs > 0) {
-    const productiveRatio = nextProductiveMs / totalMs;
-
-    if (productive) {
-      // Productive activity: target is the activity's base focus/productivity
-      const targetFocus = getBaseFocus(activity) * 100;
-      const targetProd = getActivityProductivityScore(activity);
-
-      // Weighted: current accumulated score + new productive contribution
-      // This smoothly builds up focus as productive time accumulates
-      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
-      if (prevTotal > 0) {
-        // Blend previous score with new activity's contribution
-        const prevFocusWeight = prevTotal / totalMs;
-        const newFocusWeight = duration / totalMs;
-        nextFocusScore = (session.focusScore * prevFocusWeight) + (targetFocus * newFocusWeight);
-        nextProductivityScore = (session.productivityScore * prevFocusWeight) + (targetProd * newFocusWeight);
-      } else {
-        // First activity
-        nextFocusScore = targetFocus;
-        nextProductivityScore = targetProd;
-      }
-    } else if (distraction) {
-      // Distraction: focus/productivity drop proportionally to distraction ratio
-      // The more distraction time accumulates, the lower the scores
-      const prevTotal = session.productiveMs + session.distractionMs + session.idleMs;
-      if (prevTotal > 0) {
-        // Blend: previous score diluted by new distraction time (which contributes 0)
-        const prevWeight = prevTotal / totalMs;
-        nextFocusScore = session.focusScore * prevWeight;
-        nextProductivityScore = session.productivityScore * prevWeight;
-      }
-      // If first activity is a distraction, scores stay at 0
-    } else if (idle) {
-      // Idle: maintain previous scores (idle doesn't help or hurt)
-      nextFocusScore = session.focusScore;
-      nextProductivityScore = session.productivityScore;
-    }
-  }
-
-  // Clamp to valid range
-  nextFocusScore = Math.max(0, Math.min(100, nextFocusScore));
-  nextProductivityScore = Math.max(0, Math.min(100, nextProductivityScore));
+  const metricActivity = {
+    ...activity,
+    durationMs: duration,
+  };
+  const nextMetricState = updateSmoothMetricState(
+    {
+      focusScore: session.focusScore,
+      productivityScore: session.productivityScore,
+      deepWorkScore: 0,
+      burnoutScore: 0,
+    },
+    metricActivity
+  );
+  const nextFocusScore = nextMetricState.focusScore;
+  const nextProductivityScore = nextMetricState.productivityScore;
 
   // Track if this is a NEW violation (not a continuation of same distraction)
   const isNewViolation = distraction && (
@@ -546,15 +745,9 @@ export async function evaluateDeepWorkActivity(
     }
   });
 
+  const timer = getDeepWorkTimerState(updatedSession);
   emitDeepWorkState(userId, session.id, {
-    elapsedMinutes: Math.floor(
-      (Date.now() - updatedSession.startedAt.getTime()) / (60 * 1000)
-    ),
-    remainingMinutes: Math.max(
-      0,
-      updatedSession.plannedMinutes -
-        Math.floor((Date.now() - updatedSession.startedAt.getTime()) / (60 * 1000))
-    ),
+    ...timer,
     focusScore: Number(updatedSession.focusScore.toFixed(2)),
     productivityScore: Number(updatedSession.productivityScore.toFixed(2)),
     violationCount: updatedSession.violationCount,
@@ -572,6 +765,8 @@ export async function evaluateDeepWorkActivity(
     });
     return null;
   }
+
+  if (!isNewViolation) return null;
 
   const intervention = await prisma.focusIntervention.create({
     data: {
@@ -610,22 +805,36 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
       userId
     },
     include: {
+      project: { select: { id: true, name: true, color: true, icon: true } },
       minuteLogs: {
         orderBy: { minuteIndex: "asc" }
       },
       interventions: {
         orderBy: { detectedAt: "asc" }
-      }
+      },
+      phases: { orderBy: { startedAt: "asc" } }
     }
   });
 
   if (!session) return null;
 
+  const enforcementEvents = await prisma.distractionBlockEvent.findMany({
+    where: { deepWorkId: session.id },
+    orderBy: { occurredAt: "asc" },
+  });
+
   const now = new Date();
   const endedAt = session.endedAt ?? now;
   const actualDurationMs = endedAt.getTime() - session.startedAt.getTime();
-  const actualMinutes = Math.floor(actualDurationMs / (60 * 1000));
+  const actualMinutes = Number((actualDurationMs / 60_000).toFixed(1));
   const plannedMinutes = session.plannedMinutes;
+  const focusSecondsFromPhases = session.phases
+    .filter((phase) => phase.type === "focus")
+    .reduce((sum, phase) => sum + phase.actualSeconds, 0);
+  const focusedSeconds = focusSecondsFromPhases || Math.min(actualDurationMs / 1000, plannedMinutes * 60);
+  const breakSeconds = session.phases
+    .filter((phase) => phase.type !== "focus")
+    .reduce((sum, phase) => sum + phase.actualSeconds, 0);
 
   // ─── ACCURATE TIME ALLOCATION ───
   // Use the session's accumulated ms directly (these are the source of truth)
@@ -634,10 +843,10 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
   const idleMs = session.idleMs || 0;
   const totalTrackedMs = productiveMs + distractionMs + idleMs;
 
-  const productiveMinutes = Math.round(productiveMs / 60000);
-  const distractionMinutes = Math.round(distractionMs / 60000);
-  const idleMinutes = Math.round(idleMs / 60000);
-  const totalTrackedMinutes = productiveMinutes + distractionMinutes + idleMinutes;
+  const productiveMinutes = Number((productiveMs / 60000).toFixed(1));
+  const distractionMinutes = Number((distractionMs / 60000).toFixed(1));
+  const idleMinutes = Number((idleMs / 60000).toFixed(1));
+  const totalTrackedMinutes = Number((totalTrackedMs / 60000).toFixed(1));
 
   // ─── ACCURATE FOCUS / PRODUCTIVITY ───
   // These are the final scores from the session (computed incrementally)
@@ -662,7 +871,7 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
 
   // Completion rate
   const completionRate = plannedMinutes > 0
-    ? Math.min(100, (actualMinutes / plannedMinutes) * 100)
+    ? Math.min(100, (focusedSeconds / (plannedMinutes * 60)) * 100)
     : 0;
 
   // ─── PER-SECOND TIME SERIES ───
@@ -685,8 +894,8 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
     timeSeries.push({
       second: 0,
       timestamp: session.startedAt.toISOString(),
-      focusScore: Number(session.focusScore.toFixed(2)),
-      productivityScore: Number(session.productivityScore.toFixed(2)),
+      focusScore: 0,
+      productivityScore: 0,
       distraction: false,
       idle: false,
       appName: null,
@@ -758,20 +967,20 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
   }
 
   let recoveryCount = 0;
-  let recoveryTotalMinutes = 0;
+  let recoveryTotalSeconds = 0;
   for (let i = 1; i < timeSeries.length; i++) {
     if (timeSeries[i - 1].distraction && !timeSeries[i].distraction) {
       recoveryCount++;
-      let recoveryMinutes = 1;
+      let recoverySeconds = 1;
       for (let j = i + 1; j < timeSeries.length; j++) {
         if (timeSeries[j].distraction) break;
-        recoveryMinutes++;
+        recoverySeconds++;
       }
-      recoveryTotalMinutes += recoveryMinutes;
+      recoveryTotalSeconds += recoverySeconds;
     }
   }
   const avgRecoveryMinutes =
-    recoveryCount > 0 ? recoveryTotalMinutes / recoveryCount : 0;
+    recoveryCount > 0 ? recoveryTotalSeconds / recoveryCount / 60 : 0;
 
   return {
     session: {
@@ -783,7 +992,15 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
       completionRate: Number(completionRate.toFixed(2)),
       startedAt: session.startedAt,
       endedAt: session.endedAt,
-      enforcement: session.enforcement
+      enforcement: session.enforcement,
+      timerMode: session.timerMode,
+      focusMinutes: session.focusMinutes,
+      shortBreakMinutes: session.shortBreakMinutes,
+      longBreakMinutes: session.longBreakMinutes,
+      totalRounds: session.totalRounds,
+      completedRounds: session.phases.filter((phase) => phase.type === "focus" && phase.status === "completed").length,
+      ambientSound: session.ambientSound,
+      project: session.project,
     },
     metrics: {
       // Time allocation (from session accumulators — source of truth)
@@ -805,8 +1022,26 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
 
       // Recovery
       avgRecoveryMinutes: Number(avgRecoveryMinutes.toFixed(2)),
+      focusedMinutes: Number((focusedSeconds / 60).toFixed(1)),
+      breakMinutes: Number((breakSeconds / 60).toFixed(1)),
+      blockedCount: enforcementEvents.filter((item) => item.outcome === "killed").length,
+      blockFailureCount: enforcementEvents.filter((item) => item.outcome === "failed").length,
+      warnedCount: session.interventions.filter((item) => item.action === "warned").length,
+      reasonRequiredCount: session.interventions.filter((item) => item.action === "reason_required").length,
+      overrideCount: session.interventions.filter((item) => item.resolution === "allowed_once").length,
     },
     timeSeries,
+    phases: session.phases.map((phase) => ({
+      id: phase.id,
+      type: phase.type,
+      round: phase.round,
+      status: phase.status,
+      plannedSeconds: phase.plannedSeconds,
+      actualSeconds: phase.actualSeconds,
+      startedAt: phase.startedAt,
+      endedAt: phase.endedAt,
+    })),
+    enforcementEvents,
     interventions: session.interventions.map((i) => ({
       id: i.id,
       appName: i.appName,
@@ -814,6 +1049,8 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
       domain: i.domain,
       action: i.action,
       reason: i.reason,
+      resolution: i.resolution,
+      resolvedAt: i.resolvedAt,
       detectedAt: i.detectedAt,
       durationMs: i.durationMs
     }))
@@ -826,15 +1063,10 @@ export async function pushDeepWorkState(userId: string, sessionId: string) {
   });
   if (!session || session.status !== "active") return;
 
-  const now = new Date();
-  const elapsedMinutes = Math.floor(
-    (now.getTime() - session.startedAt.getTime()) / (60 * 1000)
-  );
-  const remainingMinutes = Math.max(0, session.plannedMinutes - elapsedMinutes);
+  const timer = getDeepWorkTimerState(session);
 
   emitDeepWorkState(userId, sessionId, {
-    elapsedMinutes,
-    remainingMinutes,
+    ...timer,
     focusScore: Number(session.focusScore.toFixed(2)),
     productivityScore: Number(session.productivityScore.toFixed(2)),
     violationCount: session.violationCount,

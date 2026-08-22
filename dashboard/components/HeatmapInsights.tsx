@@ -186,7 +186,7 @@ function analyzeHeatmap(data: HeatmapResponse) {
 }
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
 );
 
 export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
@@ -194,7 +194,7 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
 
   if (!stats.bestDay) {
     return (
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid min-w-0 grid-cols-1 gap-3">
         <Card className="p-6">
           <p className="text-sm text-zinc-500">No data available for insights.</p>
         </Card>
@@ -206,7 +206,7 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
   const bestDayName = new Date(bestDayDate + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long" });
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-3">
       {/* Peak Productivity Window - UPGRADED */}
       <Card className="p-5">
         <div className="flex items-start justify-between mb-4">

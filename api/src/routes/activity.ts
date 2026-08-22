@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { handleActivity } from '../services/activityService';
 import { getTimeline } from '../services/timelineservice';
 import { createActivityFromTracker } from '../services/sessionService';
+import { reviewActivities } from '../services/activityReviewService';
 const router = Router();
 
 router.post('/', async (req, res) => {
@@ -19,15 +20,19 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-router.get("/timeline", async (req, res) => {
+router.get("/timeline", async (req, res, next) => {
   const { userId, date } = req.query;
 
   if (!userId || !date) {
     return res.status(400).json({ error: "Missing params" });
   }
 
-  const timeline = await getTimeline(userId as string, date as string);
-  res.json(timeline);
+  try {
+    const timeline = await getTimeline(userId as string, date as string);
+    res.json(timeline);
+  } catch (err) {
+    next(err);
+  }
 });
 router.post("/session", async (req, res) => {
   try {
@@ -67,6 +72,22 @@ router.post("/session", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.post("/reviews", async (req, res) => {
+  try {
+    const { userId, reviews } = req.body;
+    if (!userId || !Array.isArray(reviews)) {
+      return res.status(400).json({ error: "Missing userId or reviews" });
+    }
+
+    const result = await reviewActivities(userId, reviews);
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Review failed";
+    console.error("Activity review error:", error);
+    res.status(400).json({ error: message });
   }
 });
 

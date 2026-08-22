@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import AppCategoryTags from "./AppCategoryTags";
 
 const TOOLTIP_WIDTH = 288;
 const TOOLTIP_HEIGHT = 260;
@@ -107,12 +108,12 @@ export default function HeatmapGrid({ data }: any) {
 
   return (
     <div
-      className="bg-zinc-900 border border-zinc-800 rounded-xl p-6"
+      className="samaritan-card flex w-full max-w-full flex-col overflow-hidden p-4"
       onClick={() => {
         if (pinnedTooltip) closePinnedTooltip();
       }}
     >
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="mb-3 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300">
             Productivity Heatmap
@@ -138,7 +139,7 @@ export default function HeatmapGrid({ data }: any) {
         </div>
       </div>
 
-      <div className="relative overflow-x-auto">
+      <div className="relative w-full max-w-full overflow-x-auto">
         <div className="min-w-max">
           <div className="grid grid-cols-[90px_repeat(24,30px)] gap-2 mb-4 text-[11px] text-zinc-500">
             <div />
@@ -318,11 +319,12 @@ export default function HeatmapGrid({ data }: any) {
                         {tooltip.cell.topApps.map((app: any) => (
                           <div
                             key={app.name}
-                            className="flex justify-between gap-3"
+                            className="flex items-start justify-between gap-3"
                           >
-                            <span className="truncate text-zinc-400">
-                              {app.name}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-zinc-400">{app.name}</div>
+                              <AppCategoryTags app={app} />
+                            </div>
 
                             <span className="text-zinc-500 shrink-0">
                               {app.minutes}m

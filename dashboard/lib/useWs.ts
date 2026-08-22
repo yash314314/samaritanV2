@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { getWsClient, useWsMessage, useWsState, useWsConnect } from "@/lib/ws";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -15,7 +15,23 @@ export interface LiveDeepWorkState {
   plannedMinutes: number;
   elapsedMinutes: number;
   remainingMinutes: number;
+  elapsedSeconds: number;
+  phaseElapsedSeconds: number;
+  phaseRemainingSeconds: number;
   enforcement: string;
+  enforcementActive: boolean;
+  timerMode: string;
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  currentPhase: string;
+  currentRound: number;
+  totalRounds: number;
+  paused: boolean;
+  phaseStartedAt: string | null;
+  phaseEndsAt: string | null;
+  ambientSound: string;
+  ambientVolume: number;
   focusScore: number;
   productivityScore: number;
   violationCount: number;
@@ -42,7 +58,23 @@ export function useLiveDeepWork() {
     plannedMinutes: 0,
     elapsedMinutes: 0,
     remainingMinutes: 0,
+    elapsedSeconds: 0,
+    phaseElapsedSeconds: 0,
+    phaseRemainingSeconds: 0,
     enforcement: "warn",
+    enforcementActive: false,
+    timerMode: "countdown",
+    focusMinutes: 0,
+    shortBreakMinutes: 5,
+    longBreakMinutes: 15,
+    currentPhase: "focus",
+    currentRound: 1,
+    totalRounds: 1,
+    paused: false,
+    phaseStartedAt: null,
+    phaseEndsAt: null,
+    ambientSound: "none",
+    ambientVolume: 0.35,
     focusScore: 0,
     productivityScore: 0,
     violationCount: 0,
@@ -61,6 +93,18 @@ export function useLiveDeepWork() {
     startedAt?: string;
     plannedMinutes: number;
     enforcement: string;
+    timerMode?: string;
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
+    currentPhase?: string;
+    currentRound?: number;
+    totalRounds?: number;
+    phaseStartedAt?: string;
+    phaseEndsAt?: string | null;
+    pausedAt?: string | null;
+    ambientSound?: string;
+    ambientVolume?: number;
   }) => {
     setState((prev) => ({
       ...prev,
@@ -70,14 +114,31 @@ export function useLiveDeepWork() {
       startedAt: payload.startedAt ?? new Date().toISOString(),
       plannedMinutes: payload.plannedMinutes,
       enforcement: payload.enforcement,
+      enforcementActive: !payload.pausedAt && (payload.currentPhase ?? "focus") === "focus",
+      timerMode: payload.timerMode ?? "countdown",
+      focusMinutes: payload.focusMinutes ?? payload.plannedMinutes,
+      shortBreakMinutes: payload.shortBreakMinutes ?? 5,
+      longBreakMinutes: payload.longBreakMinutes ?? 15,
+      currentPhase: payload.currentPhase ?? "focus",
+      currentRound: payload.currentRound ?? 1,
+      totalRounds: payload.totalRounds ?? 1,
+      paused: Boolean(payload.pausedAt),
+      phaseStartedAt: payload.phaseStartedAt ?? payload.startedAt ?? new Date().toISOString(),
+      phaseEndsAt: payload.phaseEndsAt ?? null,
+      phaseElapsedSeconds: 0,
+      phaseRemainingSeconds: (payload.focusMinutes ?? payload.plannedMinutes) * 60,
+      elapsedSeconds: 0,
+      ambientSound: payload.ambientSound ?? "none",
+      ambientVolume: payload.ambientVolume ?? 0.35,
       elapsedMinutes: 0,
-      remainingMinutes: payload.plannedMinutes,
+      remainingMinutes: payload.focusMinutes ?? payload.plannedMinutes,
       minuteLogs: [],
     }));
     client.subscribeToDeepWork(payload.id);
   });
 
   useWsMessage("deepwork:state", (payload: {
+    sessionId: string;
     elapsedMinutes: number;
     remainingMinutes: number;
     focusScore: number;
@@ -87,14 +148,28 @@ export function useLiveDeepWork() {
     distractionMs: number;
     idleMs: number;
     interruptionMs?: number;
+    elapsedSeconds: number;
+    phaseElapsedSeconds: number;
+    phaseRemainingSeconds: number;
+    timerMode: string;
+    currentPhase: string;
+    currentRound: number;
+    totalRounds: number;
+    paused: boolean;
+    phaseStartedAt: string;
+    phaseEndsAt: string | null;
+    enforcementActive: boolean;
   }) => {
     setState((prev) => ({
       ...prev,
       ...payload,
+      active: true,
+      sessionId: payload.sessionId,
     }));
   });
 
   useWsMessage("deepwork:minute", (payload: {
+    sessionId: string;
     minute: number;
     focusScore: number;
     productivityScore: number;
@@ -102,25 +177,28 @@ export function useLiveDeepWork() {
     idle: boolean;
     appName: string | null;
   }) => {
-    setState((prev) => ({
+    setState((prev) => prev.sessionId && prev.sessionId !== payload.sessionId ? prev : ({
       ...prev,
-      minuteLogs: [...prev.minuteLogs, payload],
+      sessionId: payload.sessionId,
+      minuteLogs: [...prev.minuteLogs.filter((item) => item.minute !== payload.minute), payload]
+        .sort((left, right) => left.minute - right.minute)
+        .slice(-120),
     }));
   });
 
-  useWsMessage("deepwork:ended", () => {
+  useWsMessage("deepwork:ended", (payload: { sessionId: string }) => {
     setState((prev) => ({
       ...prev,
       active: false,
-      sessionId: null,
+      sessionId: payload.sessionId,
     }));
   });
 
-  useWsMessage("deepwork:expired", () => {
+  useWsMessage("deepwork:expired", (payload: { sessionId: string }) => {
     setState((prev) => ({
       ...prev,
       active: false,
-      sessionId: null,
+      sessionId: payload.sessionId,
     }));
   });
 
@@ -142,6 +220,55 @@ export interface LiveActivity {
   focusImpact: number;
   iconUrl: string | null;
   domain: string | null;
+}
+
+export interface CurrentActivity {
+  appName: string;
+  windowTitle: string;
+  iconUrl: string | null;
+  url: string | null;
+  domain: string | null;
+  processId: number | null;
+  processPath: string | null;
+  type: string;
+  observedAt: string;
+  sourceDeviceId?: string | null;
+  sourceSessionId?: string | null;
+  sourceSequence?: number | null;
+}
+
+export function useCurrentActivity() {
+  const [activity, setActivity] = useState<CurrentActivity | null>(null);
+
+  useWsMessage("activity:current", (payload: CurrentActivity) => {
+    setActivity((prev) => {
+      const sameSourceSession = Boolean(
+        prev?.sourceSessionId &&
+        payload.sourceSessionId === prev.sourceSessionId
+      );
+
+      if (
+        sameSourceSession &&
+        prev?.sourceSequence != null &&
+        payload.sourceSequence != null &&
+        payload.sourceSequence <= prev.sourceSequence
+      ) {
+        return prev;
+      }
+
+      if (
+        prev?.observedAt &&
+        payload.observedAt &&
+        new Date(payload.observedAt).getTime() < new Date(prev.observedAt).getTime()
+      ) {
+        return prev;
+      }
+
+      return payload;
+    });
+  });
+
+  return activity;
 }
 
 export function useLiveActivityFeed() {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:4000/ws";
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -32,6 +32,7 @@ export interface WsConnectionState {
 class SamaritanWsClient {
   private ws: WebSocket | null = null;
   private listeners = new Map<string, Set<WsListener>>();
+  private latestMessages = new Map<string, WsMessage>();
   private stateListeners = new Set<(state: WsConnectionState) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -109,6 +110,15 @@ class SamaritanWsClient {
     const set = this.listeners.get(type)!;
     const wrapped = listener as WsListener;
     set.add(wrapped);
+
+    const latest = this.latestMessages.get(type);
+    if (latest) {
+      queueMicrotask(() => {
+        if (!set.has(wrapped)) return;
+        try { wrapped(latest); } catch (err) { console.error("[WS] Listener error:", err); }
+      });
+    }
+
     return () => set.delete(wrapped);
   }
 
@@ -146,6 +156,10 @@ class SamaritanWsClient {
   }
 
   private _dispatch(msg: WsMessage) {
+    if (msg.type === "activity:current") {
+      this.latestMessages.set(msg.type, msg);
+    }
+
     const set = this.listeners.get(msg.type);
     if (set) {
       set.forEach((listener) => {
@@ -217,10 +231,18 @@ export function getWsClient(): SamaritanWsClient {
 
 /** Subscribe to a specific WS message type */
 export function useWsMessage<T>(type: string, handler: (payload: T) => void) {
+  // Keep the latest handler in a ref so the effect below only re-subscribes
+  // when the message *type* changes — NOT on every component render. Freshly-created
+  // inline handlers used to cause a churn of on/off resubscriptions on each state update.
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
   useEffect(() => {
     const client = getWsClient();
-    return client.on<T>(type, (msg) => handler(msg.payload));
-  }, [type, handler]);
+    return client.on<T>(type, (msg) => handlerRef.current(msg.payload));
+  }, [type]);
 }
 
 /** Subscribe to connection state */
@@ -252,8 +274,13 @@ export function useWsConnect(autoConnect = true) {
 
 /** Subscribe to all messages (wildcard) */
 export function useWsAll(handler: (msg: WsMessage) => void) {
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
   useEffect(() => {
     const client = getWsClient();
-    return client.on("*", handler);
-  }, [handler]);
+    return client.on("*", (msg) => handlerRef.current(msg));
+  }, []);
 }

@@ -8,7 +8,7 @@ export default function ActivityPanel() {
   const [tab, setTab] = useState("apps")
 
   return (
-    <div className="bg-zinc-900 rounded-xl p-4 h-full flex flex-col">
+    <div className="samaritan-card p-4 h-full flex flex-col">
 
       <div className="flex gap-3 mb-4">
         <button onClick={() => setTab("apps")}>Apps</button>

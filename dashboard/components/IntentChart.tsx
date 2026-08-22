@@ -9,9 +9,9 @@ import {
   export default function IntentChart({ intents }: any) {
   
     return (
-      <div className="bg-white p-6 shadow rounded">
+      <div className="samaritan-card p-6">
   
-        <h2 className="text-lg mb-4">
+        <h2 className="text-lg mb-4 text-zinc-100">
           Intent Distribution
         </h2>
   
@@ -23,7 +23,7 @@ import {
   
           <Tooltip />
   
-          <Bar dataKey="percentage" fill="#22c55e" />
+          <Bar dataKey="percentage" fill="#a855f7" />
   
         </BarChart>
   

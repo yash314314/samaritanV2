@@ -2,12 +2,22 @@ import { Router } from "express";
 import {
   endDeepWorkSession,
   getActiveDeepWorkSession,
+  getDeepWorkTimerState,
   getDeepWorkSessionHistory,
+  pauseDeepWorkSession,
+  resumeDeepWorkSession,
   resolveFocusIntervention,
+  skipDeepWorkBreak,
   startDeepWorkSession
 } from "../services/deepWorkService";
 import { getDeepWorkSessionResult } from "../services/deepWorkService";
 const router = Router();
+
+function failure(res: any, error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  const status = /not found/i.test(message) ? 404 : /already active|already ended|already completed/i.test(message) ? 409 : 400;
+  res.status(status).json({ error: message });
+}
 
 router.get("/active", async (req, res) => {
   const { userId } = req.query;
@@ -35,16 +45,24 @@ router.post("/start", async (req, res) => {
   try {
     const {
       userId,
+      projectId,
       goal,
       plannedMinutes,
       enforcement,
       allowedApps,
       allowedDomains,
       blockedApps,
-      blockedDomains
+      blockedDomains,
+      timerMode,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
+      totalRounds,
+      ambientSound,
+      ambientVolume,
     } = req.body;
 
-    if (!userId || !plannedMinutes) {
+    if (!userId || (!plannedMinutes && !focusMinutes)) {
       return res.status(400).json({
         error: "Missing userId or plannedMinutes"
       });
@@ -52,19 +70,27 @@ router.post("/start", async (req, res) => {
 
     const session = await startDeepWorkSession({
       userId,
+      projectId: projectId || null,
       goal,
       plannedMinutes: Number(plannedMinutes),
       enforcement,
       allowedApps,
       allowedDomains,
       blockedApps,
-      blockedDomains
+      blockedDomains,
+      timerMode,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
+      totalRounds,
+      ambientSound,
+      ambientVolume,
     });
 
-    res.json(session);
+    res.status(201).json(session);
   } catch (error) {
     console.error("Start deep work failed:", error);
-    res.status(500).json({ error: "Failed to start deep work" });
+    failure(res, error, "Failed to start deep work");
   }
 });
 
@@ -86,16 +112,45 @@ router.post("/:id/end", async (req, res) => {
     res.json(session);
   } catch (error) {
     console.error("End deep work failed:", error);
-    res.status(500).json({ error: "Failed to end deep work" });
+    failure(res, error, "Failed to end deep work");
+  }
+});
+
+router.post("/:id/pause", async (req, res) => {
+  try {
+    if (!req.body.userId) return res.status(400).json({ error: "Missing userId" });
+    res.json(await pauseDeepWorkSession(String(req.body.userId), req.params.id));
+  } catch (error) {
+    failure(res, error, "Failed to pause deep work");
+  }
+});
+
+router.post("/:id/resume", async (req, res) => {
+  try {
+    if (!req.body.userId) return res.status(400).json({ error: "Missing userId" });
+    res.json(await resumeDeepWorkSession(String(req.body.userId), req.params.id));
+  } catch (error) {
+    failure(res, error, "Failed to resume deep work");
+  }
+});
+
+router.post("/:id/skip-break", async (req, res) => {
+  try {
+    if (!req.body.userId) return res.status(400).json({ error: "Missing userId" });
+    res.json(await skipDeepWorkBreak(String(req.body.userId), req.params.id));
+  } catch (error) {
+    failure(res, error, "Failed to skip break");
   }
 });
 
 router.post("/interventions/:id/resolve", async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason, action } = req.body;
+    const { userId, reason, action } = req.body;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
 
     const intervention = await resolveFocusIntervention(
+      String(userId),
       id,
       reason,
       action ?? "allowed_once"
@@ -104,7 +159,7 @@ router.post("/interventions/:id/resolve", async (req, res) => {
     res.json(intervention);
   } catch (error) {
     console.error("Resolve intervention failed:", error);
-    res.status(500).json({ error: "Failed to resolve intervention" });
+    failure(res, error, "Failed to resolve intervention");
   }
 });
 router.get("/:id/result", async (req, res) => {
@@ -141,21 +196,18 @@ router.get("/active/status", async (req, res) => {
       return res.json({ active: false });
     }
 
-    const now = new Date();
-    const elapsedMinutes = Math.floor(
-      (now.getTime() - session.startedAt.getTime()) / (60 * 1000)
-    );
-    const remainingMinutes = Math.max(0, session.plannedMinutes - elapsedMinutes);
+    const timer = getDeepWorkTimerState(session);
 
     // CRITICAL FIX: Include live metrics for overlay
     res.json({
       active: true,
       session: {
         id: session.id,
+        projectId: session.projectId,
+        project: session.project,
         goal: session.goal,
         plannedMinutes: session.plannedMinutes,
-        elapsedMinutes,
-        remainingMinutes,
+        ...timer,
         enforcement: session.enforcement,
         focusScore: Number(session.focusScore.toFixed(2)),
         productivityScore: Number(session.productivityScore.toFixed(2)),
@@ -170,7 +222,16 @@ router.get("/active/status", async (req, res) => {
           appName: i.appName,
           action: i.action,
           detectedAt: i.detectedAt
-        })) || []
+        })) || [],
+        allowedApps: session.allowedApps,
+        allowedDomains: session.allowedDomains,
+        blockedApps: session.blockedApps,
+        blockedDomains: session.blockedDomains,
+        focusMinutes: session.focusMinutes,
+        shortBreakMinutes: session.shortBreakMinutes,
+        longBreakMinutes: session.longBreakMinutes,
+        ambientSound: session.ambientSound,
+        ambientVolume: session.ambientVolume,
       }
     });
   } catch (error) {

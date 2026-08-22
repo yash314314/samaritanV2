@@ -12,7 +12,6 @@ import {
   Clock,
   Zap,
   TrendingUp,
-  ArrowLeft,
   Loader2,
   Activity,
   Eye,
@@ -27,7 +26,9 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { fetchHeatmap, fetchTimeline } from "../../lib/api";
+import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 import HeatmapInsights from "../../components/HeatmapInsights";
+import AppCategoryTags from "../../components/AppCategoryTags";
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
@@ -48,13 +49,38 @@ interface HeatmapBucket {
   dominantApp: string | null;
   dominantCategory: string | null;
   dominantIntent: string | null;
-  topApps: { name: string; duration: number; minutes: number; percentage: number }[];
+  topApps: {
+    name: string;
+    duration: number;
+    minutes: number;
+    percentage: number;
+    category?: string;
+    categories?: { name: string; duration: number; minutes: number; percentage: number }[];
+  }[];
   categoryBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
   intentBreakdown: { name: string; duration: number; minutes: number; percentage: number }[];
 }
 
 type HeatmapDay = Record<number, HeatmapBucket>;
 type HeatmapResponse = Record<string, HeatmapDay>;
+
+const EMPTY_HEATMAP_BUCKET: HeatmapBucket = {
+  score: 0,
+  productivity: 0,
+  focus: 0,
+  duration: 0,
+  idleRatio: 0,
+  colorValue: 0,
+  colorMode: "score",
+  trackedMinutes: 0,
+  idleMinutes: 0,
+  dominantApp: null,
+  dominantCategory: null,
+  dominantIntent: null,
+  topApps: [],
+  categoryBreakdown: [],
+  intentBreakdown: [],
+};
 
 interface TimelineItem {
   title: string;
@@ -205,6 +231,15 @@ const colorScales: Record<ViewMode, string[]> = {
   ],
 };
 
+// Module-scope (stable reference) so it isn't reallocated on every render.
+const viewModeConfig: Record<ViewMode, { label: string; color: string; desc: string }> = {
+  score: { label: "Raw Score", color: "purple", desc: "Normalized productivity score" },
+  productivity: { label: "Productivity", color: "emerald", desc: "Productivity percentage" },
+  duration: { label: "Duration", color: "blue", desc: "Tracked hours per cell" },
+  focus: { label: "Focus", color: "cyan", desc: "Average focus impact" },
+  idle: { label: "Idle", color: "rose", desc: "Idle time ratio" },
+};
+
 function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
   switch (mode) {
     case "score": return bucket.score;
@@ -220,7 +255,7 @@ function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
 // ═══════════════════════════════════════════════════════════
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
 );
 
 const SkeletonCell = () => <div className="h-6 rounded-sm bg-zinc-800 animate-pulse" />;
@@ -383,11 +418,14 @@ const HeatmapTooltipCard = ({
           <p className="text-zinc-500 text-xs uppercase tracking-wider mb-2 font-medium">Top Apps</p>
           <div className="space-y-1.5">
             {bucket.topApps.slice(0, 5).map((app) => (
-              <div key={app.name} className="flex items-center gap-2 bg-zinc-900/60 rounded-lg p-1.5">
+              <div key={app.name} className="flex items-start gap-2 bg-zinc-900/60 rounded-lg p-1.5">
                 <div className="w-5 h-5 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
                   {app.name[0]}
                 </div>
-                <span className="text-zinc-200 text-xs flex-1 truncate">{app.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-zinc-200">{app.name}</div>
+                  <AppCategoryTags app={app} />
+                </div>
                 <span className="text-zinc-500 text-xs font-mono">{app.minutes}m</span>
               </div>
             ))}
@@ -501,10 +539,12 @@ const HeatmapGrid = ({
                 if (isEmpty && !showEmpty) return <div key={h} className="flex-1 px-0.5" />;
                 return (
                   <div key={h} className="flex-1 px-0.5">
-                    <div
-                      className={`h-6 rounded-sm ${getColor(bucket)} cursor-crosshair transition-all hover:ring-2 hover:ring-white/30 relative`}
+                    <button
+                      type="button"
+                      className={`relative block h-6 w-full cursor-pointer rounded-sm ${getColor(bucket)} transition-all hover:ring-2 hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400`}
                       onMouseEnter={(e) => handleMouseEnter(date, h, bucket, e)}
-                      onClick={() => bucket && onCellClick(date, h, bucket)}
+                      onClick={() => onCellClick(date, h, bucket ?? EMPTY_HEATMAP_BUCKET)}
+                      aria-label={`${date}, ${h.toString().padStart(2, "0")}:00 IST, open activity details${bucket ? "" : ", no activity recorded"}`}
                     />
                   </div>
                 );
@@ -749,34 +789,81 @@ const HourDetailDrawer = ({
   bucket: HeatmapBucket | null;
   timelineSessions: TimelineSession[];
 }) => {
-  if (!open || !bucket) return null;
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
-  const filteredSessions = timelineSessions
-    .filter((s) => {
-      const sessionDate = getISTDateKey(s.start);
-      const sessionHour = getISTHour(s.start);
-      return sessionDate === date && sessionHour === hour;
-    })
-    .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+  const filteredSessions = useMemo(() => {
+    if (!open || !date) return [];
+    const hourStart = new Date(`${date}T${hour.toString().padStart(2, "0")}:00:00+05:30`).getTime();
+    const hourEnd = hourStart + 60 * 60 * 1000;
+
+    return timelineSessions
+      .flatMap((session) => {
+        const sessionStart = new Date(session.start).getTime();
+        const sessionEnd = new Date(session.end).getTime();
+        const visibleStart = Math.max(sessionStart, hourStart);
+        const visibleEnd = Math.min(sessionEnd, hourEnd);
+        if (visibleStart >= visibleEnd) return [];
+
+        const items = (session.items ?? []).flatMap((item) => {
+          const itemStart = new Date(item.start).getTime();
+          const itemEnd = new Date(item.end).getTime();
+          const visibleItemStart = Math.max(itemStart, hourStart);
+          const visibleItemEnd = Math.min(itemEnd, hourEnd);
+          if (visibleItemStart >= visibleItemEnd) return [];
+          return [{
+            ...item,
+            start: new Date(visibleItemStart).toISOString(),
+            end: new Date(visibleItemEnd).toISOString(),
+            duration: visibleItemEnd - visibleItemStart,
+          }];
+        });
+
+        return [{
+          ...session,
+          start: new Date(visibleStart).toISOString(),
+          end: new Date(visibleEnd).toISOString(),
+          duration: visibleEnd - visibleStart,
+          items,
+        }];
+      })
+      .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+  }, [date, hour, open, timelineSessions]);
+
+  if (!open || !bucket) return null;
+  const nextHour = (hour + 1) % 24;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-zinc-950 border-l border-zinc-800 h-full overflow-y-auto shadow-2xl">
-        <div className="sticky top-0 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-center justify-between z-10">
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-3 backdrop-blur-md sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="heatmap-hour-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="samaritan-card relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden border-purple-500/35 shadow-2xl shadow-black/80">
+        <div className="z-10 flex shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-4 py-4 backdrop-blur sm:px-6">
           <div>
             <p className="text-zinc-500 text-xs uppercase tracking-wider">{date}</p>
-            <h2 className="text-xl font-bold text-white">
-              {hour.toString().padStart(2, "0")}:00 – {(hour + 1).toString().padStart(2, "0")}:00 <span className="text-zinc-500 text-base font-normal">IST</span>
+            <h2 id="heatmap-hour-title" className="text-xl font-bold text-white">
+              {hour.toString().padStart(2, "0")}:00 - {nextHour.toString().padStart(2, "0")}:00 <span className="text-zinc-500 text-base font-normal">IST</span>
             </h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors">
-            <ArrowLeft className="w-5 h-5" />
+          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors" aria-label="Close hour details">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="dashboard-scroll-panel min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Card className="p-4">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Duration</p>
               <p className="text-2xl font-bold text-white mt-1">{formatHMS(bucket.duration / 1000)}</p>
@@ -822,11 +909,14 @@ const HourDetailDrawer = ({
               <div className="space-y-2">
                 {bucket.topApps.map((app) => (
                   <div key={app.name} className="flex items-center justify-between p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
                       <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-400">
                         {app.name[0]}
                       </div>
-                      <span className="text-sm text-zinc-300">{app.name}</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-zinc-300">{app.name}</div>
+                        <AppCategoryTags app={app} limit={3} />
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-zinc-200">{app.minutes}m</p>
@@ -875,6 +965,13 @@ const HourDetailDrawer = ({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {filteredSessions.length === 0 && (
+            <div className="rounded-lg border border-dashed border-zinc-800 px-4 py-8 text-center">
+              <Clock className="mx-auto mb-2 h-5 w-5 text-zinc-600" />
+              <p className="text-sm text-zinc-400">No individual activity sessions were recorded in this hour.</p>
             </div>
           )}
         </div>
@@ -972,6 +1069,19 @@ export default function HeatmapPage() {
     loadData();
   }, [loadData]);
 
+  useRealtimeRefresh(loadData, {
+    events: [
+      "activity:new",
+      "session:metrics",
+      "analytics:daily",
+      "calendar:changed",
+      "deepwork:started",
+      "deepwork:ended",
+      "deepwork:state",
+    ],
+    debounceMs: 750,
+  });
+
   const goPrev = () => { if (timeScale === "week") setWeekOffset((o) => o - 1); };
   const goNext = () => { if (timeScale === "week") setWeekOffset((o) => o + 1); };
   const goToday = () => { setWeekOffset(0); setTimeScale("today"); };
@@ -1060,26 +1170,18 @@ export default function HeatmapPage() {
       }));
   }, [timeline]);
 
-  const viewModeConfig = {
-    score: { label: "Raw Score", color: "purple", desc: "Normalized productivity score" },
-    productivity: { label: "Productivity", color: "emerald", desc: "Productivity percentage" },
-    duration: { label: "Duration", color: "blue", desc: "Tracked hours per cell" },
-    focus: { label: "Focus", color: "cyan", desc: "Average focus impact" },
-    idle: { label: "Idle", color: "rose", desc: "Idle time ratio" },
-  };
-
   return (
-    <div className="min-h-screen bg-black text-zinc-100">
+    <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
-      <div className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="samaritan-card z-40 mb-3 shrink-0">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+              <h1 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
                 <Zap className="w-6 h-6 text-purple-500" />
                 Temporal Heatmap
               </h1>
-              <p className="mt-0.5 text-sm text-zinc-500">Deep-dive into your hourly cognitive patterns</p>
+              <p className="mt-0.5 text-xs text-zinc-500">Deep-dive into your hourly cognitive patterns</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1136,7 +1238,7 @@ export default function HeatmapPage() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-zinc-800 pt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-2">
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Color by</span>
               <div className="flex bg-zinc-950 rounded-lg p-0.5 border border-zinc-800">
@@ -1182,22 +1284,22 @@ export default function HeatmapPage() {
       </div>
 
       {/* ═══ CONTENT ═══ */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="dashboard-scroll-panel mx-auto grid min-h-0 w-full max-w-7xl flex-1 grid-cols-12 gap-4 overflow-y-auto overflow-x-hidden px-4 py-1 pr-2 sm:px-5">
         {error && (
-          <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2">
+          <div className="col-span-12 flex items-center gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-400">
             <Activity className="w-4 h-4 flex-shrink-0" />
             {error}
           </div>
         )}
 
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
+        <Card className="dashboard-grid-card col-span-12 min-h-[430px] p-4">
+          <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
                 Activity Grid
               </h2>
-              <p className="text-sm text-zinc-500 mt-0.5">
+              <p className="mt-0.5 text-xs text-zinc-500">
                 {viewModeConfig[viewMode].desc} • {displayLabel}
                 {categoryFilter && ` • Filtered: ${categoryFilter}`}
               </p>
@@ -1222,13 +1324,13 @@ export default function HeatmapPage() {
           )}
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1">
-            {heatmap && !loading ? <HeatmapInsights data={heatmap} /> : <InsightsSkeleton />}
-          </div>
-          <div className="lg:col-span-2">
-            <Card className="p-6 h-full">
-              <h3 className="text-lg font-semibold text-zinc-100 mb-4 flex items-center gap-2">
+        <div className="col-span-12 min-h-0">
+          {heatmap && !loading ? <HeatmapInsights data={heatmap} /> : <InsightsSkeleton />}
+        </div>
+
+        <div className="col-span-12 min-h-[360px]">
+            <Card className="flex h-full min-h-0 flex-col p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-100">
                 <Clock className="w-5 h-5 text-zinc-500" />
                 Hourly Timeline
               </h3>
@@ -1237,7 +1339,7 @@ export default function HeatmapPage() {
                   {Array.from({ length: 4 }).map((_, i) => (<div key={i} className="h-20 bg-zinc-800 rounded-xl" />))}
                 </div>
               ) : groupedTimeline.length > 0 ? (
-                <div className="max-h-[600px] overflow-y-auto pr-2 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+                <div className="dashboard-scroll-panel space-y-4 pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
                   {groupedTimeline.map(({ date, hours }) => (
                     <div key={date} className="space-y-3">
                       <div className="flex items-center gap-2 sticky top-0 bg-zinc-900/95 py-1 z-10">
@@ -1352,7 +1454,6 @@ export default function HeatmapPage() {
                 <div className="flex items-center justify-center h-48 text-zinc-600 text-sm">No timeline data available for this range.</div>
               )}
             </Card>
-          </div>
         </div>
       </div>
 

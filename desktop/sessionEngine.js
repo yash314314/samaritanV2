@@ -1,6 +1,6 @@
 const { app, Notification, BrowserWindow } = require("electron");
 const { streamActivity } = require("./wsClient");
-const { killProcessByName } = require("./taskkill");
+const { killProcess } = require("./taskkill");
 const crypto = require("crypto");
 
 let currentSession = null;
@@ -29,6 +29,8 @@ function startNewSession(event) {
     icon: event.icon || null,
     url: event.url || null,
     domain: event.domain || null,
+    processId: event.processId || null,
+    path: event.path || null,
     type: event.type || "active"
   };
   console.log(
@@ -50,6 +52,8 @@ async function sendSessionToBackend(session) {
     iconUrl: session.icon,
     url: session.url || null,
     domain: session.domain || null,
+    processId: session.processId || null,
+    processPath: session.path || null,
     startTime: new Date(session.startTime).toISOString(),
     endTime: new Date(session.endTime).toISOString(),
     duration: session.duration,
@@ -124,6 +128,15 @@ function handleFocusIntervention(focusIntervention, appName) {
   const { intervention, enforcement, message } = focusIntervention;
   const action = intervention?.action || enforcement || "observe";
   const interventionId = intervention?.id || focusIntervention.id || null;
+  const sameCurrentApp =
+    currentSession?.app &&
+    appName &&
+    currentSession.app.toLowerCase().trim() === appName.toLowerCase().trim();
+  const target = {
+    appName,
+    pid: sameCurrentApp ? currentSession?.processId : null,
+    path: sameCurrentApp ? currentSession?.path : null
+  };
 
   if (action === "blocked" || action === "block") {
     if (Notification.isSupported()) {
@@ -138,8 +151,7 @@ function handleFocusIntervention(focusIntervention, appName) {
       interventionId,
       message
     });
-    // Actually kill the blocked app process
-    const killResult = killProcessByName(appName);
+    const killResult = killProcess(target);
     if (killResult.killed) {
       console.log(`[Samaritan] Successfully terminated ${appName}: ${killResult.reason}`);
     } else {
@@ -172,13 +184,6 @@ function handleFocusIntervention(focusIntervention, appName) {
       message,
       showReason: true
     });
-    // For "reason_required" enforcement, also kill the app to force the user to provide a reason
-    const killResult = killProcessByName(appName);
-    if (killResult.killed) {
-      console.log(`[Samaritan] Successfully terminated ${appName} (reason required): ${killResult.reason}`);
-    } else {
-      console.log(`[Samaritan] Could not terminate ${appName} (reason required): ${killResult.reason}`);
-    }
   }
 }
 
@@ -257,7 +262,8 @@ async function handleEvent(event) {
   const isSameContext =
     currentSession.app === event.app &&
     currentSession.title === event.title &&
-    currentSession.type === (event.type || "active");
+    currentSession.type === (event.type || "active") &&
+    currentSession.processId === (event.processId || null);
 
   if (!isSameContext) {
     await closeSession("switch", eventStartTime);

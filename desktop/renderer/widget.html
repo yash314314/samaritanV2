@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Samaritan Widget</title>
+  <link rel="stylesheet" href="widget.css" />
+</head>
+<body>
+  <main id="widget" class="widget-shell">
+    <header class="widget-header drag-region">
+      <div class="brand-mark">S</div>
+      <div class="brand-copy">
+        <span class="brand-name">SAMARITAN</span>
+        <span id="connectionLabel" class="connection-label"><span class="status-dot"></span>Live</span>
+      </div>
+      <div class="window-actions no-drag">
+        <button id="pinButton" class="icon-button active" type="button" title="Keep widget on top">P</button>
+        <button id="expandButton" class="icon-button" type="button" title="Expand widget">+</button>
+        <button id="hideButton" class="icon-button" type="button" title="Hide widget">x</button>
+      </div>
+    </header>
+
+    <section class="current-row">
+      <div class="app-icon-wrap">
+        <img id="appIcon" alt="" />
+        <span id="appFallback">A</span>
+      </div>
+      <div class="activity-copy">
+        <div id="appName" class="app-name">Waiting for activity</div>
+        <div id="windowTitle" class="window-title">Tracker connection is starting</div>
+      </div>
+      <div id="focusBadge" class="focus-badge hidden">FOCUS</div>
+    </section>
+
+    <section id="expandedPanel" class="expanded-panel hidden">
+      <div class="state-grid">
+        <div class="state-cell">
+          <span class="state-label">Focus</span>
+          <strong id="focusValue" class="state-value">Ready</strong>
+        </div>
+        <div class="state-cell">
+          <span class="state-label">Next break</span>
+          <strong id="breakValue" class="state-value">--</strong>
+        </div>
+        <div class="state-cell">
+          <span class="state-label">Project</span>
+          <strong id="projectValue" class="state-value purple">Unassigned</strong>
+        </div>
+      </div>
+
+      <div class="control-block">
+        <label class="control-label" for="projectSelect">Quick tag</label>
+        <div class="control-row">
+          <select id="projectSelect"><option value="">Choose project</option></select>
+          <button id="tagButton" type="button" class="secondary-button">Apply</button>
+        </div>
+      </div>
+
+      <div class="control-row action-row">
+        <select id="focusDuration" title="Focus duration">
+          <option value="25">25 min</option>
+          <option value="45">45 min</option>
+          <option value="60">60 min</option>
+        </select>
+        <button id="focusButton" type="button" class="primary-button">Start focus</button>
+        <button id="breakButton" type="button" class="secondary-button hidden">Start break</button>
+        <button id="snoozeButton" type="button" class="icon-button wide hidden" title="Snooze break 15 minutes">Snooze</button>
+      </div>
+
+      <div id="feedback" class="feedback hidden"></div>
+      <button id="dashboardButton" type="button" class="dashboard-button">Open dashboard</button>
+    </section>
+  </main>
+  <script src="widget.js"></script>
+</body>
+</html>

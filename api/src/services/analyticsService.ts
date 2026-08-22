@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import {
+  getBaseFocus,
   getActivityProductivityScore,
   isIdleActivity
 } from "./metricEngine";
@@ -17,7 +18,12 @@ function fromIST(istDate: Date): Date {
   return new Date(istDate.getTime() - IST_OFFSET_MS);
 }
 
-function getISTDayRange(date?: Date) {
+function getISTDayRange(date?: Date | string) {
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const start = new Date(`${date}T00:00:00+05:30`);
+    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+  }
+
   const base = date ? new Date(date) : new Date();
   const ist = toIST(base);
   ist.setUTCHours(0, 0, 0, 0);
@@ -33,73 +39,170 @@ function getISTDateKey(date: Date): string {
 
 // ─── Daily Analytics ────────────────────────────────────
 
-export async function getDailyAnalytics(userId: string) {
-  const { start, end } = getISTDayRange();
+export async function getDailyAnalytics(userId: string, date?: string, toDate?: string) {
+  const { start } = getISTDayRange(date);
+  const { end } = getISTDayRange(toDate ?? date);
+  if (end <= start) throw new Error("Invalid analytics date range");
 
-  const sessions = await prisma.session.findMany({
-    where: {
-      userId,
-      startTime: { gte: start, lt: end },
-    },
-    include: { activities: true },
-  });
+  const [sessions, protectedWork] = await Promise.all([
+    prisma.session.findMany({
+      where: {
+        userId,
+        startTime: { gte: start, lt: end },
+      },
+      include: { activities: true },
+    }),
+    prisma.deepWorkSession.findMany({
+      where: {
+        userId,
+        startedAt: { gte: start, lt: end },
+      },
+      select: { startedAt: true, endedAt: true, plannedMinutes: true },
+    }),
+  ]);
 
   let totalSwitches = 0;
   let totalIdleMs = 0;
-  let totalFocusScore = 0;
-  let totalBurnout = 0;
-  let totalActiveSeconds = 0;
-  let totalDeepWorkSeconds = 0;
-  let deepWorkSessions = 0;
-  let totalEntropy = 0;
+  let totalActiveMs = 0;
+  let weightedFocus = 0;
+  let weightedBurnout = 0;
+  let weightedEntropy = 0;
+  let totalMetricWeight = 0;
 
   let productiveCount = 0;
   let distractingCount = 0;
   let neutralCount = 0;
+  let productiveDurationMs = 0;
+  let distractingDurationMs = 0;
+  let neutralDurationMs = 0;
   const appUsage: Record<string, number> = {};
+
+  const productiveCategories = new Set(["deep_work", "development_tools", "productivity", "research"]);
+  const distractingCategories = new Set(["media", "entertainment"]);
 
   sessions.forEach((session) => {
     totalSwitches += session.switchCount;
-    totalIdleMs += session.idleTime;
-    totalFocusScore += session.focusScore;
-    totalBurnout += session.burnoutScore ?? 0;
-    totalEntropy += session.entropyScore ?? 0;
-
-    if (session.isDeepWork) {
-      deepWorkSessions++;
-      if (session.endTime) {
-        const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-        totalDeepWorkSeconds += duration;
-      }
-    }
+    const sessionDuration = session.activities.reduce(
+      (sum, activity) => sum + Math.max(0, activity.duration ?? 0),
+      0
+    );
+    const metricWeight = Math.max(1, sessionDuration);
+    weightedFocus += session.focusScore * metricWeight;
+    weightedBurnout += (session.burnoutScore ?? 0) * metricWeight;
+    weightedEntropy += (session.entropyScore ?? 0) * metricWeight;
+    totalMetricWeight += metricWeight;
 
     session.activities.forEach((activity) => {
-      appUsage[activity.appName] = (appUsage[activity.appName] || 0) + 1;
-      if (activity.category === "productive") productiveCount++;
-      if (activity.category === "distracting") distractingCount++;
-      if (activity.category === "neutral") neutralCount++;
-    });
+      const duration = Math.max(0, activity.duration ?? 0);
+      const idle = isIdleActivity(activity);
 
-    if (session.endTime) {
-      const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-      totalActiveSeconds += duration;
-    }
+      if (idle) totalIdleMs += duration;
+      else {
+        totalActiveMs += duration;
+        appUsage[activity.appName] = (appUsage[activity.appName] || 0) + duration;
+
+        if (productiveCategories.has(activity.category ?? "")) {
+          productiveCount++;
+          productiveDurationMs += duration;
+        } else if (distractingCategories.has(activity.category ?? "")) {
+          distractingCount++;
+          distractingDurationMs += duration;
+        } else {
+          neutralCount++;
+          neutralDurationMs += duration;
+        }
+      }
+    });
   });
 
   const totalSessions = sessions.length;
-  const averageFocus = totalSessions > 0 ? totalFocusScore / totalSessions : 0;
-  const averageBurnout = totalSessions > 0 ? totalBurnout / totalSessions : 0;
+  const averageFocus = totalMetricWeight > 0 ? weightedFocus / totalMetricWeight : 0;
+  const averageBurnout = totalMetricWeight > 0 ? weightedBurnout / totalMetricWeight : 0;
+  const averageEntropy = totalMetricWeight > 0 ? weightedEntropy / totalMetricWeight : 0;
+  const totalActiveSeconds = Math.round(totalActiveMs / 1000);
+  const totalIdleSeconds = Math.round(totalIdleMs / 1000);
+  const trackedSeconds = totalActiveSeconds + totalIdleSeconds;
+  const idleRatio = trackedSeconds > 0 ? totalIdleSeconds / trackedSeconds : 0;
+  const activeHours = totalActiveSeconds / 3600;
+  const switchesPerHour = activeHours > 0 ? totalSwitches / activeHours : 0;
+
+  const breakBalance = trackedSeconds < 15 * 60
+    ? 0
+    : idleRatio < 0.15
+      ? Math.min(100, (idleRatio / 0.15) * 100)
+      : idleRatio <= 0.3
+        ? 100
+        : Math.max(20, 100 - ((idleRatio - 0.3) / 0.5) * 80);
+  const strainReserve = Math.max(0, 100 - averageBurnout);
+  const stability = Math.max(0, 100 - averageEntropy);
+  const switchControl = Math.max(0, Math.min(100, 100 - ((switchesPerHour - 8) / 22) * 100));
+  const recoveryScore = trackedSeconds < 15 * 60
+    ? 0
+    : Math.max(0, Math.min(100,
+        strainReserve * 0.3 +
+        stability * 0.2 +
+        averageFocus * 0.2 +
+        breakBalance * 0.15 +
+        switchControl * 0.15
+      ));
+
+  const recoveryStatus = trackedSeconds < 15 * 60
+    ? "Building baseline"
+    : recoveryScore >= 75
+      ? "Ready"
+      : recoveryScore >= 55
+        ? "Balanced"
+        : recoveryScore >= 35
+          ? "Recovery due"
+          : "Overextended";
+
+  let recoveryAction = "Pace is sustainable. Keep the next block intentional.";
+  if (trackedSeconds < 15 * 60) recoveryAction = "Keep tracking to establish today's baseline.";
+  else if (averageBurnout >= 65) recoveryAction = "Take a 10-15 minute off-screen recovery break.";
+  else if (idleRatio < 0.08 && activeHours >= 1.5) recoveryAction = "Add a short recovery gap before the next work block.";
+  else if (averageEntropy >= 65 || switchesPerHour >= 24) recoveryAction = "Reduce switching and protect one single-context block.";
+  else if (averageFocus < 45) recoveryAction = "Reset around one clear task before adding more work.";
+
+  const now = new Date();
+  const totalDeepWorkSeconds = protectedWork.reduce((sum, session) => {
+    const recordedEnd = session.endedAt ?? (now < end ? now : end);
+    const effectiveEnd = new Date(Math.min(recordedEnd.getTime(), end.getTime()));
+    return sum + Math.max(0, (effectiveEnd.getTime() - session.startedAt.getTime()) / 1000);
+  }, 0);
 
   return {
     totalSessions,
     totalSwitches,
-    totalIdleSeconds: Math.round(totalIdleMs / 1000),
+    totalIdleSeconds,
     totalActiveSeconds,
     averageFocusScore: Number(averageFocus.toFixed(2)),
     averageBurnoutScore: Number(averageBurnout.toFixed(2)),
     appUsage,
-    productivityBreakdown: { productiveCount, distractingCount, neutralCount },
-    averageEntropyScore: totalSessions > 0 ? Number((totalEntropy / totalSessions).toFixed(2)) : 0,
+    productivityBreakdown: {
+      productiveCount,
+      distractingCount,
+      neutralCount,
+      productiveDurationMs,
+      distractingDurationMs,
+      neutralDurationMs,
+    },
+    averageEntropyScore: Number(averageEntropy.toFixed(2)),
+    deepWorkSessions: protectedWork.length,
+    totalDeepWorkSeconds: Math.round(totalDeepWorkSeconds),
+    recovery: {
+      score: Number(recoveryScore.toFixed(1)),
+      status: recoveryStatus,
+      action: recoveryAction,
+      continuouslyUpdated: true,
+      factors: {
+        breakBalance: Number(breakBalance.toFixed(1)),
+        strainReserve: Number(strainReserve.toFixed(1)),
+        stability: Number(stability.toFixed(1)),
+        switchControl: Number(switchControl.toFixed(1)),
+      },
+      idleRatio: Number((idleRatio * 100).toFixed(1)),
+      switchesPerHour: Number(switchesPerHour.toFixed(1)),
+    },
   };
 }
 
@@ -153,50 +256,6 @@ export async function getDeepWorkStreak(userId: string) {
 
 // ─── Weekly Analytics ───────────────────────────────────
 
-export async function getWeeklyAnalytics(userId: string) {
-  const { start } = getISTDayRange();
-  const startDate = new Date(start);
-  startDate.setDate(startDate.getDate() - 6);
-
-  const sessions = await prisma.session.findMany({
-    where: { userId, startTime: { gte: startDate } },
-  });
-
-  const dailyMap: Record<string, any> = {};
-
-  sessions.forEach((session) => {
-    const dateKey = getISTDateKey(session.startTime);
-
-    if (!dailyMap[dateKey]) {
-      dailyMap[dateKey] = {
-        focusTotal: 0,
-        burnoutTotal: 0,
-        entropyTotal: 0,
-        deepWorkSeconds: 0,
-        sessionCount: 0,
-      };
-    }
-
-    dailyMap[dateKey].focusTotal += session.focusScore;
-    dailyMap[dateKey].burnoutTotal += session.burnoutScore ?? 0;
-    dailyMap[dateKey].entropyTotal += session.entropyScore ?? 0;
-    dailyMap[dateKey].sessionCount++;
-
-    if (session.isDeepWork && session.endTime) {
-      const duration = (session.endTime.getTime() - session.startTime.getTime()) / 1000;
-      dailyMap[dateKey].deepWorkSeconds += duration;
-    }
-  });
-
-  return Object.entries(dailyMap).map(([date, data]) => ({
-    date,
-    averageFocus: data.focusTotal / data.sessionCount,
-    averageBurnout: data.burnoutTotal / data.sessionCount,
-    averageEntropy: data.entropyTotal / data.sessionCount,
-    deepWorkSeconds: data.deepWorkSeconds,
-  }));
-}
-
 // ─── Heatmap ────────────────────────────────────────────
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -246,6 +305,7 @@ export async function getHeatmap(userId: string) {
           totalMs: 0,
           idleMs: 0,
           appDurations: {},
+          appCategoryDurations: {},
           categoryDurations: {},
           intentDurations: {},
         };
@@ -264,6 +324,9 @@ export async function getHeatmap(userId: string) {
       }
 
       bucket.appDurations[appName] = (bucket.appDurations[appName] || 0) + segmentMs;
+      if (!bucket.appCategoryDurations[appName]) bucket.appCategoryDurations[appName] = {};
+      bucket.appCategoryDurations[appName][category] =
+        (bucket.appCategoryDurations[appName][category] || 0) + segmentMs;
       bucket.categoryDurations[category] = (bucket.categoryDurations[category] || 0) + segmentMs;
       bucket.intentDurations[intent] = (bucket.intentDurations[intent] || 0) + segmentMs;
 
@@ -287,6 +350,19 @@ export async function getHeatmap(userId: string) {
         percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
       }));
 
+  const getTopApps = (
+    values: Record<string, number>,
+    categoriesByApp: Record<string, Record<string, number>>,
+    totalMs: number
+  ) => getTopEntries(values, totalMs).map((app) => {
+    const categories = getTopEntries(categoriesByApp[app.name] ?? {}, app.duration);
+    return {
+      ...app,
+      category: categories[0]?.name ?? "unknown",
+      categories,
+    };
+  });
+
   const finalHeatmap: Record<string, Record<number, any>> = {};
 
   Object.entries(heatmap).forEach(([date, hours]) => {
@@ -304,7 +380,7 @@ export async function getHeatmap(userId: string) {
         dominantApp: getDominantKey(data.appDurations),
         dominantCategory: getDominantKey(data.categoryDurations),
         dominantIntent: getDominantKey(data.intentDurations),
-        topApps: getTopEntries(data.appDurations, data.totalMs),
+        topApps: getTopApps(data.appDurations, data.appCategoryDurations, data.totalMs),
         categoryBreakdown: getTopEntries(data.categoryDurations, data.totalMs),
         intentBreakdown: getTopEntries(data.intentDurations, data.totalMs),
       };
@@ -354,7 +430,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
     if (categoryFilter && activity.category !== categoryFilter) continue;
 
     const score = getActivityProductivityScore(activity);
-    const focusImpact = activity.focusImpact ?? 0.5;
+    const focusImpact = getBaseFocus(activity);
 
     let current = new Date(activity.startTime);
     const end =
@@ -377,6 +453,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
           totalMs: 0,
           idleMs: 0,
           appDurations: {},
+          appCategoryDurations: {},
           categoryDurations: {},
           intentDurations: {},
         };
@@ -396,6 +473,9 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
       }
 
       bucket.appDurations[appName] = (bucket.appDurations[appName] || 0) + segmentMs;
+      if (!bucket.appCategoryDurations[appName]) bucket.appCategoryDurations[appName] = {};
+      bucket.appCategoryDurations[appName][category] =
+        (bucket.appCategoryDurations[appName][category] || 0) + segmentMs;
       bucket.categoryDurations[category] = (bucket.categoryDurations[category] || 0) + segmentMs;
       bucket.intentDurations[intent] = (bucket.intentDurations[intent] || 0) + segmentMs;
 
@@ -418,6 +498,19 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
         minutes: Number((duration / 60000).toFixed(1)),
         percentage: totalMs > 0 ? Number(((duration / totalMs) * 100).toFixed(1)) : 0,
       }));
+
+  const getTopApps = (
+    values: Record<string, number>,
+    categoriesByApp: Record<string, Record<string, number>>,
+    totalMs: number
+  ) => getTopEntries(values, totalMs).map((app) => {
+    const categories = getTopEntries(categoriesByApp[app.name] ?? {}, app.duration);
+    return {
+      ...app,
+      category: categories[0]?.name ?? "unknown",
+      categories,
+    };
+  });
 
   const finalHeatmap: Record<string, Record<number, any>> = {};
 
@@ -448,7 +541,7 @@ export async function getHeatmapV2(options: HeatmapV2Options) {
         dominantApp: getDominantKey(data.appDurations),
         dominantCategory: getDominantKey(data.categoryDurations),
         dominantIntent: getDominantKey(data.intentDurations),
-        topApps: getTopEntries(data.appDurations, data.totalMs),
+        topApps: getTopApps(data.appDurations, data.appCategoryDurations, data.totalMs),
         categoryBreakdown: getTopEntries(data.categoryDurations, data.totalMs),
         intentBreakdown: getTopEntries(data.intentDurations, data.totalMs),
       };

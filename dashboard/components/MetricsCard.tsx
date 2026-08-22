@@ -2,7 +2,7 @@
 
 export default function MetricsCard() {
     return (
-      <div className="bg-zinc-900 rounded-xl p-5 space-y-4">
+      <div className="samaritan-card p-5 space-y-4">
   
         <h2 className="text-lg font-semibold">Productivity</h2>
   

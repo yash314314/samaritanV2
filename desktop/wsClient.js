@@ -1,5 +1,6 @@
 const WebSocket = require("ws");
 const Store = require("electron-store");
+const crypto = require("crypto");
 
 const store = new Store();
 const WS_URL = "ws://localhost:4000/ws";
@@ -16,6 +17,8 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let messageQueue = [];
 let isConnected = false;
+let currentActivitySequence = 0;
+const sourceSessionId = crypto.randomUUID();
 
 const listeners = new Map();
 
@@ -172,6 +175,34 @@ function streamActivity(activity) {
   return true;
 }
 
+/** Stream the current foreground context without persisting it as an activity. */
+function streamCurrentActivity(context) {
+  if (ws?.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  ws.send(JSON.stringify({
+    type: "activity:current",
+    payload: {
+      userId: USER_ID,
+      sourceDeviceId: DEVICE_ID,
+      sourceSessionId,
+      sourceSequence: ++currentActivitySequence,
+      ...context,
+      observedAt: context.observedAt || new Date().toISOString()
+    }
+  }));
+
+  return true;
+}
+
+function reportDistractionBlock(event) {
+  send("distraction-block:event", {
+    id: crypto.randomUUID(),
+    ...event,
+  });
+}
+
 /** Subscribe to deep work state changes */
 function subscribeToDeepWork(deepWorkId) {
   send("session:subscribe", { deepWorkId });
@@ -193,6 +224,8 @@ module.exports = {
   on,
   off,
   streamActivity,
+  streamCurrentActivity,
+  reportDistractionBlock,
   subscribeToDeepWork,
   unsubscribeFromDeepWork,
   get isConnected() { return isConnected; },
