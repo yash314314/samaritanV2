@@ -78,6 +78,18 @@ From the repository root, the PowerShell launcher starts PostgreSQL when needed,
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-samaritan.ps1
 ```
 
+For **Linux OS**:
+
+```bash
+./start-samaritan.sh
+```
+
+To stop all background services on Linux:
+
+```bash
+./stop-samaritan.sh
+```
+
 Use `-InstallDependencies` on the first run if any `node_modules` directory is missing. Add `-OpenDashboard` to open the browser automatically, `-SkipDatabase` when PostgreSQL is managed separately, `-SkipSetup` to bypass migration and bootstrap checks, or `-SkipTracker` when only the web stack is needed.
 
 ### 2. Start PostgreSQL
