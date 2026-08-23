@@ -8,9 +8,23 @@ export const api = axios.create({
 });
 
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
-export const getUserId = () => USER_ID;
 
-// â”€â”€â”€ CLIENT-SIDE RESPONSE CACHE â”€â”€â”€
+export const getUserId = () => {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("samaritan_token");
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        return payload.userId || USER_ID;
+      } catch (e) {
+        // Fallback
+      }
+    }
+  }
+  return USER_ID;
+};
+
+// ─── CLIENT-SIDE RESPONSE CACHE ───
 // The dashboard loads a lot of aggregate analytics that changes infrequently.
 // Caching them in-memory (across routes within a session) makes revisiting a
 // page near-instant instead of re-hitting the API with `cache: "no-store"`.
@@ -28,7 +42,7 @@ function isCacheableGet(endpoint: string): boolean {
   return !/(\/active|\/status|\/next-suggestion|\/distraction-blocks)/.test(endpoint);
 }
 
-// â”€â”€â”€ UNIFIED REQUEST HELPER â”€â”€â”€
+// ─── UNIFIED REQUEST HELPER ───
 async function request(endpoint: string, init: RequestInit = {}) {
   const method = (init.method || "GET").toUpperCase();
 
@@ -42,11 +56,18 @@ async function request(endpoint: string, init: RequestInit = {}) {
     }
   }
 
+  const token = typeof window !== "undefined" ? localStorage.getItem("samaritan_token") : null;
+  const authHeaders: Record<string, string> = {};
+  if (token) {
+    authHeaders["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
     cache: "no-store",
     ...init,
     headers: {
       ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...authHeaders,
       ...(init.headers || {})
     }
   });

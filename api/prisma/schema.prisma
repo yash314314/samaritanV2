@@ -8,11 +8,65 @@ datasource db {
 }
 
 model User {
+  id           String   @id @default(uuid())
+  email        String?  @unique
+  passwordHash String?
+  name         String
+  role         String   @default("user") // admin | user
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions                 Session[]
+  deepWorkSessions         DeepWorkSession[]
+  projects                 Project[]
+  calendarEvents           CalendarEvent[]
+  goals                    Goal[]
+  ratings                  Rating[]
+  reports                  Report[]
+  refreshTokens            RefreshToken[]
+  calendarReminders        CalendarReminder[]
+  calendarConnections      CalendarConnection[]
+  calendarSources          CalendarSource[]
+  calendarTrackingSettings CalendarTrackingSettings?
+  smartBreakSettings       SmartBreakSettings?
+  smartBreaks              SmartBreak[]
+  distractionBlocks        DistractionBlock[]
+  distractionBlockEvents   DistractionBlockEvent[]
+  webhookEndpoints         WebhookEndpoint[]
+  calendarWorkHours        CalendarWorkHour[]
+  calendarSessions         CalendarSession[]
+  projectTime              ProjectTime[]
+}
+
+model RefreshToken {
   id        String   @id @default(uuid())
-  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
   createdAt DateTime @default(now())
 
-  sessions Session[]
+  @@index([userId])
+  @@index([token])
+}
+
+model Report {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  period          String   // daily | weekly | monthly
+  startDate       DateTime
+  endDate         DateTime
+  summaryJson     Json
+  productivityPct Float    @default(0)
+  focusHours      Float    @default(0)
+  burnoutIndex    Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([period])
 }
 
 model Session {
@@ -95,6 +149,7 @@ model AppPattern {
 model DeepWorkSession {
   id             String    @id @default(uuid())
   userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   projectId      String?
   project        Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   goal           String?
@@ -104,19 +159,19 @@ model DeepWorkSession {
   status         String // active | completed | abandoned
   enforcement    String // observe | warn | require_reason | block
 
-  timerMode             String   @default("countdown") // countdown | pomodoro
-  focusMinutes          Int      @default(25)
-  shortBreakMinutes     Int      @default(5)
-  longBreakMinutes      Int      @default(15)
-  totalRounds           Int      @default(1)
-  currentRound          Int      @default(1)
-  currentPhase          String   @default("focus") // focus | short_break | long_break
-  phaseStartedAt        DateTime @default(now())
-  phaseEndsAt           DateTime?
-  pausedAt              DateTime?
+  timerMode              String    @default("countdown") // countdown | pomodoro
+  focusMinutes           Int       @default(25)
+  shortBreakMinutes      Int       @default(5)
+  longBreakMinutes       Int       @default(15)
+  totalRounds            Int       @default(1)
+  currentRound           Int       @default(1)
+  currentPhase           String    @default("focus") // focus | short_break | long_break
+  phaseStartedAt         DateTime  @default(now())
+  phaseEndsAt            DateTime?
+  pausedAt               DateTime?
   pausedRemainingSeconds Int?
-  ambientSound          String   @default("none")
-  ambientVolume         Float    @default(0.35)
+  ambientSound           String    @default("none")
+  ambientVolume          Float     @default(0.35)
 
   allowedApps    String[]
   allowedDomains String[]
@@ -209,11 +264,10 @@ model DeepWorkMinuteLog {
   @@index([timestamp])
 }
 
-// ── Rize-like intent / project / calendar layer ──
-
 model Project {
   id             String   @id @default(uuid())
   userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name           String
   description    String?
   icon           String?
@@ -249,6 +303,7 @@ model ProjectRule {
 model CalendarEvent {
   id                      String            @id @default(uuid())
   userId                  String
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   title                   String
   description             String?
   location                String?
@@ -302,6 +357,7 @@ model CalendarEvent {
 model CalendarReminder {
   id              String        @id @default(uuid())
   userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   calendarEventId String        @unique
   calendarEvent   CalendarEvent @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
   remindAt        DateTime
@@ -319,6 +375,7 @@ model CalendarReminder {
 model CalendarConnection {
   id                    String           @id @default(uuid())
   userId                String
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider              String
   accountLabel          String?
   status                String           @default("connected")
@@ -339,6 +396,7 @@ model CalendarConnection {
 model CalendarSource {
   id                 String             @id @default(uuid())
   userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   connectionId       String
   connection         CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   providerCalendarId String
@@ -359,6 +417,7 @@ model CalendarSource {
 
 model CalendarTrackingSettings {
   userId                       String   @id
+  user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   meetingKeyword               String   @default("#rize-meeting")
   focusKeyword                 String   @default("#rize-focus")
   breakKeyword                 String   @default("#rize-break")
@@ -373,6 +432,7 @@ model CalendarTrackingSettings {
 
 model SmartBreakSettings {
   userId               String   @id
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   enabled              Boolean  @default(true)
   workThresholdMinutes Int      @default(90)
   breakDurationMinutes Int      @default(10)
@@ -386,6 +446,7 @@ model SmartBreakSettings {
 model SmartBreak {
   id                 String    @id @default(uuid())
   userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   status             String    @default("suggested")
   openKey            String?   @unique
   suggestedAt        DateTime  @default(now())
@@ -408,6 +469,7 @@ model SmartBreak {
 model DistractionBlock {
   id               String   @id @default(uuid())
   userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   targetType       String
   target           String
   normalizedTarget String
@@ -424,6 +486,7 @@ model DistractionBlock {
 model DistractionBlockEvent {
   id          String   @id @default(uuid())
   userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ruleId      String?
   deepWorkId  String?
   targetType  String
@@ -447,6 +510,7 @@ model DistractionBlockEvent {
 model WebhookEndpoint {
   id             String            @id @default(uuid())
   userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name           String
   targetUrl      String
   events         String[]
@@ -488,6 +552,7 @@ model WebhookDelivery {
 model CalendarWorkHour {
   id          String   @id @default(uuid())
   userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   dayOfWeek   Int
   enabled     Boolean  @default(true)
   startMinute Int      @default(540)
@@ -502,6 +567,7 @@ model CalendarWorkHour {
 model CalendarSession {
   id               String            @id @default(uuid())
   userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   calendarEventId  String?
   calendarEvent    CalendarEvent?    @relation(fields: [calendarEventId], references: [id], onDelete: SetNull)
   type             String
@@ -550,6 +616,7 @@ model MeetingEvidence {
 model ProjectTime {
   id        String  @id @default(uuid())
   userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   projectId String
   project   Project @relation(fields: [projectId], references: [id])
   date      String
@@ -562,6 +629,7 @@ model ProjectTime {
 model Goal {
   id          String         @id @default(uuid())
   userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   description String?
   type        String         @default("focus_minutes")
@@ -605,6 +673,7 @@ model GoalProgress {
 model Rating {
   id         String   @id @default(uuid())
   userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   timestamp  DateTime @default(now())
   rating     Int
   deepWorkId String?

@@ -3,8 +3,9 @@ const Store = require("electron-store");
 const crypto = require("crypto");
 
 const store = new Store();
-const WS_URL = "ws://localhost:4000/ws";
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
+const WS_URL = process.env.WS_URL || "ws://localhost:4000/ws";
+const USER_ID = store.get("userId") || process.env.USER_ID || "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
+const AUTH_TOKEN = store.get("authToken") || process.env.AUTH_TOKEN || "";
 const DEVICE_ID = store.get("deviceId") || require("uuid").v4();
 store.set("deviceId", DEVICE_ID);
 
@@ -29,7 +30,7 @@ const listeners = new Map();
 function connect() {
   if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
-  const url = `${WS_URL}?userId=${USER_ID}&deviceId=${DEVICE_ID}&clientType=desktop`;
+  const url = `${WS_URL}?userId=${USER_ID}&deviceId=${DEVICE_ID}&clientType=desktop${AUTH_TOKEN ? `&token=${AUTH_TOKEN}` : ""}`;
   ws = new WebSocket(url);
 
   ws.on("open", () => {

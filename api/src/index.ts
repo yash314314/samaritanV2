@@ -1,5 +1,7 @@
 import express from 'express';
 import { createServer } from "http";
+import authRoutes from './routes/auth';
+import reportsRoutes from './routes/reports';
 import activityRoutes from './routes/activity';
 import analyticsRoutes from './routes/analytics';
 import focusRoutes from './routes/focus';
@@ -18,6 +20,7 @@ import { initWebSocket } from "./websocket/manager";
 import { startCalendarTrackingLifecycle } from "./services/calendarTrackingService";
 import { startCalendarReminderScheduler } from "./services/calendarReminderService";
 import { startSmartBreakLifecycle } from "./services/smartBreakService";
+import { startReportScheduler } from "./services/reportScheduler";
 import "./websocket/handlers"; // Register WS message handlers
 
 const app = express();
@@ -26,10 +29,15 @@ const server = createServer(app);
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3000"
+    origin: process.env.CORS_ORIGIN || "*",
   })
 );
 
+// Auth & Reports Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/reports', reportsRoutes);
+
+// Core Modules Routes
 app.use('/activity', activityRoutes);
 app.use('/analytics', analyticsRoutes);
 app.use('/focus', focusRoutes);
@@ -42,7 +50,7 @@ app.use('/api/breaks', breaksRoutes);
 app.use('/api/distraction-blocks', distractionBlocksRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: "OK", ws: true });
+  res.json({ status: "OK", ws: true, timestamp: new Date().toISOString() });
 });
 
 // Global error handling middleware
@@ -57,12 +65,14 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 // Attach WebSocket server to same HTTP server
 initWebSocket(server);
 
-server.listen(4000, () => {
-  console.log("API + WS running on http://localhost:4000");
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, () => {
+  console.log(`Samaritan API + WS running on port ${PORT}`);
   startSessionExpiryChecker();
   startMinuteLogger();
   startProjectTimeAggregation();
   startCalendarTrackingLifecycle();
   startCalendarReminderScheduler();
   startSmartBreakLifecycle();
+  startReportScheduler();
 });

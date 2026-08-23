@@ -10,6 +10,7 @@ import {
   Target,
   Calendar as CalendarIcon,
   Goal,
+  FileText,
   Settings
 } from "lucide-react";
 
@@ -20,17 +21,15 @@ const navItems = [
   { name: "Focus Protocol", path: "/focus", icon: Timer },
   { name: "Projects", path: "/projects", icon: Target },
   { name: "Calendar", path: "/calendar", icon: CalendarIcon },
-  { name: "Goals", path: "/goals", icon: Goal }
+  { name: "Goals", path: "/goals", icon: Goal },
+  { name: "Reports", path: "/reports", icon: FileText }
 ];
 
 export default function Sidebar() {
-
   const pathname = usePathname();
 
   return (
-
     <aside className="sticky top-0 z-40 flex h-screen w-[72px] shrink-0 flex-col border-r border-white/10 bg-[#0B0B0D]">
-
       {/* HEADER */}
       <div className="flex h-20 items-center justify-center border-b border-white/10">
         <span
@@ -43,14 +42,11 @@ export default function Sidebar() {
 
       {/* NAVIGATION */}
       <nav className="flex-1 space-y-2 px-3 py-5">
-
         {navItems.map((item) => {
-
           const Icon = item.icon;
           const isActive = pathname === item.path;
 
           return (
-
             <Link
               key={item.path}
               href={item.path}
@@ -70,8 +66,6 @@ export default function Sidebar() {
                 }
               `}
             >
-
-              {/* ICON ALWAYS VISIBLE */}
               <Icon
                 size={20}
                 className={`shrink-0 ${
@@ -79,7 +73,6 @@ export default function Sidebar() {
                 }`}
               />
 
-              {/* FLOATING LABEL (only on hover - never reflows layout) */}
               <span
                 className="
                   pointer-events-none
@@ -104,22 +97,15 @@ export default function Sidebar() {
               >
                 {item.name}
               </span>
-
             </Link>
-
           );
-
         })}
-
       </nav>
 
       {/* FOOTER */}
       <div className="border-t border-white/10 p-3 text-center text-zinc-500">
         <Settings className="mx-auto h-4 w-4" />
       </div>
-
     </aside>
-
   );
-
 }

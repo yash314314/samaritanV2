@@ -1,0 +1,60 @@
+name: SamaritanV2 CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  audit-and-build:
+    name: Build & Verify Samaritan Stack
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: acpe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install API Dependencies & Generate Prisma Client
+        run: |
+          cd api
+          npm ci
+          npx prisma generate
+          npx prisma db push --force-reset
+          npm run bootstrap:user
+
+      - name: Type Check & Verify Express API
+        run: |
+          cd api
+          npx tsc --noEmit
+
+      - name: Install Dashboard Dependencies & Build Next.js
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+
+      - name: Build Docker Container Stack
+        run: |
+          docker compose -f docker-compose.prod.yml build
