@@ -41,7 +41,7 @@ export default function Sidebar() {
       </div>
 
       {/* NAVIGATION */}
-      <nav className="flex-1 space-y-2 px-3 py-5">
+      <nav data-tour="sidebar-nav" className="flex-1 space-y-2 px-3 py-5">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.path;

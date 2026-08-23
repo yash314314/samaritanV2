@@ -7,6 +7,7 @@ import { DayPicker } from "react-day-picker";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar, User, LogOut, LogIn } from "lucide-react";
 import Link from "next/link";
+import TourButton from "./TourButton";
 
 export default function TopBar() {
   const {
@@ -52,7 +53,7 @@ export default function TopBar() {
       shadow-[0_16px_42px_rgba(0,0,0,0.28)]
       shrink-0
     ">
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
+      <div data-tour="date-controls" className="flex min-w-0 flex-wrap items-center gap-3">
         <button
           onClick={goToPrevious}
           className={iconButtonClass}
@@ -82,7 +83,9 @@ export default function TopBar() {
         </button>
       </div>
 
-      <div className="flex items-center space-x-3">
+      <div data-tour="user-controls" className="flex items-center space-x-3">
+        <TourButton />
+
         {user ? (
           <div className="flex items-center space-x-3">
             <div className="hidden sm:flex flex-col text-right">
