@@ -447,7 +447,12 @@ export const goalsApi = {
 
 // â”€â”€â”€ RATINGS API â”€â”€â”€
 export const ratingsApi = {
-  create: (data: { userId: string; rating: number; deepWorkId?: string }) =>
+  createRating: (data: { rating: number; deepWorkId?: string; note?: string }) =>
+    request("/api/ratings", {
+      method: "POST",
+      body: JSON.stringify({ userId: USER_ID, ...data }),
+    }),
+  create: (data: { userId: string; rating: number; deepWorkId?: string; note?: string }) =>
     request("/api/ratings", {
       method: "POST",
       body: JSON.stringify(data),
