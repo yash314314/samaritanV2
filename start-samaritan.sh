@@ -10,6 +10,18 @@ RUNTIME_DIR="$REPO_ROOT/.runtime"
 LOG_DIR="$RUNTIME_DIR/logs"
 PID_FILE="$RUNTIME_DIR/services.pid"
 
+RUN_SEED=false
+
+# Parse command line flags
+for arg in "$@"; do
+    case $arg in
+        --seed|-s|--demo)
+            RUN_SEED=true
+            shift
+            ;;
+    esac
+done
+
 mkdir -p "$LOG_DIR"
 
 log_info() {
@@ -49,7 +61,7 @@ log_info "Checking Linux prerequisites..."
 command -v node >/dev/null 2>&1 || { log_error "Node.js is not installed"; exit 1; }
 command -v npm >/dev/null 2>&1 || { log_error "npm is not installed"; exit 1; }
 
-# 1. Start PostgreSQL
+# 1. Start PostgreSQL Container
 if check_port 5432; then
     log_info "PostgreSQL is already running on port 5432"
 else
@@ -64,12 +76,19 @@ else
 fi
 
 # 2. Database Migrations & User Bootstrap
-log_info "Checking database migrations & local user bootstrap..."
+log_info "Deploying database migrations & bootstrapping local user..."
 (
     cd "$API_DIR"
     npx prisma migrate deploy >/dev/null 2>&1 || true
     npx prisma generate >/dev/null 2>&1 || true
     npm run bootstrap:user >/dev/null 2>&1 || true
+    
+    if [ "$RUN_SEED" = true ]; then
+        log_info "Seeding default categorization patterns & demo dataset..."
+        npm run seed:patterns >/dev/null 2>&1 || true
+        npm run seed:demo >/dev/null 2>&1 || true
+        log_success "Database seeded successfully!"
+    fi
 )
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
