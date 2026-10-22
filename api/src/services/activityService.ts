@@ -3,7 +3,9 @@ import { prisma } from "../prisma";
 import { getOrCreateActiveSession } from "./sessionService";
 import { classifyActivity } from "./contextClassifier";
 import { tagActivityToProject } from "./projectTagger";
-import { getISTDayRange } from "../utils/time";
+import type { ISTDateRange } from "../utils/time";
+import { loadResolvedActivities } from "./rangeActivityQuery";
+import { detectDeepWorkBlocks } from "./rangeMetrics";
 import {
   clamp,
   clamp01,
@@ -276,27 +278,17 @@ function compressTimeline(activities: any[]) {
 /*                                TIMELINE API                                */
 /* -------------------------------------------------------------------------- */
 
-export async function getTimeline(userId: string, date: string) {
-
-  const { start, end } =
-    getISTDayRange(new Date(date + "T00:00:00"));
+export async function getTimeline(userId: string, range: ISTDateRange) {
 
   const activities = await prisma.activity.findMany({
     where: {
       session: { userId },
       startTime: {
-        gte: start,
-        lt: end
+        gte: range.start,
+        lt: range.end
       }
     },
     orderBy: { startTime: "asc" }
-  });
-  console.log("[Timeline Fetch]", {
-    userId,
-    date,
-    start,
-    end,
-    count: activities.length
   });
   return compressTimeline(activities);
 
@@ -306,102 +298,14 @@ export async function getTimeline(userId: string, date: string) {
 /*                              DEEP WORK BLOCKS                              */
 /* -------------------------------------------------------------------------- */
 
-export async function getFocusBlocks(userId: string, date: string) {
+const MIN_FOCUS_BLOCK_MS = 10 * 60 * 1000;
 
-  const { start, end } =
-    getISTDayRange(new Date(date + "T00:00:00"));
-
-  const activities = await prisma.activity.findMany({
-    where: {
-      session: { userId },
-      startTime: {
-        gte: start,
-        lt: end
-      }
-    },
-    orderBy: { startTime: "asc" }
-  });
-
-  return detectFocusBlocks(activities);
-
-}
-
-function detectFocusBlocks(activities: any[]) {
-
-  const MIN_BLOCK_DURATION = 10 * 60 * 1000;
-
-  const blocks: any[] = [];
-
-  let currentBlock: any = null;
-
-  for (const activity of activities) {
-
-    const isDeepWork =
-      activity.category === "deep_work";
-
-    if (!isDeepWork) {
-
-      if (currentBlock) {
-
-        finalizeBlock(
-          currentBlock,
-          blocks,
-          MIN_BLOCK_DURATION
-        );
-
-        currentBlock = null;
-
-      }
-
-      continue;
-
-    }
-
-    if (!currentBlock) {
-
-      currentBlock = {
-        start: activity.startTime,
-        end: activity.endTime,
-        duration: activity.duration
-      };
-
-    } else {
-
-      currentBlock.end = activity.endTime;
-      currentBlock.duration += activity.duration;
-
-    }
-
-  }
-
-  if (currentBlock) {
-
-    finalizeBlock(
-      currentBlock,
-      blocks,
-      MIN_BLOCK_DURATION
-    );
-
-  }
-
-  return blocks;
-
-}
-
-function finalizeBlock(
-  block: any,
-  blocks: any[],
-  minDuration: number
-) {
-
-  if (block.duration >= minDuration) {
-
-    blocks.push({
-      start: block.start,
-      end: block.end,
-      duration: block.duration
-    });
-
-  }
-
+/**
+ * Contiguous deep_work blocks of at least ten minutes inside the IST day range.
+ * Blocks break on any other activity (including idle) or a gap over two
+ * minutes; `duration` is owned deep-work time in ms, clipped to the range.
+ */
+export async function getFocusBlocks(userId: string, range: ISTDateRange) {
+  const items = await loadResolvedActivities(userId, range.start, range.end);
+  return detectDeepWorkBlocks(items).filter((block) => block.duration >= MIN_FOCUS_BLOCK_MS);
 }

@@ -284,10 +284,25 @@ async function handleEvent(event) {
 
 /* ---------------- SHUTDOWN HANDLER ---------------- */
 
-app.on("before-quit", async () => {
+let shutdownFlushed = false;
+
+app.on("before-quit", (event) => {
+  if (shutdownFlushed) return;
+  // Electron does not wait for async listeners, so the open session was lost
+  // on every quit. Hold the quit until it is sent, capped so an unreachable
+  // backend cannot block exit.
+  event.preventDefault();
+  shutdownFlushed = true;
   console.log("[Samaritan] Shutdown sequence initiated.");
-  await closeSession("shutdown");
-  console.log("[Samaritan] All observations archived.");
+  Promise.race([
+    closeSession("shutdown"),
+    new Promise((resolve) => setTimeout(resolve, 3000)),
+  ])
+    .catch((err) => console.error("[Samaritan] Shutdown flush failed:", err.message))
+    .finally(() => {
+      console.log("[Samaritan] All observations archived.");
+      app.quit();
+    });
 });
 
 /* ---------------- CRASH PROTECTION ---------------- */

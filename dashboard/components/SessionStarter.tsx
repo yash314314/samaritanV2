@@ -39,7 +39,7 @@ export function SessionStarter() {
   return (
     <div className="samaritan-card p-8">
       <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-        <Target className="w-6 h-6 text-blue-500" />
+        <Target className="w-6 h-6 text-red-500" />
         Start Deep Work Session
       </h2>
 
@@ -51,7 +51,7 @@ export function SessionStarter() {
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             placeholder="e.g., Write API documentation"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
           />
         </div>
 
@@ -68,7 +68,7 @@ export function SessionStarter() {
               step="5"
               value={minutes}
               onChange={(e) => setMinutes(Number(e.target.value))}
-              className="flex-1 accent-blue-500"
+              className="flex-1 accent-red-500"
             />
             <span className="text-white font-mono text-lg w-16 text-right">{minutes}</span>
           </div>
@@ -83,7 +83,7 @@ export function SessionStarter() {
                 onClick={() => setEnforcement(opt.value)}
                 className={`flex items-center gap-3 p-4 rounded-lg border transition-all ${
                   enforcement === opt.value
-                    ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                    ? "border-red-500 bg-red-500/10 text-red-400"
                     : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
                 }`}
               >
@@ -100,7 +100,7 @@ export function SessionStarter() {
         <button
           onClick={handleStart}
           disabled={!goal.trim() || loading}
-          className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           {loading ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

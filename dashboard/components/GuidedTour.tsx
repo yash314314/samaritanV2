@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useLayoutEffect } from "react";
 import { useTour } from "../context/TourContext";
-import { Sparkles, ArrowRight, ArrowLeft, X, CheckCircle2 } from "lucide-react";
+import { X } from "lucide-react";
+import { DecodeText } from "./sam/Decode";
 
 interface Rect {
   top: number;
@@ -17,37 +18,35 @@ export default function GuidedTour() {
 
   const step = steps[currentStep];
 
-  const updateRect = () => {
+  // Scroll the target into view once per step, then follow it: the layer is
+  // position: fixed, so it tracks viewport coordinates through any scroll.
+  useLayoutEffect(() => {
     if (!isActive || !step) return;
     const el = document.querySelector(step.target);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-      const rect = el.getBoundingClientRect();
-      setTargetRect({
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX,
-        width: rect.width,
-        height: rect.height,
-      });
-    } else {
-      setTargetRect({
-        top: window.scrollY + window.innerHeight / 2 - 100,
-        left: window.scrollX + window.innerWidth / 2 - 180,
-        width: 360,
-        height: 180,
-      });
-    }
-  };
+    el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
 
-  useLayoutEffect(() => {
-    updateRect();
-    window.addEventListener("resize", updateRect);
-    window.addEventListener("scroll", updateRect);
-    return () => {
-      window.removeEventListener("resize", updateRect);
-      window.removeEventListener("scroll", updateRect);
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = el?.getBoundingClientRect();
+        setTargetRect(
+          rect
+            ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+            : { top: window.innerHeight / 2 - 100, left: window.innerWidth / 2 - 180, width: 360, height: 180 }
+        );
+      });
     };
-  }, [isActive, currentStep]);
+
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [isActive, step]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -62,90 +61,81 @@ export default function GuidedTour() {
   const isLast = currentStep === steps.length - 1;
   const padding = 6;
 
-  const popoverTop = targetRect.top + targetRect.height + 16;
-  const popoverLeft = Math.max(16, Math.min(window.innerWidth - 360, targetRect.left));
+  // Below the target when it fits, else above, else beside it (tall targets
+  // such as the sidebar leave no room on either side vertically).
+  const popoverWidth = Math.min(340, window.innerWidth - 32);
+  const popoverHeight = 230;
+  const gap = padding + 10;
+  const below = targetRect.top + targetRect.height + gap;
+  const above = targetRect.top - gap - popoverHeight;
+  const clampLeft = (left: number) => Math.max(16, Math.min(window.innerWidth - popoverWidth - 16, left));
+  const clampTop = (top: number) => Math.max(16, Math.min(window.innerHeight - popoverHeight - 16, top));
+  const popoverPosition =
+    below + popoverHeight <= window.innerHeight
+      ? { top: below, left: clampLeft(targetRect.left) }
+      : above >= 16
+        ? { top: above, left: clampLeft(targetRect.left) }
+        : { top: clampTop(targetRect.top + 24), left: clampLeft(targetRect.left + targetRect.width + gap) };
 
   return (
-    <div className="fixed inset-0 z-[100] pointer-events-auto select-none">
-      {/* Overlay: Blurs & Darkens everything else */}
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity duration-300" />
-
-      {/* Projected Spotlight Cutout with Thin Purple Border Rectangle */}
+    <div className="sam-ui fixed inset-0 z-[100] select-none" role="dialog" aria-modal="true" aria-labelledby="tour-step-title">
+      {/* The spotlight's outer shadow dims everything except the target. */}
       <div
-        className="absolute transition-all duration-300 ease-out border-2 border-purple-500 rounded-xl pointer-events-none shadow-[0_0_30px_rgba(168,85,247,0.8)] bg-transparent"
+        className="pointer-events-none absolute border border-accent transition-all duration-300 ease-out motion-reduce:transition-none"
         style={{
           top: targetRect.top - padding,
           left: targetRect.left - padding,
           width: targetRect.width + padding * 2,
           height: targetRect.height + padding * 2,
-          boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.8), 0 0 25px rgba(168, 85, 247, 0.7)",
+          boxShadow: "0 0 0 9999px color-mix(in srgb, var(--sam-void) 82%, transparent)",
         }}
       >
-        <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-purple-400 rounded-tl animate-pulse" />
-        <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-purple-400 rounded-tr animate-pulse" />
-        <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-purple-400 rounded-bl animate-pulse" />
-        <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-purple-400 rounded-br animate-pulse" />
+        <span className="absolute -left-px -top-px h-2.5 w-2.5 border-l-2 border-t-2 border-accent" />
+        <span className="absolute -right-px -top-px h-2.5 w-2.5 border-r-2 border-t-2 border-accent" />
+        <span className="absolute -bottom-px -left-px h-2.5 w-2.5 border-b-2 border-l-2 border-accent" />
+        <span className="absolute -bottom-px -right-px h-2.5 w-2.5 border-b-2 border-r-2 border-accent" />
       </div>
 
-      {/* Floating Description Popover Card */}
       <div
-        className="absolute w-[320px] sm:w-[350px] bg-[#18181B] border border-purple-500/50 rounded-2xl p-5 shadow-2xl shadow-purple-950/60 space-y-4 transition-all duration-300 ease-out z-[110]"
-        style={{
-          top: Math.min(window.scrollY + window.innerHeight - 240, popoverTop),
-          left: popoverLeft,
-        }}
+        className="sam-lock absolute z-[110] border border-grid bg-void p-5 transition-all duration-300 ease-out motion-reduce:transition-none"
+        style={{ width: popoverWidth, ...popoverPosition }}
       >
-        {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="p-1.5 bg-purple-950 text-purple-400 rounded-lg border border-purple-800">
-              <Sparkles className="w-3.5 h-3.5" />
-            </span>
-            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider font-mono">
+          <div className="flex items-center gap-2">
+            <span className="sam-triangle h-2 w-2.5" aria-hidden />
+            <span className="sam-key">
               Step {currentStep + 1} of {steps.length}
             </span>
           </div>
           <button
+            type="button"
             onClick={endTour}
-            className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800 transition text-xs"
-            title="Skip Tour (Esc)"
+            className="text-key transition-colors hover:text-signal"
+            title="End tour (Esc)"
+            aria-label="End tour"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
 
-        {/* Title & Body */}
-        <div className="space-y-1">
-          <h3 className="font-bold text-white text-base tracking-tight">{step.title}</h3>
-          <p className="text-xs text-zinc-300 leading-relaxed">{step.description}</p>
-        </div>
+        <h3 id="tour-step-title" className="mt-4 font-display text-[15px] uppercase tracking-[0.06em] text-signal">
+          {/* Remounted per step so each title resolves as the spotlight lands. */}
+          <DecodeText key={currentStep} text={step.title} trigger="mount" underline={false} />
+        </h3>
+        <p className="mt-2 text-[13px] leading-relaxed text-trace">{step.description}</p>
 
-        {/* Action Controls */}
-        <div className="flex items-center justify-between pt-2 border-t border-white/10">
-          <button
-            onClick={endTour}
-            className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline font-semibold"
-          >
-            Skip Tour
+        <div className="mt-5 flex items-center justify-between border-t border-grid pt-4">
+          <button type="button" onClick={endTour} className="text-[12px] text-key transition-colors hover:text-signal">
+            Skip tour
           </button>
-
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             {currentStep > 0 && (
-              <button
-                onClick={prevStep}
-                className="px-3 py-1.5 rounded-xl bg-[#202024] hover:bg-[#27272A] text-zinc-300 text-xs font-semibold flex items-center space-x-1 border border-white/10 transition"
-              >
-                <ArrowLeft className="w-3 h-3" />
-                <span>Back</span>
+              <button type="button" onClick={prevStep} className="sam-button">
+                Back
               </button>
             )}
-
-            <button
-              onClick={nextStep}
-              className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-purple-600/30 transition"
-            >
-              <span>{isLast ? "Finish Tour" : "Next"}</span>
-              {isLast ? <CheckCircle2 className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+            <button type="button" onClick={nextStep} className="sam-button" data-variant="primary">
+              {isLast ? "Finish" : "Next"}
             </button>
           </div>
         </div>

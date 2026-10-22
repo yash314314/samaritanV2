@@ -9,7 +9,7 @@ import {
 import { emitCalendarSessionChanged } from "../websocket/broadcaster";
 import { refreshRecurringCalendarEvents } from "./calendarRecurrenceService";
 import { finalizeCalendarFocusSession, reconcileCalendarFocusSessions } from "./calendarFocusService";
-import { normalizeCalendarTimezone } from "./calendarTimeService";
+import { calendarSessionDurationInRange, normalizeCalendarTimezone } from "./calendarTimeService";
 
 const DEFAULT_SETTINGS: CalendarClassifierSettings & {
   offlineMeetingCreation: boolean;
@@ -438,11 +438,11 @@ export async function listCalendarSessions(userId: string, from?: Date, to?: Dat
             OR: [
               {
                 scheduledStart: { ...(to ? { lte: to } : {}) },
-                scheduledEnd: { ...(from ? { gte: from } : {}) },
+                scheduledEnd: { ...(from ? { gt: from } : {}) },
               },
               {
                 actualStart: { ...(to ? { lte: to } : {}) },
-                actualEnd: { ...(from ? { gte: from } : {}) },
+                actualEnd: { ...(from ? { gt: from } : {}) },
               },
               {
                 actualStart: to ? { lte: to } : { not: null },
@@ -686,14 +686,7 @@ export async function deleteManualCalendarSession(userId: string, sessionId: str
 export async function getCalendarSessionSummary(userId: string, from: Date, to: Date, now = new Date()) {
   const sessions = await listCalendarSessions(userId, from, to);
   const included = sessions.filter((session) => !["rejected", "missed"].includes(session.status));
-  const durationFor = (session: typeof included[number]) => {
-    if (session.status === "active" && session.actualStart) {
-      return Math.max(0, Math.min(now.getTime(), to.getTime()) - Math.max(session.actualStart.getTime(), from.getTime()));
-    }
-    return session.actualDurationMs || (session.actualStart && session.actualEnd
-      ? Math.max(0, session.actualEnd.getTime() - session.actualStart.getTime())
-      : 0);
-  };
+  const durationFor = (session: typeof included[number]) => calendarSessionDurationInRange(session, from, to, now);
   const byType = (type: string) => included.filter((session) => session.type === type);
   const meetings = byType("meeting");
   const meetingWindows = meetings

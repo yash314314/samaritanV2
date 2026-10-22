@@ -20,9 +20,10 @@ function formatDuration(ms: number) {
 function formatTime(date: string) {
   const d = new Date(date);
 
-  return d.toLocaleTimeString([], {
+  return d.toLocaleTimeString("en-GB", {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    hour12: false
   });
 }
 
@@ -76,8 +77,6 @@ function getBrowserFallbackIcon(appName?: string) {
 
   if (name.includes("brave")) return "/icons/apps/brave.png";
   if (name.includes("edge")) return "/icons/apps/edge.png";
-  if (name.includes("chrome")) return "/icons/apps/chrome.png";
-  if (name.includes("firefox")) return "/icons/apps/firefox.png";
 
   return null;
 }
@@ -96,7 +95,9 @@ function getLatestItem(activity: any) {
 }
 
 function AppIcon({ activity }: { activity: any }) {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  // Every source that failed to load. Remembering only the last one made two
+  // broken candidates alternate forever.
+  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
 
   const latestItem = getLatestItem(activity);
   const latestTitle = latestItem?.title ?? activity?.items?.[0]?.title;
@@ -121,133 +122,64 @@ function AppIcon({ activity }: { activity: any }) {
     isBrowserApp(activity?.appName) ? browserFallback : null
   ].filter(Boolean) as string[];
 
-  const src = candidates.find(candidate => candidate !== failedSrc);
+  const src = candidates.find(candidate => !failedSrcs.includes(candidate));
 
   if (src) {
     return (
       <img
         src={src}
         alt=""
-        className="h-4 w-4 rounded-sm object-contain"
-        onError={() => setFailedSrc(src)}
+        className="h-4 w-4 object-contain"
+        onError={() => setFailedSrcs(previous => [...previous, src])}
       />
     );
   }
 
-  return <FiMonitor size={16} />;
+  return <FiMonitor size={14} strokeWidth={1.5} />;
 }
 
-export default function RecentActivity({ data }: any) {
-  const [tooltip, setTooltip] = useState<any>(null);
-
+export default function RecentActivity({ data, limit = 8 }: any) {
   if (!Array.isArray(data) || data.length === 0) {
     return (
-      <div className="text-xs text-zinc-500">
-        No recent activity
-      </div>
+      <p className="text-[12px] text-key">
+        Nothing observed for this day yet. Activity appears here as you work.
+      </p>
     );
   }
 
-  const recent = [...data].slice(-6).reverse();
+  const recent = [...data].slice(-limit).reverse();
 
   return (
-    <div className="space-y-2">
+    <ol className="divide-y divide-grid">
       {recent.map((a: any, i: number) => {
         const latestItem = getLatestItem(a);
         const title =
           latestItem?.title ??
           a?.items?.[0]?.title ??
-          "Unknown Window";
-
-        const duration = a?.duration ?? 0;
+          "Untitled window";
 
         return (
-          <div
-            key={i}
-            className="flex justify-between items-center text-xs border-b border-zinc-800 pb-2 hover:bg-zinc-800/40 px-2 py-2 rounded transition cursor-default"
-            onMouseEnter={(e) => {
-              setTooltip({
-                x: e.clientX,
-                y: e.clientY,
-                activity: a
-              });
-            }}
-            onMouseLeave={() => setTooltip(null)}
+          <li
+            key={`${a?.start ?? i}-${a?.appName ?? ""}`}
+            className="grid grid-cols-[3.25rem_1rem_minmax(0,1fr)_auto] items-center gap-3 py-2.5"
+            title={`${a?.appName ?? "Unknown"}: ${title}`}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="text-purple-400 shrink-0">
-                <AppIcon activity={a} />
-              </div>
-
-              <div className="flex flex-col min-w-0">
-                <span className="text-zinc-200 font-medium truncate max-w-[160px]">
-                  {a?.appName ?? "Unknown"}
-                </span>
-
-                <span className="text-zinc-500 truncate max-w-[160px]">
-                  {title}
-                </span>
-              </div>
-            </div>
-
-            <span className="text-zinc-400 shrink-0 ml-3">
-              {formatDuration(duration)}
+            <span className="tabular-nums text-[11px] text-key">
+              {a?.start ? formatTime(a.start) : "--:--"}
             </span>
-          </div>
+            <span className="flex h-4 w-4 items-center justify-center text-key">
+              <AppIcon activity={a} />
+            </span>
+            <span className="min-w-0 truncate">
+              <span className="text-signal">[{a?.appName ?? "unknown"}]</span>
+              <span className="ml-2 text-key">{title}</span>
+            </span>
+            <span className="tabular-nums text-trace">
+              {formatDuration(a?.duration ?? 0)}
+            </span>
+          </li>
         );
       })}
-
-      {tooltip && (() => {
-        const latestItem = getLatestItem(tooltip.activity);
-        const title =
-          latestItem?.title ??
-          tooltip.activity.items?.[0]?.title ??
-          "Unknown Window";
-
-        return (
-          <div
-            className="fixed bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-4 text-xs w-64 z-[9999]"
-            style={{
-              top: tooltip.y + 12,
-              left: tooltip.x + 12
-            }}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="text-purple-400 shrink-0">
-                <AppIcon activity={tooltip.activity} />
-              </div>
-
-              <div className="font-semibold text-zinc-200 truncate">
-                {tooltip.activity.appName}
-              </div>
-            </div>
-
-            <div className="text-zinc-400 mb-2 break-words">
-              {title}
-            </div>
-
-            <div className="space-y-1 text-zinc-500">
-              <div>
-                Duration: {formatDuration(tooltip.activity.duration)}
-              </div>
-
-              <div>
-                Start: {formatTime(tooltip.activity.start)}
-              </div>
-
-              <div>
-                End: {formatTime(tooltip.activity.end)}
-              </div>
-
-              {tooltip.activity.category && (
-                <div>
-                  Category: {tooltip.activity.category}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
-    </div>
+    </ol>
   );
 }

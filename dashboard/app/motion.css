@@ -1,0 +1,413 @@
+/* =====================================================================
+   Samaritan motion
+   Calm, exact, machine-like. Text resolves behind a block cursor, corner
+   brackets lock onto a frame, a hairline sweeps while Samaritan calculates.
+   No bounce, blur or glow; stepped or sharp ease-out timing; nothing longer
+   than ~450 ms except the waiting loop. Only route entry (components/sam/
+   RouteStage.tsx) and direct responses to the user animate, and every rule
+   here is switched off under prefers-reduced-motion.
+   ===================================================================== */
+
+:root {
+  --sam-ease: cubic-bezier(0.2, 0, 0, 1);
+  --sam-bracket: 12px;
+}
+
+/* ---------------- Boot ----------------
+   The boot script (lib/motionBoot.ts) keeps the prerendered title and panels
+   hidden until hydration starts the entry sequence over them. */
+
+html[data-sam-boot] .sam-route :is(.samaritan-card, .sam-rule, h1) {
+  visibility: hidden;
+}
+
+/* ---------------- Decode (components/sam/Decode.tsx) ---------------- */
+
+.sam-decode[data-phase] > .sam-decode-final {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sam-decode:not([data-phase]) > .sam-decode-live {
+  display: none;
+}
+
+.sam-decode-live {
+  white-space: pre;
+}
+
+.sam-decode-noise {
+  color: var(--sam-key);
+}
+
+/* Characters still to come hold their place, so the line never reflows. */
+.sam-decode-off {
+  color: transparent;
+}
+
+/* The hairline under a resolving word extends with it, then fades. */
+.sam-decode[data-underline] :is(.sam-decode-on, .sam-decode-noise) {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--sam-signal);
+  text-underline-offset: 0.32em;
+}
+
+.sam-decode[data-phase="cursor"] .sam-decode-on {
+  text-decoration-color: transparent;
+  transition: text-decoration-color 220ms linear;
+}
+
+.sam-decode-cursor {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+.sam-decode-cursor::after {
+  content: "";
+  position: absolute;
+  left: 0.1em;
+  bottom: -0.12em;
+  width: 0.5em;
+  height: 0.92em;
+  background: var(--sam-accent);
+}
+
+.sam-decode[data-phase="cursor"] .sam-decode-cursor::after {
+  animation: sam-cursor-blink 220ms steps(1, end) 2 both;
+}
+
+.sam-decode[data-phase="cursor"][data-hold] .sam-decode-cursor::after {
+  animation: sam-cursor-blink 1040ms steps(1, end) infinite;
+}
+
+@keyframes sam-cursor-blink {
+  50% { opacity: 0; }
+}
+
+/* ---------------- Panels acquire (route entry) ----------------
+   RouteStage animates each panel with the Web Animations API, staggered in
+   page order: the brackets lock on in three steps, the hairline frame
+   appears as they land, then the contents resolve. These rules only provide
+   the layers it animates, and only while the route is entering. */
+
+/* Corner brackets: eight 1px strokes painted as backgrounds of one layer.
+   Height-capped panels scroll, and brackets travelling in from outside them
+   would flash a scrollbar, so those panels skip the brackets.
+   Permanently active on cards so brackets lock on and stick to the corners. */
+:is(.samaritan-card, .rize-card):not([class*="max-h-"])::after,
+.sam-dialog-aperture::after,
+.fixed.inset-0 > .samaritan-card:not([class*="max-h-"])::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left top / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left top / 1px var(--sam-bracket) no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right top / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right top / 1px var(--sam-bracket) no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left bottom / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left bottom / 1px var(--sam-bracket) no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right bottom / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right bottom / 1px var(--sam-bracket) no-repeat;
+  opacity: 1;
+}
+
+/* Same steps as RouteStage's BRACKET_FRAMES, for dialogs and popovers. */
+@keyframes sam-lock {
+  0% { inset: -7px; opacity: 0; animation-timing-function: steps(1, end); }
+  6% { inset: -7px; opacity: 1; animation-timing-function: steps(3, end); }
+  40% { inset: -1px; opacity: 1; }
+  100% { inset: -1px; opacity: 1; }
+}
+
+/* Ruled sections: the rule is drawn from a gradient whose end RouteStage
+   moves from 0% to 106%, leaving a bright leading edge. At rest (106%) it
+   matches the plain rule. */
+@property --sam-draw {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 106%;
+}
+
+.sam-route[data-sam-entering] .sam-rule {
+  border-image: linear-gradient(
+      to right,
+      var(--sam-grid) calc(var(--sam-draw) - 6%),
+      var(--sam-signal) var(--sam-draw),
+      transparent var(--sam-draw)
+    )
+    1;
+}
+
+/* ---------------- Bars, meters and rings fill on entry ----------------
+   Only elements mounted while the route is entering start empty; later
+   value changes use the ordinary width transition. */
+
+.sam-bar > span,
+.sam-fill {
+  transform-origin: left center;
+  transition:
+    width 600ms ease-out,
+    transform 420ms var(--sam-ease);
+}
+
+/* Vertical bars rise from their baseline. */
+.sam-rise {
+  transform-origin: center bottom;
+  transition:
+    height 600ms ease-out,
+    transform 420ms var(--sam-ease);
+}
+
+/* On entry, fills wait for their panel's contents to resolve. */
+.sam-route[data-sam-entering] :is(.sam-bar > span, .sam-fill, .sam-rise) {
+  transition-delay: 0ms, 300ms;
+}
+
+@starting-style {
+  .sam-route[data-sam-entering] :is(.sam-bar > span, .sam-fill) {
+    transform: scaleX(0);
+  }
+
+  .sam-route[data-sam-entering] .sam-rise {
+    transform: scaleY(0);
+  }
+
+  .sam-route[data-sam-entering] .sam-ring {
+    stroke-dashoffset: var(--sam-ring-length);
+  }
+}
+
+/* ---------------- Dialogs: Samaritan Aperture & Reticle Lock ----------------
+   1. Central hairline sweeps outward horizontally (0-70ms)
+   2. Box unfolds vertically via clip-path aperture expansion (70-240ms)
+   3. Corner reticle vertices snap into place in 3 stepped mechanical clicks
+   4. Single phosphor laser scanline sweeps top to bottom */
+
+.fixed.inset-0:is([class*="bg-black/"], [class*="bg-slate-950/"], [class*="bg-void/"]),
+.fixed.inset-0 > .absolute.inset-0[class*="bg-black/"] {
+  animation: sam-fade-in 160ms linear backwards;
+}
+
+.sam-dialog-aperture,
+.fixed.inset-0 > :is(.samaritan-card, [role="dialog"]),
+.fixed.inset-0 > .absolute.inset-0 ~ :is(div, section, form) {
+  animation: sam-aperture-unfold 240ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  transform-origin: center center;
+  position: relative;
+}
+
+.sam-dialog-aperture::after,
+.fixed.inset-0 > .samaritan-card:not([class*="max-h-"])::after {
+  animation: sam-reticle-lock 280ms steps(3, end) backwards;
+}
+
+@keyframes sam-aperture-unfold {
+  0% {
+    opacity: 0;
+    clip-path: inset(49.8% 45% 49.8% 45%);
+    transform: scale(0.98);
+  }
+  25% {
+    opacity: 1;
+    clip-path: inset(49.5% 0 49.5% 0); /* 1px central laser beam across full width */
+    transform: scale(1);
+  }
+  60% {
+    clip-path: inset(10% 0 10% 0);
+  }
+  100% {
+    opacity: 1;
+    clip-path: inset(0% 0% 0% 0%);
+    transform: scale(1);
+  }
+}
+
+@keyframes sam-reticle-lock {
+  0%   { inset: -14px; opacity: 0; }
+  10%  { inset: -14px; opacity: 1; }
+  45%  { inset: -6px;  opacity: 1; }
+  80%  { inset: -1px;  opacity: 1; }
+  100% { inset: -1px;  opacity: 1; }
+}
+
+/* Single phosphor / laser sweep beam */
+.sam-scanline-beam {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--sam-signal, #ffffff) 20%,
+    var(--sam-alert, #fb0915) 50%,
+    var(--sam-signal, #ffffff) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 10px rgba(251, 9, 21, 0.6);
+  pointer-events: none;
+  z-index: 30;
+  opacity: 0;
+  animation: sam-laser-sweep 360ms cubic-bezier(0.2, 0, 0, 1) 60ms forwards;
+}
+
+@keyframes sam-laser-sweep {
+  0% {
+    top: 0%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  85% {
+    opacity: 0.9;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+/* Popovers that point at something (the guided tour) lock on the same way. */
+.sam-lock {
+  animation: sam-dialog-in 180ms var(--sam-ease) backwards;
+}
+
+.sam-lock::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left top / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) left top / 1px var(--sam-bracket) no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right bottom / var(--sam-bracket) 1px no-repeat,
+    linear-gradient(var(--sam-signal), var(--sam-signal)) right bottom / 1px var(--sam-bracket) no-repeat;
+  opacity: 1;
+  animation: sam-lock 340ms linear backwards;
+}
+
+@keyframes sam-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes sam-dialog-in {
+  from { opacity: 0; transform: scale(1.02); }
+}
+
+/* ---------------- Calculating (components/sam/SamLoading.tsx) ---------------- */
+
+.sam-loading-line {
+  position: relative;
+  overflow: hidden;
+  background: var(--sam-grid);
+}
+
+.sam-loading-line::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  background: var(--sam-signal);
+  animation: sam-sweep 1100ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes sam-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(315%); }
+}
+
+/* ---------------- Feedback ---------------- */
+
+/* Sidebar: one triangle slides to the current route. */
+.sam-nav-marker[data-ready] {
+  transition: transform 240ms var(--sam-ease);
+}
+
+/* Tabs: RouteStage slides a hairline from the old tab to the new one; the
+   new tab's own underline waits until it lands. */
+.sam-tab-slider {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+}
+
+[data-sam-tab-arriving] {
+  border-bottom-color: transparent !important;
+  text-decoration-color: transparent !important;
+}
+
+/* Segments: the chosen option's fill wipes in from the left in three steps. */
+.sam-segment > button[data-sam-wipe] {
+  animation: sam-segment-wipe 120ms steps(3, end);
+}
+
+@keyframes sam-segment-wipe {
+  from {
+    background-color: transparent;
+    background-image: linear-gradient(var(--sam-signal), var(--sam-signal));
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
+    color: var(--sam-signal);
+  }
+  to {
+    background-color: transparent;
+    background-image: linear-gradient(var(--sam-signal), var(--sam-signal));
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    color: var(--sam-void);
+  }
+}
+
+.sam-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* ---------------- Reduced motion: final states, no movement ---------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .fixed.inset-0,
+  .fixed.inset-0 > *,
+  .fixed.inset-0 > .samaritan-card::after,
+  .sam-dialog-aperture,
+  .sam-dialog-aperture::after,
+  .sam-scanline-beam,
+  .sam-lock,
+  .sam-lock::after,
+  .sam-segment > button[data-sam-wipe],
+  .sam-decode-cursor::after,
+  .animate-spin,
+  .animate-pulse {
+    animation: none !important;
+    clip-path: none !important;
+  }
+
+  .sam-loading-line::after {
+    width: 100%;
+    animation: none;
+    transform: none;
+  }
+
+  .sam-bar > span,
+  .sam-fill,
+  .sam-rise,
+  .sam-nav-marker[data-ready] {
+    transition: none;
+  }
+
+  .sam-button:active:not(:disabled) {
+    transform: none;
+  }
+}

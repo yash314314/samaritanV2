@@ -38,7 +38,7 @@ function CustomTooltip({active,payload}:any){
 
   return(
 
-    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs shadow-xl">
+    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs">
 
       <div className="text-zinc-200 font-semibold mb-1">
         {data.app}
@@ -126,15 +126,15 @@ export default function AppUsageChart({data}:any){
           >
 
             <CartesianGrid
-              stroke="#27272a"
+              stroke="var(--sam-grid)"
               strokeDasharray="3 3"
               horizontal={false}
             />
 
             <XAxis
               type="number"
-              tick={{fill:"#a1a1aa",fontSize:12}}
-              axisLine={{stroke:"#3f3f46"}}
+              tick={{fill:"var(--sam-key)",fontSize:12}}
+              axisLine={{stroke:"var(--sam-grid)"}}
               tickLine={false}
               tickFormatter={(value)=>formatDuration(value)}
             />
@@ -142,7 +142,7 @@ export default function AppUsageChart({data}:any){
             <YAxis
               dataKey="app"
               type="category"
-              tick={{fill:"#a1a1aa",fontSize:12}}
+              tick={{fill:"var(--sam-key)",fontSize:12}}
               axisLine={false}
               tickLine={false}
               width={140}
@@ -150,7 +150,7 @@ export default function AppUsageChart({data}:any){
 
             <Tooltip
               content={<CustomTooltip />}
-              cursor={{ fill: "rgba(24,24,27,0.6)" }}
+              cursor={{ fill: "color-mix(in srgb, var(--sam-void) 60%, transparent)" }}
             />
 
             <Bar
@@ -163,10 +163,10 @@ export default function AppUsageChart({data}:any){
 
                 <Cell
                   key={index}
-                  fill="#8b5cf6"
+                  fill="var(--sam-series-1)"
                   className="transition-all duration-200 hover:brightness-125"
                   style={{
-                    filter:"drop-shadow(0 0 0px rgba(139,92,246,0))"
+                    filter:"drop-shadow(0 0 0px transparent)"
                   }}
                 />
 

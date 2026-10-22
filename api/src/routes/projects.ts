@@ -8,6 +8,7 @@ import {
   getProjectDashboard,
   getUnassignedProjectActivities,
 } from '../services/projectTrackingService';
+import { parseIntegerParam } from '../utils/requestParams';
 
 const router = Router();
 
@@ -59,7 +60,8 @@ router.get('/unassigned', async (req, res) => {
   const { userId } = req.query;
   if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
   try {
-    res.json(await getUnassignedProjectActivities(userId, Number(req.query.days) || 7));
+    const days = parseIntegerParam(req.query.days, { name: 'days', min: 1, max: 30, fallback: 7 });
+    res.json(await getUnassignedProjectActivities(userId, days));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fetch unassigned activity';
     res.status(400).json({ error: message });
@@ -81,7 +83,8 @@ router.get('/:id/dashboard', async (req, res) => {
   const { userId } = req.query;
   if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
   try {
-    res.json(await getProjectDashboard(userId, req.params.id, Number(req.query.days) || 14));
+    const days = parseIntegerParam(req.query.days, { name: 'days', min: 7, max: 60, fallback: 14 });
+    res.json(await getProjectDashboard(userId, req.params.id, days));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load project dashboard';
     res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });

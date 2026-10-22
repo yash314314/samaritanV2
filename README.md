@@ -44,19 +44,19 @@ Next.js dashboard (dashboard/)
 | PostgreSQL 15 | Persistent users, sessions, activities, patterns, deep work, projects, calendar, and goals | `localhost:5432` |
 | Express API | REST endpoints, analytics, classification, metrics, and background jobs | `http://localhost:4000` |
 | WebSocket server | Desktop ingestion and live dashboard events | `ws://localhost:4000/ws` |
-| Next.js dashboard | Main interface | `http://localhost:3000` |
-| Electron tracker | Windows foreground observer and deep-work enforcement | Local desktop process |
+| Next.js dashboard | Main interface | `http://localhost:4001` |
+| Electron tracker | Foreground observer (Windows, Linux X11, Hyprland) and deep-work enforcement | Local desktop process |
 
 ## Prerequisites
 
-- Windows 10 or Windows 11
+- Windows 10 or Windows 11, or Linux (X11 or Hyprland)
 - Node.js 20 or newer
 - npm
 - Docker Desktop with Docker Compose
 - Permission to inspect foreground windows
 - Permission to terminate applications if using deep-work `block` enforcement
 
-The dashboard and API can run on other operating systems, but the tracker is Windows-oriented. It uses `active-win`, Electron power events, Windows process paths, and `taskkill` behavior.
+On Linux the tracker uses `active-win` under X11. Under Hyprland (Wayland), where `active-win` and Chromium's idle timer cannot see native windows, it reads the focused window from Hyprland's IPC socket and runs a private `hypridle` instance for idle detection, so `hypridle` must be installed. Other Wayland compositors are not supported yet.
 
 ## First-Time Setup
 
@@ -78,17 +78,20 @@ From the repository root, the PowerShell launcher starts PostgreSQL when needed,
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-samaritan.ps1
 ```
 
-For **Linux OS**:
+For **Linux**:
 
 ```bash
-./start-samaritan.sh
+./start-samaritan.sh               # production: compiled API + static dashboard build
+./start-samaritan.sh --dev         # hot-reload dev servers instead
+./start-samaritan.sh --seed        # also seed categorization patterns and demo data
+./start-samaritan.sh --rebuild     # force a rebuild of the API and dashboard
+./start-samaritan.sh --no-desktop  # backend and dashboard only
+./stop-samaritan.sh                # stop everything (add --db to stop PostgreSQL too)
 ```
 
-To stop all background services on Linux:
+The Linux launcher installs missing dependencies, creates `api/.env` from `api/.env.example`, starts PostgreSQL through Docker Compose and waits for its health check, applies migrations, bootstraps the local user, rebuilds the API and dashboard only when their sources changed, and then starts the API, dashboard, and tracker. Every setup step aborts with the tail of its log on failure. Logs are written to `.runtime/logs/` and pruned after 14 days. If another program holds a Samaritan port, the launcher names it and exits rather than mistaking it for Samaritan; set `SAMARITAN_DASHBOARD_PORT` to move the dashboard.
 
-```bash
-./stop-samaritan.sh
-```
+All services bind to `127.0.0.1` only. The API trusts the `userId` it is given, so it must not be exposed to a network; browser access is limited to `localhost` origins (override with `CORS_ORIGIN` in `api/.env`).
 
 Use `-InstallDependencies` on the first run if any `node_modules` directory is missing. Add `-OpenDashboard` to open the browser automatically, `-SkipDatabase` when PostgreSQL is managed separately, `-SkipSetup` to bypass migration and bootstrap checks, or `-SkipTracker` when only the web stack is needed.
 
@@ -111,7 +114,7 @@ These credentials are for local development only.
 
 ### 3. Configure Environment Variables
 
-Create `api/.env`:
+Create `api/.env` (or copy `api/.env.example`):
 
 ```dotenv
 DATABASE_URL="postgresql://postgres:password@localhost:5432/acpe?schema=public"
@@ -181,7 +184,7 @@ cd dashboard
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:4001`.
 
 Terminal 3, Electron tracker:
 
@@ -267,13 +270,13 @@ The API and dashboard reject stale or out-of-order observations.
 
 ### Session Persistence
 
-`sessionEngine.js` holds the active observation in memory. When application, title, process, or activity type changes, it closes the previous observation and streams it to the API. Sessions shorter than two seconds are currently discarded.
+`sessionEngine.js` holds the active observation in memory. When application, title, process, or activity type changes, it closes the previous observation and streams it to the API. While a context stays unchanged, the open observation is re-sent every 10 seconds (the API upserts by id), so long sessions appear live and survive a crash. On quit, the open observation is flushed before exit. Sessions shorter than two seconds are discarded. Leading status glyphs in window titles (terminal spinners, unsaved-file dots) are stripped, so an animated title does not split one session into discarded fragments.
 
 WebSocket ingestion is primary. HTTP `POST /activity/session` is the fallback when the desktop WebSocket is unavailable.
 
 ### Idle Tracking
 
-The desktop tracker considers the system idle after 120 seconds. Lock, suspend, unlock, and resume events also close or create idle observations. Idle activities remain visible in analytics but do not count as deep-work violations.
+The desktop tracker considers the system idle after 120 seconds. On Hyprland, idle comes from a private `hypridle` instance that honours Wayland idle inhibitors (such as visible video playback) but ignores D-Bus and systemd inhibitors, so background audio does not hide time away from the keyboard. Lock, suspend, unlock, and resume events also close or create idle observations. Idle activities remain visible in analytics but do not count as deep-work violations.
 
 ## Classification and Review
 
@@ -469,13 +472,15 @@ Run `npm run seed:patterns` from `api/`, then optionally run `npm run reclassify
 - Check desktop logs for the `taskkill` result.
 - Some protected or elevated processes cannot be terminated by a non-elevated tracker.
 
-### Port 3000 or 4000 is already in use
+### Port 4000 or 4001 is already in use
 
 Find the owning process:
 
 ```powershell
-netstat -ano | Select-String ':3000\s|:4000\s'
+netstat -ano | Select-String ':4001\s|:4000\s'
 ```
+
+On Linux, `ss -ltnp | grep -E ':(4000|4001) '`. The Linux launcher reports the owner itself.
 
 Stop the duplicate development process or configure a different port consistently across API, dashboard, Electron, and CORS.
 
@@ -500,12 +505,12 @@ Afterward, repeat the database, migration, local-user, and pattern-seed steps.
 ## Current Development Constraints
 
 - One hardcoded local user ID is shared across the dashboard and desktop tracker.
-- API CORS currently allows only `http://localhost:3000`.
+- API CORS and WebSocket connections accept only `localhost` origins unless `CORS_ORIGIN` is set.
 - API and desktop URLs are primarily hardcoded for localhost development.
 - Authentication and authorization are not implemented.
 - The Docker credentials are not suitable for production.
 - Electron packaging is not wired to the dashboard export path as a complete release workflow.
-- Automated test coverage is not yet established; use type checks, builds, health checks, and manual end-to-end verification.
+- Automated test coverage is limited to API unit tests (`npm test` in `api/`) and the desktop verification scripts (`npm test` in `desktop/`); use type checks, builds, health checks, and manual end-to-end verification beyond that.
 - Time-oriented analytics and scheduled aggregation are designed around IST (`Asia/Kolkata`).
 
 These constraints should be addressed before exposing the application beyond a trusted local machine.

@@ -3,6 +3,8 @@ import { handleActivity } from '../services/activityService';
 import { getTimeline } from '../services/timelineservice';
 import { createActivityFromTracker } from '../services/sessionService';
 import { reviewActivities } from '../services/activityReviewService';
+import { resolveISTDateRange } from '../utils/time';
+import { parseUserId, sendRouteError } from '../utils/requestParams';
 const router = Router();
 
 router.post('/', async (req, res) => {
@@ -20,18 +22,13 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-router.get("/timeline", async (req, res, next) => {
-  const { userId, date } = req.query;
-
-  if (!userId || !date) {
-    return res.status(400).json({ error: "Missing params" });
-  }
-
+router.get("/timeline", async (req, res) => {
   try {
-    const timeline = await getTimeline(userId as string, date as string);
-    res.json(timeline);
-  } catch (err) {
-    next(err);
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange({ date: req.query.date }, { required: true, maxDays: 1 });
+    res.json(await getTimeline(userId, range));
+  } catch (error) {
+    sendRouteError(res, error, "Server error", "Activity timeline error:");
   }
 });
 router.post("/session", async (req, res) => {

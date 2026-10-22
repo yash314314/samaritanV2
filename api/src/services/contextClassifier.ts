@@ -169,7 +169,14 @@ function normalizeAppName(value: string) {
     .trim();
 }
 
-function getAppAliases(appName: string) {
+// True when needle occurs in haystack as a whole word ("brave" in
+// "brave-browser", "code" in "code-oss"), never as a fragment of a longer word.
+function containsWord(haystack: string, needle: string) {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`).test(haystack);
+}
+
+export function getAppAliases(appName: string) {
   const normalized = normalizeAppName(appName);
   const aliases = new Set([normalized]);
 
@@ -190,7 +197,10 @@ function getAppAliases(appName: string) {
 
   for (const group of aliasGroups) {
     const normalizedGroup = group.map(normalizeAppName);
-    if (normalizedGroup.some((alias) => alias === normalized || normalized.includes(alias) || alias.includes(normalized))) {
+    // Only the app name may contain an alias. The reverse test made any short
+    // name a member of every group whose alias contains it ("desktop" joined
+    // "whatsapp desktop" and was classified as chat).
+    if (normalizedGroup.some((alias) => alias === normalized || containsWord(normalized, alias))) {
       normalizedGroup.forEach((alias) => aliases.add(alias));
     }
   }

@@ -1,9 +1,12 @@
 const activeWin = require("active-win");
+const hyprland = require("./hyprland");
 const { handleEvent, closeSession } = require("./sessionEngine");
 const { killProcess } = require("./taskkill");
 const { streamCurrentActivity } = require("./wsClient");
 const { reportDistractionBlock } = require("./wsClient");
-const { powerMonitor, app, Notification } = require("electron");
+const { powerMonitor, app, Notification, nativeImage } = require("electron");
+const pathModule = require("path");
+const { resolveAppIcon, ICON_SIZE } = require("./linuxIcons");
 const { resolveBrowserContext } = require("./browserUrlResolver");
 const { findMatchingDistractionRule } = require("./distractionMatcher");
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
@@ -15,37 +18,56 @@ const SAMPLE_INTERVAL = 500;
 
 const iconCache = new Map();
 
-async function getCachedIcon(path) {
+function iconKey(appName, path) {
 
-  if (!path) return null;
+  return `${appName}|${path || ""}`;
 
-  if (iconCache.has(path)) {
-    return iconCache.get(path);
+}
+
+// Samaritan's own windows: the bundled logo instead of the generic Electron icon.
+function ownIcon() {
+
+  const image = nativeImage.createFromPath(pathModule.join(__dirname, "assets", "tray@2x.png"));
+
+  return image.isEmpty() ? null : image.resize({ width: ICON_SIZE, height: ICON_SIZE, quality: "best" }).toDataURL();
+
+}
+
+async function getCachedIcon({ appName, path, processId }) {
+
+  const key = iconKey(appName, path);
+
+  if (iconCache.has(key)) {
+    return iconCache.get(key);
   }
+
+  let icon = null;
 
   try {
 
-    const iconImage = await app.getFileIcon(path);
-
-    if (!iconImage || iconImage.isEmpty()) {
-      return null;
+    if (processId === process.pid) {
+      icon = ownIcon();
+    } else if (process.platform === "linux") {
+      // app.getFileIcon() fails for nearly every Linux executable; resolve
+      // through desktop entries and the icon theme instead.
+      icon = await resolveAppIcon({ appClass: appName, exePath: path });
+    } else if (path) {
+      const iconImage = await app.getFileIcon(path);
+      if (iconImage && !iconImage.isEmpty()) {
+        icon = iconImage.resize({ width: 32, height: 32 }).toDataURL();
+      }
     }
-
-    const resized = iconImage.resize({ width: 32, height: 32 });
-
-    const base64 = resized.toDataURL();
-
-    iconCache.set(path, base64);
-
-    return base64;
 
   } catch (err) {
 
-    console.log("[Samaritan] Icon extraction failed:", path);
-
-    return null;
+    console.log("[Samaritan] Icon extraction failed:", appName, err.message);
 
   }
+
+  // Misses are cached too, so unresolvable apps cost nothing after the first switch.
+  iconCache.set(key, icon);
+
+  return icon;
 
 }
 
@@ -55,6 +77,18 @@ let lastContext = null;
 let isIdle = false;
 let idleStart = null;
 let trackingRunning = false;
+let lastTrackerError = null;
+
+/* ---------------- PLATFORM SOURCES ---------------- */
+
+// Hyprland needs its own window and idle sources; see hyprland.js.
+const getActiveWindow = hyprland.isHyprland ? hyprland.getActiveWindow : activeWin;
+
+function getSystemIdleTime() {
+  return hyprland.isIdleMonitorRunning()
+    ? hyprland.getIdleSeconds()
+    : powerMonitor.getSystemIdleTime();
+}
 
 // Reference to the active deep work session (set from main.js)
 let activeDeepWorkRef = null;
@@ -198,9 +232,18 @@ async function exitIdle(reason, endedAt = Date.now()) {
 }
 /* ---------------- CONTEXT HASH ---------------- */
 
+// Terminals and editors prefix titles with animated or status glyphs (CLI
+// spinners, "●" unsaved markers). Each frame would otherwise open a new
+// session shorter than MIN_SESSION_DURATION, so the time is never recorded.
+function normalizeTitle(title) {
+
+  return String(title || "").replace(/^[\p{So}\p{Sk}\s]+/u, "").trim();
+
+}
+
 function contextKey(win) {
 
-  return `${win.owner?.name}|${win.title}|${win.owner?.processId}`;
+  return `${win.owner?.name}|${normalizeTitle(win.title)}|${win.owner?.processId}`;
 
 }
 
@@ -213,7 +256,7 @@ async function track() {
 
   try {
 
-    const idleTime = powerMonitor.getSystemIdleTime();
+    const idleTime = getSystemIdleTime();
 
     /* ---------- IDLE DETECTION ---------- */
 
@@ -236,7 +279,7 @@ async function track() {
 
     /* ---------- GET ACTIVE WINDOW ---------- */
 
-    const win = await activeWin();
+    const win = await getActiveWindow();
 
     if (!win) {
       trackingRunning = false;
@@ -249,15 +292,16 @@ async function track() {
     /* ---------- CONTEXT CHANGE ---------- */
 
     const path = win.owner?.path || null;
-    const cachedIcon = path ? iconCache.get(path) || null : null;
+    const cachedIcon = iconCache.get(iconKey(win.owner?.name || "Unknown", path)) || null;
+    const title = normalizeTitle(win.title) || "Untitled";
     const browserContext = await resolveBrowserContext({
       appName: win.owner?.name || "Unknown",
-      title: win.title || "Untitled"
+      title
     });
     const currentContext = {
       key: newKey,
       app: win.owner?.name || "Unknown",
-      title: win.title || "Untitled",
+      title,
       icon: cachedIcon,
       url: browserContext.url,
       domain: browserContext.domain,
@@ -286,14 +330,21 @@ async function track() {
     /* ---------- NO CHANGE ---------- */
 
     if (lastContext && lastContext.key === newKey) {
+      // Extend the open session. sessionEngine sends a heartbeat every 10s, so
+      // long sessions reach the dashboard live and survive a crash.
+      await handleEvent(currentContext);
       trackingRunning = false;
       return;
     }
 
     // Icon extraction can be relatively slow on the first encounter. The live
     // state has already been streamed, so enrich only the persisted session.
-    if (!currentContext.icon && path) {
-      currentContext.icon = await getCachedIcon(path);
+    if (!currentContext.icon) {
+      currentContext.icon = await getCachedIcon({
+        appName: currentContext.app,
+        path,
+        processId: currentContext.processId,
+      });
     }
 
     console.log(
@@ -305,10 +356,15 @@ async function track() {
     await handleEvent(currentContext);
 
     lastContext = currentContext;
+    lastTrackerError = null;
 
   } catch (err) {
 
-    console.error("[Samaritan] Tracker error:", err.message);
+    // The loop runs twice a second; only report when the failure changes.
+    if (err.message !== lastTrackerError) {
+      console.error("[Samaritan] Tracker error:", err.message);
+      lastTrackerError = err.message;
+    }
 
   }
 
@@ -322,6 +378,15 @@ function startTracking() {
 
   console.log("[Samaritan] Surveillance initialized.");
   console.log("[Samaritan] Sampling interval:", SAMPLE_INTERVAL, "ms");
+
+  if (hyprland.isHyprland) {
+    console.log("[Samaritan] Hyprland detected; using compositor IPC for window tracking.");
+    hyprland.startIdleMonitor({
+      configDir: app.getPath("userData"),
+      thresholdSeconds: idleThreshold,
+    });
+    app.on("will-quit", hyprland.stopIdleMonitor);
+  }
 
   powerMonitor.on("lock-screen", async () => {
     console.log("[Samaritan] System locked.");

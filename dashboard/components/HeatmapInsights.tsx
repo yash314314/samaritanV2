@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Zap, TrendingUp, Clock, Calendar, BarChart3, Target } from "lucide-react";
+import { Decode } from "./sam/Decode";
 
 interface HeatmapBucket {
   score: number;
@@ -186,7 +187,7 @@ function analyzeHeatmap(data: HeatmapResponse) {
 }
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full ${className}`}>{children}</div>
 );
 
 export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
@@ -206,36 +207,38 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
   const bestDayName = new Date(bestDayDate + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long" });
 
   return (
-    <div className="min-w-0 space-y-3">
+    <div className="min-w-0 grid grid-cols-1 xl:grid-cols-1 gap-3">
       {/* Peak Productivity Window - UPGRADED */}
-      <Card className="p-5">
-        <div className="flex items-start justify-between mb-4">
+      <Card className="p-4">
+        <div className="flex items-start justify-between mb-3">
           <div>
             <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium flex items-center gap-1.5">
               <Zap className="w-3 h-3" /> Peak Window
             </p>
-            <h3 className="text-2xl font-bold text-purple-400 mt-1">
-              {stats.bestTwoHourWindow.startHour.toString().padStart(2, "0")}:00 – {stats.bestTwoHourWindow.endHour.toString().padStart(2, "0")}:00
+            <h3 className="text-xl font-bold text-zinc-100 mt-1">
+              <Decode
+                value={`${stats.bestTwoHourWindow.startHour.toString().padStart(2, "0")}:00 – ${stats.bestTwoHourWindow.endHour.toString().padStart(2, "0")}:00`}
+              />
             </h3>
             <p className="text-xs text-zinc-500 mt-0.5">
               {formatDateShort(stats.bestTwoHourWindow.date)} • {formatHMS(stats.bestTwoHourWindow.duration / 1000)}
             </p>
           </div>
-          <div className="p-2.5 bg-purple-500/10 rounded-lg">
-            <Target className="w-5 h-5 text-purple-400" />
+          <div className="p-2 bg-red-500/10 rounded-lg">
+            <Target className="w-4 h-4 text-red-500" />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mb-3">
-          <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+          <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800">
             <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Avg Score</p>
-            <p className="text-lg font-bold text-purple-400 font-mono">
+            <p className="text-base font-bold text-zinc-100 font-mono">
               {(stats.bestTwoHourWindow.score / 2).toFixed(1)}
             </p>
           </div>
-          <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+          <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800">
             <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Best 3H</p>
-            <p className="text-lg font-bold text-zinc-300 font-mono">
+            <p className="text-base font-bold text-zinc-300 font-mono">
               {stats.bestThreeHourWindow.startHour.toString().padStart(2, "0")}:00 – {stats.bestThreeHourWindow.endHour.toString().padStart(2, "0")}:00
             </p>
           </div>
@@ -243,21 +246,21 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
 
         {/* Recommended routine */}
         {stats.recommendedHours.length > 0 && (
-          <div className="pt-3 border-t border-zinc-800">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+          <div className="pt-2 border-t border-zinc-800">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
               <Clock className="w-3 h-3" /> Recommended Routine
             </p>
             <div className="flex flex-wrap gap-1.5">
               {stats.recommendedHours.map((h) => (
                 <span
                   key={h.hour}
-                  className="px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-mono"
+                  className="px-2 py-0.5 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono"
                 >
                   {h.hour.toString().padStart(2, "0")}:00
                 </span>
               ))}
             </div>
-            <p className="text-[10px] text-zinc-600 mt-1.5">
+            <p className="text-[10px] text-zinc-600 mt-1">
               Consistent across {Math.round((stats.recommendedHours[0]?.reliability / Object.keys(data).length) * 100)}% of tracked days
             </p>
           </div>
@@ -265,44 +268,44 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
       </Card>
 
       {/* Most Productive Day - UPGRADED */}
-      <Card className="p-5">
-        <div className="flex items-start justify-between mb-4">
+      <Card className="p-4">
+        <div className="flex items-start justify-between mb-3">
           <div>
             <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium flex items-center gap-1.5">
               <TrendingUp className="w-3 h-3" /> Best Day
             </p>
-            <h3 className="text-2xl font-bold text-emerald-400 mt-1">
+            <h3 className="text-xl font-bold text-zinc-100 mt-1">
               {bestDayName}
             </h3>
             <p className="text-xs text-zinc-500 mt-0.5">
               {bestDayDate} • {bestDayStat.activeHours} active hrs
             </p>
           </div>
-          <div className="p-2.5 bg-emerald-500/10 rounded-lg">
-            <Calendar className="w-5 h-5 text-emerald-400" />
+          <div className="p-2 bg-zinc-800 rounded-lg">
+            <Calendar className="w-4 h-4 text-zinc-300" />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mb-3">
-          <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+          <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800">
             <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Avg Score</p>
-            <p className="text-lg font-bold text-emerald-400 font-mono">
+            <p className="text-base font-bold text-zinc-100 font-mono">
               {bestDayStat.totalScore.toFixed(1)}
             </p>
           </div>
-          <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+          <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800">
             <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Peak Hour</p>
-            <p className="text-lg font-bold text-zinc-300 font-mono">
+            <p className="text-base font-bold text-zinc-300 font-mono">
               {bestDayStat.peakHour.toString().padStart(2, "0")}:00
             </p>
           </div>
         </div>
 
-        <div className="pt-3 border-t border-zinc-800">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+        <div className="pt-2 border-t border-zinc-800">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
             <BarChart3 className="w-3 h-3" /> Day Rankings
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {stats.allDays.slice(0, 5).map(([date, stat], i) => {
               const dayLabel = new Date(date + "T00:00:00").toLocaleDateString("en-IN", {
                 weekday: "short",
@@ -314,17 +317,17 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
 
               return (
                 <div key={date} className="flex items-center gap-2 group">
-                  <span className={`text-[10px] w-4 text-right font-mono ${i === 0 ? "text-emerald-400" : "text-zinc-600"}`}>
+                  <span className={`text-[10px] w-4 text-right font-mono ${i === 0 ? "text-red-400" : "text-zinc-600"}`}>
                     {i + 1}
                   </span>
-                  <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${i === 0 ? "bg-emerald-500" : "bg-zinc-600 group-hover:bg-zinc-500"}`}
+                      className={`sam-fill h-full rounded-full ${i === 0 ? "bg-red-500" : "bg-zinc-600 group-hover:bg-zinc-500"}`}
                       style={{ width: `${width}%` }}
                     />
                   </div>
-                  <span className="text-xs text-zinc-400 w-24 text-right truncate">{dayLabel}</span>
-                  <span className="text-xs text-zinc-500 font-mono w-8 text-right">{stat.totalScore.toFixed(0)}</span>
+                  <span className="text-xs text-zinc-400 w-20 text-right truncate">{dayLabel}</span>
+                  <span className="text-xs text-zinc-500 font-mono w-7 text-right">{stat.totalScore.toFixed(0)}</span>
                 </div>
               );
             })}
@@ -333,17 +336,17 @@ export default function HeatmapInsights({ data }: { data: HeatmapResponse }) {
       </Card>
 
       {/* Hourly Pattern - NEW */}
-      <Card className="p-5">
-        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-3 flex items-center gap-1.5">
+      <Card className="p-4">
+        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2 flex items-center gap-1.5">
           <Clock className="w-3 h-3" /> Hourly Pattern
         </p>
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {stats.hourlyReliability.slice(0, 5).map((h) => (
             <div key={h.hour} className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 font-mono w-8">{h.hour.toString().padStart(2, "0")}:00</span>
               <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-purple-500/60 rounded-full"
+                  className="sam-fill h-full bg-red-500/70 rounded-full"
                   style={{ width: `${Math.min(100, (h.avgScore / (stats.hourlyReliability[0]?.avgScore || 1)) * 100)}%` }}
                 />
               </div>

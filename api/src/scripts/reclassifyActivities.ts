@@ -3,6 +3,8 @@ import { prisma } from "../prisma";
 
 async function main() {
   const activities = await prisma.activity.findMany({
+    // Manual reviews are stored with confidence 1; never overwrite them.
+    where: { OR: [{ confidence: { lt: 1 } }, { confidence: null }] },
     orderBy: { startTime: "asc" },
     select: {
       id: true,

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { getUserId, projectsApi } from "@/lib/api";
+import { playSamaritanDialogSequence, playSamaritanDismiss } from "@/lib/samaritanAudio";
 import {
   X,
   Target,
@@ -102,9 +103,9 @@ const PROTOCOL_PRESETS = [
 
 const ENFORCEMENT_LEVELS = [
   { value: "observe", label: "Observe", desc: "Log only, no blocking", color: "text-zinc-400", bg: "bg-zinc-500/10", border: "border-zinc-500/20" },
-  { value: "warn", label: "Warn", desc: "Notification on violation", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-  { value: "require_reason", label: "Require Reason", desc: "Require justification, no app kill", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" },
-  { value: "block", label: "Block", desc: "Terminate violating apps", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+  { value: "warn", label: "Warn", desc: "Notification on violation", color: "text-zinc-200", bg: "bg-zinc-500/10", border: "border-zinc-500/20" },
+  { value: "require_reason", label: "Require Reason", desc: "Require justification, no app kill", color: "text-zinc-100", bg: "bg-red-500/10", border: "border-red-500/20" },
+  { value: "block", label: "Block", desc: "Terminate violating apps", color: "text-red-400", bg: "bg-red-500/15", border: "border-red-500/30" },
 ];
 
 interface Props {
@@ -153,8 +154,18 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
 
   useEffect(() => {
     if (!open) return;
+    playSamaritanDialogSequence(1.0);
     projectsApi.list(getUserId()).then((data) => setProjects(data as Array<{ id: string; name: string; color: string }>)).catch(console.error);
-  }, [open]);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        playSamaritanDismiss(0.9);
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
   const toggleApp = useCallback((name: string, list: string[], setList: (v: string[]) => void) => {
     if (list.includes(name)) setList(list.filter(n => n !== name));
@@ -210,19 +221,37 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="samaritan-card relative my-0 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden sm:my-4 sm:max-h-[calc(100dvh-2rem)]">
+      <div className="samaritan-card sam-dialog-aperture relative my-0 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-800 bg-zinc-950 sm:my-4 sm:max-h-[calc(100dvh-2rem)]">
+        {/* Single Phosphor Laser Scanline Sweep */}
+        <div className="sam-scanline-beam" aria-hidden="true" />
+
+        {/* Surveillance Directive Banner */}
+        <div className="flex shrink-0 select-none items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-4 py-2 font-mono text-[10px] tracking-wider">
+          <div className="flex items-center gap-2">
+            <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
+              ▼
+            </span>
+            <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+            <span className="font-bold uppercase text-white">DEEP_WORK.CONFIG</span>
+          </div>
+          <div className="flex items-center gap-2 text-zinc-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" aria-hidden="true" />
+            <span className="font-mono">[TARGET_PARAM_INIT]</span>
+          </div>
+        </div>
+
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur px-6 py-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 px-6 py-3.5 backdrop-blur">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10">
-              <Target className="h-5 w-5 text-purple-500" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-none border border-red-500/30 bg-red-500/10">
+              <Target className="h-5 w-5 text-red-500" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100">Configure Deep Work</h2>
-              <p className="text-xs text-zinc-500">Set your focus parameters</p>
+              <h2 className="font-mono text-base font-bold uppercase tracking-wide text-zinc-100">Configure Deep Work</h2>
+              <p className="text-xs text-zinc-500">Set focus parameters and enforcement boundaries</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+          <button onClick={onClose} className="rounded-none p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -238,15 +267,15 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
               value={goal}
               onChange={e => setGoal(e.target.value)}
               placeholder="What are you trying to accomplish?"
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20"
+              className="w-full rounded-none border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500">Timer system</label>
-            <div className="grid grid-cols-2 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
-              <button type="button" onClick={() => setTimerMode("pomodoro")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm transition ${timerMode === "pomodoro" ? "bg-purple-500/20 text-purple-300" : "text-zinc-500 hover:text-zinc-300"}`}><TimerReset className="h-4 w-4" /> Pomodoro</button>
-              <button type="button" onClick={() => setTimerMode("countdown")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm transition ${timerMode === "countdown" ? "bg-purple-500/20 text-purple-300" : "text-zinc-500 hover:text-zinc-300"}`}><Clock className="h-4 w-4" /> Countdown</button>
+            <div className="sam-segment grid grid-cols-2" role="group" aria-label="Timer system">
+              <button type="button" aria-pressed={timerMode === "pomodoro"} onClick={() => setTimerMode("pomodoro")} className="flex h-9 items-center justify-center gap-2"><TimerReset className="h-3.5 w-3.5" strokeWidth={1.5} /> Pomodoro</button>
+              <button type="button" aria-pressed={timerMode === "countdown"} onClick={() => setTimerMode("countdown")} className="flex h-9 items-center justify-center gap-2"><Clock className="h-3.5 w-3.5" strokeWidth={1.5} /> Countdown</button>
             </div>
           </div>
 
@@ -260,9 +289,9 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                 <button
                   key={d}
                   onClick={() => { setDuration(d); setCustomDuration(""); }}
-                  className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                  className={`rounded-none px-4 py-2 text-sm font-medium transition-all ${
                     duration === d && !customDuration
-                      ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                      ? "bg-red-500/15 text-white border border-red-500/40"
                       : "bg-zinc-800 text-zinc-400 border border-zinc-800 hover:border-zinc-700"
                   }`}
                 >
@@ -275,7 +304,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   value={customDuration}
                   onChange={e => { setCustomDuration(e.target.value); setDuration(0); }}
                   placeholder="Custom"
-                  className="w-24 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-purple-500/50"
+                  className="w-24 rounded-none border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-red-500/50"
                 />
                 <span className="text-xs text-zinc-600">min</span>
               </div>
@@ -291,7 +320,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                 <button
                   key={preset.name}
                   onClick={() => applyPreset(preset)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-left text-xs text-zinc-300 transition-all hover:border-purple-500/40 hover:bg-purple-500/10"
+                  className="rounded-none border border-zinc-800 bg-zinc-950 px-3 py-2 text-left text-xs text-zinc-300 transition-all hover:border-red-500/40 hover:bg-red-500/10"
                 >
                   <span className="font-semibold">{preset.name}</span>
                   <span className="mt-0.5 block text-[10px] text-zinc-600">
@@ -302,7 +331,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
             </div>
           </div>
           </> : <div>
-            <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Pomodoro cycle</label><span className="text-[11px] text-purple-300">{focusMinutes * totalRounds}m focused</span></div>
+            <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Pomodoro cycle</label><span className="text-[11px] font-mono text-red-400">{focusMinutes * totalRounds}m focused</span></div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <TimerInput label="Focus" value={focusMinutes} min={5} max={120} onChange={setFocusMinutes} />
               <TimerInput label="Short break" value={shortBreakMinutes} min={1} max={30} onChange={setShortBreakMinutes} />
@@ -310,16 +339,16 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
               <TimerInput label="Rounds" value={totalRounds} min={1} max={12} onChange={setTotalRounds} suffix="" />
             </div>
             <div className="mt-3 flex gap-1.5" aria-label="Pomodoro presets">
-              {[{ label: "Classic", values: [25, 5, 15, 4] }, { label: "Long focus", values: [50, 10, 20, 3] }, { label: "Sprint", values: [15, 3, 10, 4] }].map((preset) => <button key={preset.label} type="button" onClick={() => { setFocusMinutes(preset.values[0]); setShortBreakMinutes(preset.values[1]); setLongBreakMinutes(preset.values[2]); setTotalRounds(preset.values[3]); }} className="rounded-md border border-zinc-800 px-2.5 py-1.5 text-[10px] text-zinc-500 hover:border-purple-500/30 hover:text-purple-300">{preset.label}</button>)}
+              {[{ label: "Classic", values: [25, 5, 15, 4] }, { label: "Long focus", values: [50, 10, 20, 3] }, { label: "Sprint", values: [15, 3, 10, 4] }].map((preset) => <button key={preset.label} type="button" onClick={() => { setFocusMinutes(preset.values[0]); setShortBreakMinutes(preset.values[1]); setLongBreakMinutes(preset.values[2]); setTotalRounds(preset.values[3]); }} className="sam-button">{preset.label}</button>)}
             </div>
           </div>}
 
           <div>
             <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Ambient sound</label><span className="text-[10px] text-zinc-600">Generated locally</span></div>
             <div className="grid grid-cols-5 gap-1.5">
-              {(["none", "white", "pink", "brown", "rain"] as const).map((sound) => <button key={sound} type="button" onClick={() => setAmbientSound(sound)} className={`rounded-md border px-2 py-2 text-[11px] capitalize transition ${ambientSound === sound ? "border-purple-500/40 bg-purple-500/10 text-purple-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}>{sound}</button>)}
+              {(["none", "white", "pink", "brown", "rain"] as const).map((sound) => <button key={sound} type="button" onClick={() => setAmbientSound(sound)} className={`rounded-none border px-2 py-2 text-[11px] capitalize transition ${ambientSound === sound ? "border-red-500/40 bg-red-500/10 text-white" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}>{sound}</button>)}
             </div>
-            {ambientSound !== "none" && <div className="mt-3 flex items-center gap-3"><Volume2 className="h-4 w-4 text-zinc-600" /><input aria-label="Ambient sound volume" type="range" min={0} max={1} step={0.05} value={ambientVolume} onChange={(event) => setAmbientVolume(Number(event.target.value))} className="min-w-0 flex-1 accent-purple-500" /><span className="w-9 text-right text-xs tabular-nums text-zinc-500">{Math.round(ambientVolume * 100)}%</span></div>}
+            {ambientSound !== "none" && <div className="mt-3 flex items-center gap-3"><Volume2 className="h-4 w-4 text-zinc-600" /><input aria-label="Ambient sound volume" type="range" min={0} max={1} step={0.05} value={ambientVolume} onChange={(event) => setAmbientVolume(Number(event.target.value))} className="min-w-0 flex-1 accent-red-500" /><span className="w-9 text-right text-xs tabular-nums text-zinc-500">{Math.round(ambientVolume * 100)}%</span></div>}
           </div>
 
           <div>
@@ -329,7 +358,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
               <select
                 value={projectId}
                 onChange={(event) => setProjectId(event.target.value)}
-                className="h-11 w-full appearance-none rounded-lg border border-zinc-800 bg-zinc-950 pl-10 pr-9 text-sm text-zinc-200 outline-none focus:border-purple-500/50"
+                className="h-11 w-full appearance-none rounded-none border border-zinc-800 bg-zinc-950 pl-10 pr-9 text-sm text-zinc-200 outline-none focus:border-red-500/50"
               >
                 <option value="">No project</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
@@ -360,7 +389,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                 <ChevronDown className="h-4 w-4 text-zinc-500" />
               </button>
               {showEnforcementDropdown && (
-                <div className="absolute z-20 mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1 shadow-xl">
+                <div className="absolute z-20 mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1">
                   {ENFORCEMENT_LEVELS.map(level => (
                     <button
                       key={level.value}
@@ -374,7 +403,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                         <div className={`font-medium ${level.color}`}>{level.label}</div>
                         <div className="text-xs text-zinc-500">{level.desc}</div>
                       </div>
-                      {enforcement === level.value && <Check className="ml-auto h-4 w-4 text-purple-500" />}
+                      {enforcement === level.value && <Check className="ml-auto h-4 w-4 text-red-500" />}
                     </button>
                   ))}
                 </div>
@@ -386,20 +415,20 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {/* Allowed Apps */}
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-emerald-500">
-                Allowed Apps
+              <label className="mb-2 block font-mono text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                Authorized Apps
               </label>
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {allowedApps.map(app => (
-                  <span key={app} className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-400 border border-emerald-500/20">
+                  <span key={app} className="inline-flex items-center gap-1 rounded-none border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200">
                     {app}
-                    <button onClick={() => setAllowedApps(allowedApps.filter(a => a !== app))} className="hover:text-emerald-300">
+                    <button onClick={() => setAllowedApps(allowedApps.filter(a => a !== app))} className="hover:text-red-400">
                       <X className="h-3 w-3" />
                     </button>
                   </span>
                 ))}
               </div>
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+              <div className="max-h-40 overflow-y-auto rounded-none border border-zinc-800 bg-zinc-950 p-2">
                 <div className="grid grid-cols-2 gap-1">
                   {APP_CATALOG.map(app => {
                     const Icon = app.icon;
@@ -408,15 +437,15 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                       <button
                         key={app.name}
                         onClick={() => toggleApp(app.name, allowedApps, setAllowedApps)}
-                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-all ${
+                        className={`flex items-center gap-2 rounded-none px-2 py-1.5 text-xs transition-all ${
                           selected
-                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            ? "border border-zinc-600 bg-zinc-800 text-white"
                             : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                         }`}
                       >
                         <Icon className="h-3.5 w-3.5" />
                         <span className="truncate">{app.name}</span>
-                        {selected && <Check className="ml-auto h-3 w-3" />}
+                        {selected && <Check className="ml-auto h-3 w-3 text-red-500" />}
                       </button>
                     );
                   })}
@@ -426,20 +455,20 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
 
             {/* Blocked Apps */}
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-rose-500">
-                Blocked Apps
+              <label className="mb-2 block font-mono text-xs font-semibold uppercase tracking-wider text-red-400">
+                Restricted Apps
               </label>
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {blockedApps.map(app => (
-                  <span key={app} className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-400 border border-rose-500/20">
+                  <span key={app} className="inline-flex items-center gap-1 rounded-none border border-red-500/30 bg-red-500/15 px-2 py-1 text-xs text-red-300">
                     {app}
-                    <button onClick={() => setBlockedApps(blockedApps.filter(a => a !== app))} className="hover:text-rose-300">
+                    <button onClick={() => setBlockedApps(blockedApps.filter(a => a !== app))} className="hover:text-white">
                       <X className="h-3 w-3" />
                     </button>
                   </span>
                 ))}
               </div>
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+              <div className="max-h-40 overflow-y-auto rounded-none border border-zinc-800 bg-zinc-950 p-2">
                 <div className="grid grid-cols-2 gap-1">
                   {APP_CATALOG.map(app => {
                     const Icon = app.icon;
@@ -448,15 +477,15 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                       <button
                         key={app.name}
                         onClick={() => toggleApp(app.name, blockedApps, setBlockedApps)}
-                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-all ${
+                        className={`flex items-center gap-2 rounded-none px-2 py-1.5 text-xs transition-all ${
                           selected
-                            ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                            ? "border border-red-500/40 bg-red-500/20 text-red-200"
                             : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                         }`}
                       >
                         <Icon className="h-3.5 w-3.5" />
                         <span className="truncate">{app.name}</span>
-                        {selected && <Check className="ml-auto h-3 w-3" />}
+                        {selected && <Check className="ml-auto h-3 w-3 text-red-500" />}
                       </button>
                     );
                   })}
@@ -469,12 +498,12 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {/* Allowed Domains */}
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-emerald-500">
-                Allowed Domains
+              <label className="mb-2 block font-mono text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                Authorized Domains
               </label>
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {allowedDomains.map(d => (
-                  <span key={d} className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-400 border border-emerald-500/20">
+                  <span key={d} className="inline-flex items-center gap-1 rounded-none border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200">
                     {d}
                     <button onClick={() => setAllowedDomains(allowedDomains.filter(x => x !== d))}>
                       <X className="h-3 w-3" />
@@ -489,9 +518,9 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   onChange={e => setDomainInput(prev => ({ ...prev, allow: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && addDomain("allow")}
                   placeholder="e.g. github.com"
-                  className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-emerald-500/50"
+                  className="flex-1 rounded-none border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
                 />
-                <button onClick={() => addDomain("allow")} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20">
+                <button onClick={() => addDomain("allow")} className="sam-button px-3 py-2">
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
@@ -500,8 +529,8 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   <button
                     key={d.name}
                     onClick={() => toggleApp(d.name, allowedDomains, setAllowedDomains)}
-                    className={`rounded px-1.5 py-0.5 text-[10px] ${
-                      allowedDomains.includes(d.name) ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-zinc-600 hover:text-zinc-400"
+                    className={`rounded-none px-1.5 py-0.5 text-[10px] ${
+                      allowedDomains.includes(d.name) ? "border border-zinc-600 bg-zinc-800 text-white" : "border border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     {d.name}
@@ -512,12 +541,12 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
 
             {/* Blocked Domains */}
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-rose-500">
-                Blocked Domains
+              <label className="mb-2 block font-mono text-xs font-semibold uppercase tracking-wider text-red-400">
+                Restricted Domains
               </label>
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {blockedDomains.map(d => (
-                  <span key={d} className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-400 border border-rose-500/20">
+                  <span key={d} className="inline-flex items-center gap-1 rounded-none border border-red-500/30 bg-red-500/15 px-2 py-1 text-xs text-red-300">
                     {d}
                     <button onClick={() => setBlockedDomains(blockedDomains.filter(x => x !== d))}>
                       <X className="h-3 w-3" />
@@ -532,9 +561,9 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   onChange={e => setDomainInput(prev => ({ ...prev, block: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && addDomain("block")}
                   placeholder="e.g. youtube.com"
-                  className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-rose-500/50"
+                  className="flex-1 rounded-none border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-red-500/50"
                 />
-                <button onClick={() => addDomain("block")} className="rounded-lg bg-rose-500/10 px-3 py-2 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20">
+                <button onClick={() => addDomain("block")} className="sam-button px-3 py-2">
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
@@ -543,8 +572,8 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
                   <button
                     key={d.name}
                     onClick={() => toggleApp(d.name, blockedDomains, setBlockedDomains)}
-                    className={`rounded px-1.5 py-0.5 text-[10px] ${
-                      blockedDomains.includes(d.name) ? "bg-rose-500/20 text-rose-400" : "bg-zinc-800 text-zinc-600 hover:text-zinc-400"
+                    className={`rounded-none px-1.5 py-0.5 text-[10px] ${
+                      blockedDomains.includes(d.name) ? "border border-red-500/40 bg-red-500/20 text-red-300" : "border border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     {d.name}
@@ -561,7 +590,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
             <div className="text-xs text-zinc-500">
               {enforcement !== "observe" && (
                 <span className="flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
                   {blockedApps.length + blockedDomains.length} restrictions active
                 </span>
               )}
@@ -569,14 +598,14 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
             <div className="flex gap-3">
               <button
                 onClick={onClose}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800"
+                className="sam-button"
               >
                 Cancel
               </button>
               <button
                 onClick={handleStart}
                 disabled={timerMode === "countdown" && !duration && !customDuration}
-                className="flex items-center gap-2 rounded-lg bg-purple-500 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-purple-500/20 transition-all hover:bg-purple-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="sam-button" data-variant="primary"
               >
                 <Clock className="h-4 w-4" />
                 Start Deep Work

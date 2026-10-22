@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import { format } from "date-fns";
 
 export const ThemedDatePicker = forwardRef<
   HTMLInputElement,
@@ -10,7 +11,9 @@ export const ThemedDatePicker = forwardRef<
     placeholder?: string;
   }
 >(({ selected, onChange, placeholder }, ref) => {
-  const value = selected && !isNaN(selected.getTime()) ? selected.toISOString().slice(0, 10) : "";
+  // Local date parts: the picker hands back local midnight, which is the
+  // previous day in UTC for IST users.
+  const value = selected && !isNaN(selected.getTime()) ? format(selected, "yyyy-MM-dd") : "";
 
   return (
     <input
@@ -27,7 +30,7 @@ export const ThemedDatePicker = forwardRef<
           onChange(new Date(year, month - 1, day));
         }
       }}
-      className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition focus:border-purple-500/50 [color-scheme:dark]"
+      className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition focus:border-red-500/50 [color-scheme:dark]"
     />
   );
 });

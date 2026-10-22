@@ -22,20 +22,20 @@ interface TourContextType {
 const defaultSteps: TourStep[] = [
   {
     target: '[data-tour="date-controls"]',
-    title: "Date & Timeline Navigation",
-    description: "Navigate through daily productivity logs, change dates, and open calendar views to inspect past focus performance.",
+    title: "Day controls",
+    description: "Step between days, or click the date to pick one from the month.",
     position: "bottom",
   },
   {
     target: '[data-tour="sidebar-nav"]',
-    title: "SamaritanV2 Navigation Dock",
-    description: "Switch seamlessly between Overview, Analytics, Productivity Heatmap, Focus Protocol, Projects, Calendar, Goals, and Reports.",
+    title: "Navigation",
+    description: "Overview, analytics, heatmap, focus sessions, projects, calendar, goals and reports. Settings, at the bottom, changes theme, colours and typeface.",
     position: "right",
   },
   {
     target: '[data-tour="user-controls"]',
-    title: "User Profile & Tour Launch",
-    description: "Manage active user sessions, credentials, and re-launch this guided tour anytime by clicking the Tour button.",
+    title: "Account and tour",
+    description: "Sign in or out here. Tour replays this walkthrough at any time.",
     position: "bottom",
   },
 ];

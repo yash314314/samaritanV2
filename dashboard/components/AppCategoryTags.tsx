@@ -24,11 +24,11 @@ export default function AppCategoryTags({ app, limit = 2 }: { app: TaggedApp; li
         return (
           <span
             key={category.name}
-            className="max-w-full truncate rounded px-1.5 py-0.5 text-[9px] font-medium capitalize leading-none"
+            className="max-w-full truncate px-1.5 py-0.5 text-[9px] uppercase leading-none tracking-[0.06em]"
             style={{
               color,
-              backgroundColor: `${color}18`,
-              border: `1px solid ${color}45`,
+              backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${color} 45%, transparent)`,
             }}
             title={category.percentage != null
               ? `${formatCategory(category.name)} ${category.percentage}% of this app's hour`

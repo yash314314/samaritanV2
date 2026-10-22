@@ -1,3 +1,4 @@
+import "dotenv/config"; // Must run first: modules below read process.env at load time
 import express from 'express';
 import { createServer } from "http";
 import authRoutes from './routes/auth';
@@ -12,6 +13,7 @@ import goalsRoutes from './routes/goals';
 import ratingsRoutes from './routes/ratings';
 import breaksRoutes from './routes/breaks';
 import distractionBlocksRoutes from './routes/distractionBlocks';
+import preferencesRoutes from './routes/preferences';
 import cors from 'cors';
 import { startMinuteLogger } from "./services/minuteLogger";
 import { startSessionExpiryChecker } from './services/sessionExpiry';
@@ -21,6 +23,7 @@ import { startCalendarTrackingLifecycle } from "./services/calendarTrackingServi
 import { startCalendarReminderScheduler } from "./services/calendarReminderService";
 import { startSmartBreakLifecycle } from "./services/smartBreakService";
 import { startReportScheduler } from "./services/reportScheduler";
+import { isAllowedOrigin } from "./utils/origin";
 import "./websocket/handlers"; // Register WS message handlers
 
 const app = express();
@@ -29,7 +32,7 @@ const server = createServer(app);
 app.use(express.json());
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "*",
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
   })
 );
 
@@ -48,6 +51,7 @@ app.use('/api/goals', goalsRoutes);
 app.use('/api/ratings', ratingsRoutes);
 app.use('/api/breaks', breaksRoutes);
 app.use('/api/distraction-blocks', distractionBlocksRoutes);
+app.use('/api/preferences', preferencesRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: "OK", ws: true, timestamp: new Date().toISOString() });
@@ -65,9 +69,11 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 // Attach WebSocket server to same HTTP server
 initWebSocket(server);
 
-const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
-  console.log(`Samaritan API + WS running on port ${PORT}`);
+const PORT = Number(process.env.PORT) || 4000;
+// Loopback by default: the API has no enforced auth. Containers set HOST=0.0.0.0.
+const HOST = process.env.HOST || "127.0.0.1";
+server.listen(PORT, HOST, () => {
+  console.log(`Samaritan API + WS running on ${HOST}:${PORT}`);
   startSessionExpiryChecker();
   startMinuteLogger();
   startProjectTimeAggregation();

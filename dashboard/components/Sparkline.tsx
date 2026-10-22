@@ -18,9 +18,9 @@ export function Sparkline({ data, height = 60 }: SparklineProps) {
 
   const getStrokeColor = () => {
     const lastStatus = data.status[data.status.length - 1];
-    if (lastStatus === "distraction") return "#ef4444";
-    if (lastStatus === "idle") return "#f59e0b";
-    return "#3b82f6";
+    if (lastStatus === "distraction") return "var(--sam-alert)";
+    if (lastStatus === "idle") return "var(--sam-warn)";
+    return "var(--sam-series-2)";
   };
 
   return (

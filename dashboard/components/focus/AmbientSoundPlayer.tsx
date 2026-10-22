@@ -30,18 +30,17 @@ export default function AmbientSoundPlayer({
   const activeNodesRef = useRef<AudioNode[]>([]);
   const animationTimerRef = useRef<number | null>(null);
 
-  // Sync external props
-  useEffect(() => {
-    if (initialSound !== selectedSound) {
-      setSelectedSound(initialSound);
-    }
-  }, [initialSound]);
-
-  useEffect(() => {
-    if (initialVolume !== volume) {
-      setVolume(initialVolume);
-    }
-  }, [initialVolume]);
+  // Follow the sound and volume props when the parent changes them.
+  const [syncedSound, setSyncedSound] = useState<SoundType>(initialSound);
+  const [syncedVolume, setSyncedVolume] = useState<number>(initialVolume);
+  if (initialSound !== syncedSound) {
+    setSyncedSound(initialSound);
+    setSelectedSound(initialSound);
+  }
+  if (initialVolume !== syncedVolume) {
+    setSyncedVolume(initialVolume);
+    setVolume(initialVolume);
+  }
 
   // Clean up Web Audio API nodes
   const stopAudio = () => {
@@ -234,22 +233,22 @@ export default function AmbientSoundPlayer({
   ];
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 backdrop-blur-md">
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 backdrop-blur-md">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2">
-          <div className={`p-2 rounded-lg ${isPlaying ? "bg-cyan-500/20 text-cyan-400" : "bg-slate-800 text-slate-400"}`}>
+          <div className={`p-2 rounded-lg ${isPlaying ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400"}`}>
             <Music className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+            <h4 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
               Ambient Focus Audio
               {isPlaying && (
-                <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-800 px-1.5 py-0.5 rounded-full">
+                <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-red-400 bg-red-950/60 border border-red-800 px-1.5 py-0.5 rounded-full">
                   <Sparkles className="w-3 h-3 animate-pulse" /> Active
                 </span>
               )}
             </h4>
-            <p className="text-xs text-slate-400">Offline Web Audio focus generator</p>
+            <p className="text-xs text-zinc-400">Offline Web Audio focus generator</p>
           </div>
         </div>
 
@@ -257,8 +256,8 @@ export default function AmbientSoundPlayer({
           onClick={togglePlay}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
             isPlaying
-              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30"
-              : "bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400 shadow-md shadow-cyan-500/20"
+              ? "bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30"
+              : "bg-zinc-100 text-black font-semibold hover:bg-white"
           }`}
         >
           {isPlaying ? (
@@ -281,8 +280,8 @@ export default function AmbientSoundPlayer({
             onClick={() => changeSound(s.id)}
             className={`px-2.5 py-2 rounded-lg text-left text-xs transition-all border ${
               selectedSound === s.id
-                ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-300 font-medium shadow-sm shadow-cyan-500/10"
-                : "bg-slate-950/40 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                ? "bg-red-500/15 border-red-500/40 text-red-300 font-medium"
+                : "bg-zinc-950/40 border-zinc-800/80 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
             }`}
           >
             <div className="font-semibold text-[11px] truncate">{s.label}</div>
@@ -292,16 +291,16 @@ export default function AmbientSoundPlayer({
       </div>
 
       {/* Volume Control */}
-      <div className="flex items-center gap-3 pt-2 border-t border-slate-800/60">
+      <div className="flex items-center gap-3 pt-2 border-t border-zinc-800/60">
         <button
           onClick={toggleMute}
-          className="text-slate-400 hover:text-slate-200 transition-colors"
+          className="text-zinc-400 hover:text-zinc-200 transition-colors"
           title={isMuted ? "Unmute" : "Mute"}
         >
           {isMuted || volume === 0 ? (
-            <VolumeX className="w-4 h-4 text-slate-500" />
+            <VolumeX className="w-4 h-4 text-zinc-500" />
           ) : (
-            <Volume2 className="w-4 h-4 text-cyan-400" />
+            <Volume2 className="w-4 h-4 text-red-400" />
           )}
         </button>
 
@@ -312,10 +311,10 @@ export default function AmbientSoundPlayer({
           step="0.01"
           value={isMuted ? 0 : volume}
           onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-          className="w-full accent-cyan-400 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+          className="w-full accent-red-500 bg-zinc-800 h-1.5 rounded-lg appearance-none cursor-pointer"
         />
 
-        <span className="text-[10px] font-mono text-slate-400 w-8 text-right">
+        <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">
           {Math.round((isMuted ? 0 : volume) * 100)}%
         </span>
       </div>

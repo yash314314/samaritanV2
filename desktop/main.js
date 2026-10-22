@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, screen } = require("electron");
 const path = require("path");
 const {
   startTracking,
@@ -15,9 +15,12 @@ const {
   send: sendWs,
 } = require("./wsClient");
 const { flushCurrentSession, handleFocusIntervention } = require("./sessionEngine");
+const hyprland = require("./hyprland");
 
-const isDev = !app.isPackaged;
 const API_BASE = "http://localhost:4000";
+const DASHBOARD_URL = (process.env.SAMARITAN_DASHBOARD_URL || "http://localhost:4001").replace(/\/+$/, "");
+const OPEN_DEVTOOLS = process.env.SAMARITAN_DEVTOOLS === "1";
+const WIDGET_TITLE = "Samaritan Widget";
 const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 let mainWindow;
@@ -25,6 +28,8 @@ let widgetWindow;
 let tray;
 let widgetExpanded = false;
 let widgetPinned = true;
+// Appearance ids saved from the dashboard's Settings page; null until loaded.
+let widgetAppearance = null;
 let quitting = false;
 let activeDeepWork = null;
 let activeIntervention = null;
@@ -85,6 +90,23 @@ async function hydrateDistractionBlocks() {
   } catch (err) {
     console.warn("[DistractionBlocker] Rule hydration failed:", err.message);
   }
+}
+
+async function hydrateAppearance() {
+  try {
+    const response = await fetch(`${API_BASE}/api/preferences/appearance?userId=${USER_ID}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { appearance } = await response.json();
+    widgetAppearance = appearance;
+    sendWidgetAppearance();
+  } catch (err) {
+    console.warn("[Widget] Appearance load failed:", err.message);
+  }
+}
+
+function sendWidgetAppearance() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  widgetWindow.webContents.send("widget:appearance", widgetAppearance);
 }
 
 async function clearActiveDeepWork(sessionId, endedAt = null) {
@@ -185,13 +207,9 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(
-    isDev
-      ? "http://localhost:3000"
-      : `file://${path.join(__dirname, "../renderer/out/index.html")}`
-  );
+  mainWindow.loadURL(DASHBOARD_URL);
 
-  if (isDev) {
+  if (OPEN_DEVTOOLS) {
     mainWindow.webContents.openDevTools();
   }
 
@@ -202,8 +220,14 @@ function createWindow() {
 
 function positionWidget() {
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const [width, height] = widgetWindow.getSize();
+  if (hyprland.isHyprland) {
+    hyprland.placeFloatingWindow({ title: WIDGET_TITLE, width, height }).catch((err) => {
+      console.warn("[Widget] Hyprland placement failed:", err.message);
+    });
+    return;
+  }
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   widgetWindow.setPosition(
     display.workArea.x + display.workArea.width - width - 18,
     display.workArea.y + display.workArea.height - height - 18,
@@ -234,7 +258,16 @@ function createWidgetWindow() {
   });
   widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   widgetWindow.loadFile(path.join(__dirname, "renderer", "widget.html"));
+  // Keep the title stable: Hyprland placement looks the window up by it.
+  widgetWindow.on("page-title-updated", (event) => event.preventDefault());
+  widgetWindow.setTitle(WIDGET_TITLE);
   widgetWindow.once("ready-to-show", () => {
+    if (hyprland.isHyprland) {
+      // Hyprland can only float/move the widget once it is mapped.
+      widgetWindow.showInactive();
+      positionWidget();
+      return;
+    }
     positionWidget();
     widgetWindow.showInactive();
   });
@@ -247,7 +280,9 @@ function createWidgetWindow() {
 }
 
 async function createTray() {
-  const icon = await app.getFileIcon(process.execPath, { size: "small" });
+  // app.getFileIcon() cannot resolve the Electron binary's icon on Linux.
+  const icon = nativeImage.createFromPath(path.join(__dirname, "assets", "tray.png"));
+  if (icon.isEmpty()) throw new Error("Tray icon asset is missing");
   tray = new Tray(icon);
   tray.setToolTip("Samaritan Tracker");
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -266,7 +301,7 @@ async function createTray() {
 
 function openDashboard(route = "/") {
   if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  if (isDev && route.startsWith("/")) mainWindow.loadURL(`http://localhost:3000${route}`);
+  if (route.startsWith("/")) mainWindow.loadURL(`${DASHBOARD_URL}${route}`);
   mainWindow.show();
   mainWindow.focus();
 }
@@ -274,17 +309,29 @@ function openDashboard(route = "/") {
 app.whenReady().then(async () => {
   createWindow();
   createWidgetWindow();
-  await createTray();
+  try {
+    await createTray();
+  } catch (err) {
+    // No StatusNotifier host (e.g. bar without a tray) must not stop tracking.
+    console.warn("[Tray] Unavailable:", err.message);
+  }
 
   // Connect WebSocket
   connectWs();
   hydrateActiveDeepWork();
   hydrateDistractionBlocks();
+  hydrateAppearance();
 
   onWs("connection:established", () => {
     hydrateActiveDeepWork();
     hydrateDistractionBlocks();
+    hydrateAppearance();
     sendWs("widget.subscribe", {});
+  });
+
+  onWs("appearance:changed", (appearance) => {
+    widgetAppearance = appearance;
+    sendWidgetAppearance();
   });
 
   onWs("widget.state.update", (state) => {
@@ -365,7 +412,10 @@ app.whenReady().then(async () => {
     resolveActiveIntervention(reason);
   });
 
-  ipcMain.on("widget:ready", () => sendWs("widget.subscribe", {}));
+  ipcMain.on("widget:ready", () => {
+    sendWs("widget.subscribe", {});
+    sendWidgetAppearance();
+  });
   ipcMain.on("widget:setExpanded", (_event, expanded) => {
     widgetExpanded = Boolean(expanded);
     if (!widgetWindow || widgetWindow.isDestroyed()) return;

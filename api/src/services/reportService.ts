@@ -1,9 +1,29 @@
+import type { Activity } from "@prisma/client";
 import { prisma } from "../prisma";
-import dayjs from "dayjs";
+import {
+  addDaysToDateKey,
+  lastISTDays,
+  toISTDateKey,
+  type ISTDateRange,
+} from "../utils/time";
+import {
+  activeMsBySession,
+  productivityScoreOf,
+  summarizeActivities,
+  type EffectiveActivity,
+} from "./rangeMetrics";
+import { loadResolvedActivities } from "./rangeActivityQuery";
+import { getProjectTimeRange } from "./projectTimeService";
+
+export type ReportPeriod = "daily" | "weekly" | "monthly";
+
+export const REPORT_PERIODS: readonly ReportPeriod[] = ["daily", "weekly", "monthly"];
+
+const PERIOD_DAYS: Record<ReportPeriod, number> = { daily: 1, weekly: 7, monthly: 30 };
 
 export interface ReportSummaryPayload {
   userId: string;
-  period: "daily" | "weekly" | "monthly";
+  period: ReportPeriod;
   startDate: Date;
   endDate: Date;
   focusHours: number;
@@ -15,122 +35,119 @@ export interface ReportSummaryPayload {
   projectBreakdown: Array<{ projectName: string; minutes: number }>;
 }
 
-export async function generateUserReport(
-  userId: string,
-  period: "daily" | "weekly" | "monthly",
-  customStart?: Date,
-  customEnd?: Date
-) {
-  const endDate = customEnd || new Date();
-  let startDate = customStart;
+/**
+ * IST window of a report. `completed` covers the period that just ended
+ * (yesterday, or the 7/30 days before today) for scheduled reports; otherwise
+ * the period ends today and the report covers it up to `now`.
+ */
+export function reportPeriodRange(period: ReportPeriod, now = new Date(), completed = false): ISTDateRange {
+  const todayKey = toISTDateKey(now);
+  return lastISTDays(PERIOD_DAYS[period], completed ? addDaysToDateKey(todayKey, -1) : todayKey);
+}
 
-  if (!startDate) {
-    if (period === "daily") {
-      startDate = dayjs(endDate).startOf("day").toDate();
-    } else if (period === "weekly") {
-      startDate = dayjs(endDate).subtract(7, "day").startOf("day").toDate();
-    } else {
-      startDate = dayjs(endDate).subtract(30, "day").startOf("day").toDate();
-    }
+/**
+ * Pure summary of resolved (clipped, overlap-free) activities. Durations are
+ * milliseconds in, minutes/hours out. Idle time is excluded; "focus hours" is
+ * time in productive categories, the same definition as productivityScore.
+ */
+export function summarizeReportActivities(
+  items: EffectiveActivity<Activity>[],
+  sessionBurnout: Map<string, number>,
+  projectMinutes: Array<{ projectName: string; minutes: number }>
+) {
+  const totals = summarizeActivities(items);
+
+  let burnoutWeighted = 0;
+  let burnoutWeight = 0;
+  for (const [sessionId, activeMs] of activeMsBySession(items)) {
+    if (activeMs <= 0) continue;
+    burnoutWeighted += (sessionBurnout.get(sessionId) ?? 0) * activeMs;
+    burnoutWeight += activeMs;
   }
 
-  // Fetch activities in window
-  const sessions = await prisma.session.findMany({
-    where: {
-      userId,
-      startTime: { gte: startDate, lte: endDate },
-    },
-    include: {
-      activities: {
-        include: {
-          project: true,
-        },
-      },
-    },
-  });
+  const appCategories = new Map<string, Record<string, number>>();
+  for (const item of items) {
+    if (item.idle) continue;
+    const appName = item.activity.appName || "Unknown";
+    const category = item.activity.category || "unknown";
+    const categories = appCategories.get(appName) ?? {};
+    categories[category] = (categories[category] ?? 0) + item.ms;
+    appCategories.set(appName, categories);
+  }
 
-  let totalDurationSec = 0;
-  let totalProductiveSec = 0;
-  let totalFocusScoreSum = 0;
-  let totalBurnoutScoreSum = 0;
-  let sessionCount = 0;
-
-  const appMap = new Map<string, { durationSec: number; category: string }>();
-  const categoryMap = new Map<string, number>();
-  const projectMap = new Map<string, number>();
-
-  sessions.forEach((s) => {
-    sessionCount++;
-    totalFocusScoreSum += s.focusScore || 0;
-    totalBurnoutScoreSum += s.burnoutScore || 0;
-
-    s.activities.forEach((act) => {
-      const dur = act.duration || 0;
-      totalDurationSec += dur;
-
-      const cat = act.category || "uncategorized";
-      categoryMap.set(cat, (categoryMap.get(cat) || 0) + dur);
-
-      if (cat === "productive") {
-        totalProductiveSec += dur;
-      }
-
-      // App stats
-      const appKey = act.appName || "Unknown";
-      const existingApp = appMap.get(appKey);
-      if (existingApp) {
-        existingApp.durationSec += dur;
-      } else {
-        appMap.set(appKey, { durationSec: dur, category: cat });
-      }
-
-      // Project stats
-      if (act.project) {
-        const projName = act.project.name;
-        projectMap.set(projName, (projectMap.get(projName) || 0) + Math.round(dur / 60));
-      }
-    });
-  });
-
-  const focusHours = Math.round((totalProductiveSec / 3600) * 10) / 10;
-  const totalHours = Math.round((totalDurationSec / 3600) * 10) / 10;
-  const productivityPct = totalDurationSec > 0 ? Math.round((totalProductiveSec / totalDurationSec) * 100) : 0;
-  const burnoutIndex = sessionCount > 0 ? Math.round((totalBurnoutScoreSum / sessionCount) * 10) / 10 : 0;
-
-  const topApps = Array.from(appMap.entries())
-    .map(([appName, val]) => ({
-      appName,
-      durationMinutes: Math.round(val.durationSec / 60),
-      category: val.category,
+  const topApps = Object.entries(totals.appUsage)
+    .map(([appName, ms]) => ({
+      appName: appName || "Unknown",
+      durationMinutes: Math.round(ms / 60000),
+      category: Object.entries(appCategories.get(appName || "Unknown") ?? {}).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown",
     }))
     .sort((a, b) => b.durationMinutes - a.durationMinutes)
     .slice(0, 7);
 
   const categoryBreakdown: Record<string, number> = {};
-  categoryMap.forEach((valSec, catKey) => {
-    categoryBreakdown[catKey] = Math.round(valSec / 60);
-  });
+  for (const [category, ms] of Object.entries(totals.categoryMs)) {
+    categoryBreakdown[category] = Math.round(ms / 60000);
+  }
 
-  const projectBreakdown = Array.from(projectMap.entries()).map(([projectName, minutes]) => ({
-    projectName,
-    minutes,
-  }));
+  return {
+    focusHours: Math.round((totals.productiveMs / 3600000) * 10) / 10,
+    productivityPct: Math.round(productivityScoreOf(totals)),
+    burnoutIndex: burnoutWeight > 0 ? Math.round((burnoutWeighted / burnoutWeight) * 10) / 10 : 0,
+    totalDurationHours: Math.round((totals.activeMs / 3600000) * 10) / 10,
+    categoryBreakdown,
+    topApps,
+    projectBreakdown: projectMinutes,
+  };
+}
+
+const TITLE_DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Kolkata" });
+
+export async function generateUserReport(
+  userId: string,
+  period: ReportPeriod,
+  customStart?: Date,
+  customEnd?: Date,
+  now = new Date()
+) {
+  const window = reportPeriodRange(period, now);
+  const startDate = customStart ?? window.start;
+  const endDate = customEnd ?? new Date(Math.min(window.end.getTime(), now.getTime()));
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
+    throw new Error("Invalid report range");
+  }
+
+  const items = await loadResolvedActivities(userId, startDate, endDate);
+  const sessionIds = [...new Set(items.map((item) => item.activity.sessionId))];
+  const [sessions, projectTotals] = await Promise.all([
+    sessionIds.length
+      ? prisma.session.findMany({ where: { id: { in: sessionIds } }, select: { id: true, burnoutScore: true } })
+      : Promise.resolve([]),
+    getProjectTimeRange(userId, startDate, endDate, now),
+  ]);
+  const projects = projectTotals.size
+    ? await prisma.project.findMany({ where: { id: { in: [...projectTotals.keys()] } }, select: { id: true, name: true } })
+    : [];
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+  const projectBreakdown = [...projectTotals.entries()]
+    .map(([projectId, value]) => ({ projectName: projectNames.get(projectId) ?? "Unknown project", minutes: Math.round(value.minutes) }))
+    .filter((entry) => entry.minutes > 0)
+    .sort((a, b) => b.minutes - a.minutes);
+
+  const summary = summarizeReportActivities(
+    items,
+    new Map(sessions.map((session) => [session.id, session.burnoutScore ?? 0])),
+    projectBreakdown
+  );
 
   const summaryJson: ReportSummaryPayload = {
     userId,
     period,
     startDate,
     endDate,
-    focusHours,
-    productivityPct,
-    burnoutIndex,
-    totalDurationHours: totalHours,
-    categoryBreakdown,
-    topApps,
-    projectBreakdown,
+    ...summary,
   };
 
-  const title = `${period.toUpperCase()} Activity & Focus Report - ${dayjs(startDate).format("MMM D, YYYY")}`;
+  const title = `${period.toUpperCase()} Activity & Focus Report - ${TITLE_DATE.format(startDate)}`;
 
   const report = await prisma.report.create({
     data: {
@@ -140,9 +157,9 @@ export async function generateUserReport(
       startDate,
       endDate,
       summaryJson: summaryJson as any,
-      productivityPct,
-      focusHours,
-      burnoutIndex,
+      productivityPct: summary.productivityPct,
+      focusHours: summary.focusHours,
+      burnoutIndex: summary.burnoutIndex,
     },
   });
 

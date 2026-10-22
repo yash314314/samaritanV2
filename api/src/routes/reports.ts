@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma } from "../prisma";
-import { generateUserReport } from "../services/reportService";
+import { REPORT_PERIODS, generateUserReport } from "../services/reportService";
+import { parseEnumParam } from "../utils/requestParams";
+import { InvalidRequestError } from "../utils/time";
 import { optionalAuth, AuthenticatedRequest } from "../middleware/authMiddleware";
 
 const router = Router();
@@ -11,7 +13,7 @@ const DEFAULT_USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 router.get("/", optionalAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.user?.userId || (req.query.userId as string) || DEFAULT_USER_ID;
-    const period = req.query.period as string | undefined;
+    const period = parseEnumParam(req.query.period, { name: "period", allowed: REPORT_PERIODS });
 
     const where: any = { userId };
     if (period) where.period = period;
@@ -23,6 +25,7 @@ router.get("/", optionalAuth, async (req: AuthenticatedRequest, res) => {
 
     return res.json({ success: true, reports });
   } catch (error: any) {
+    if (error instanceof InvalidRequestError) return res.status(400).json({ error: error.message });
     return res.status(500).json({ error: error.message || "Failed to fetch reports" });
   }
 });
@@ -31,11 +34,12 @@ router.get("/", optionalAuth, async (req: AuthenticatedRequest, res) => {
 router.post("/generate", optionalAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.user?.userId || req.body.userId || DEFAULT_USER_ID;
-    const period = (req.body.period as "daily" | "weekly" | "monthly") || "daily";
+    const period = parseEnumParam(req.body.period, { name: "period", allowed: REPORT_PERIODS, fallback: "daily" });
 
     const report = await generateUserReport(userId, period);
     return res.json({ success: true, report });
   } catch (error: any) {
+    if (error instanceof InvalidRequestError) return res.status(400).json({ error: error.message });
     return res.status(500).json({ error: error.message || "Failed to generate report" });
   }
 });

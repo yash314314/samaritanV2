@@ -133,6 +133,8 @@ window.widgetAPI.onActionResult((result) => {
   if (result.ok) feedback(result.action === "quickTag" ? "Project rule saved" : "Action completed");
   else feedback(result.error || "Action failed", true);
 });
+// Theme, accent and typeface follow the dashboard's Settings page.
+window.widgetAPI.onAppearance((appearance) => window.SamaritanTheme.apply(appearance));
 window.widgetAPI.onWindowState((next) => {
   pinned = next.pinned;
   byId("pinButton").classList.toggle("active", pinned);

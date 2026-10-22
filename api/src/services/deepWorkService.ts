@@ -838,10 +838,50 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
 
   // ─── ACCURATE TIME ALLOCATION ───
   // Use the session's accumulated ms directly (these are the source of truth)
-  const productiveMs = session.productiveMs || 0;
-  const distractionMs = session.distractionMs || 0;
-  const idleMs = session.idleMs || 0;
-  const totalTrackedMs = productiveMs + distractionMs + idleMs;
+  let productiveMs = session.productiveMs || 0;
+  let distractionMs = session.distractionMs || 0;
+  let idleMs = session.idleMs || 0;
+  let totalTrackedMs = productiveMs + distractionMs + idleMs;
+
+  // Fallback 1: If session accumulators are 0, check overlapping raw activities
+  if (totalTrackedMs === 0) {
+    const overlappingActivities = await prisma.activity.findMany({
+      where: {
+        session: { userId },
+        startTime: { lte: endedAt },
+        endTime: { gte: session.startedAt },
+      },
+    });
+
+    if (overlappingActivities.length > 0) {
+      for (const act of overlappingActivities) {
+        const start = Math.max(session.startedAt.getTime(), act.startTime.getTime());
+        const end = Math.min(endedAt.getTime(), act.endTime.getTime());
+        const dur = Math.max(0, end - start);
+        if (dur <= 0) continue;
+        const cat = (act.category ?? "").toLowerCase();
+        const app = (act.appName ?? "").toLowerCase();
+        if (cat === "idle" || app.includes("idle")) {
+          idleMs += dur;
+        } else if (cat === "distracting" || cat === "social" || cat === "entertainment") {
+          distractionMs += dur;
+        } else {
+          productiveMs += dur;
+        }
+      }
+      totalTrackedMs = productiveMs + distractionMs + idleMs;
+    }
+  }
+
+  // Fallback 2: If still 0, fall back to elapsed focus duration
+  if (totalTrackedMs === 0 && focusedSeconds > 0) {
+    const focusDurationMs = Math.round(focusedSeconds * 1000);
+    const interruptionMs = session.interruptionMs || 0;
+    distractionMs = Math.min(focusDurationMs, interruptionMs);
+    productiveMs = Math.max(0, focusDurationMs - distractionMs);
+    idleMs = 0;
+    totalTrackedMs = productiveMs + distractionMs + idleMs;
+  }
 
   const productiveMinutes = Number((productiveMs / 60000).toFixed(1));
   const distractionMinutes = Number((distractionMs / 60000).toFixed(1));
@@ -850,8 +890,14 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
 
   // ─── ACCURATE FOCUS / PRODUCTIVITY ───
   // These are the final scores from the session (computed incrementally)
-  const finalFocusScore = Number(session.focusScore.toFixed(2));
-  const finalProductivityScore = Number(session.productivityScore.toFixed(2));
+  const finalFocusScore = session.focusScore > 0
+    ? Number(session.focusScore.toFixed(2))
+    : totalTrackedMs > 0
+      ? Number(((productiveMs / totalTrackedMs) * 100).toFixed(2))
+      : 0;
+  const finalProductivityScore = session.productivityScore > 0
+    ? Number(session.productivityScore.toFixed(2))
+    : finalFocusScore;
 
   // ─── DERIVED METRICS ───
   // Focus efficiency: what % of tracked time was productive
@@ -874,10 +920,28 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
     ? Math.min(100, (focusedSeconds / (plannedMinutes * 60)) * 100)
     : 0;
 
-  // ─── PER-SECOND TIME SERIES ───
-  // Interpolate between minute-log data points to create smooth per-second data.
-  // This gives a much more detailed view of how focus/productivity evolved.
-  const minuteLogs = session.minuteLogs;
+  // ─── ATOMIC PER-SECOND TIME SERIES ───
+  // Construct a true atomic second-by-second timeline combining minuteLogs,
+  // raw activities, and recorded interventions.
+  const activities = await prisma.activity.findMany({
+    where: {
+      session: { userId },
+      startTime: { lte: endedAt },
+      endTime: { gte: session.startedAt },
+    },
+    orderBy: { startTime: "asc" },
+  });
+
+  const totalDurationSec = Math.max(
+    1,
+    Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000)
+  );
+
+  const minuteLogMap = new Map<number, (typeof session.minuteLogs)[0]>();
+  for (const ml of session.minuteLogs) {
+    minuteLogMap.set(ml.minuteIndex, ml);
+  }
+
   const timeSeries: Array<{
     second: number;
     timestamp: string;
@@ -889,80 +953,80 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
     category: string | null;
   }> = [];
 
-  if (minuteLogs.length === 0) {
-    // No minute logs — use session start/end as a single data point
-    timeSeries.push({
-      second: 0,
-      timestamp: session.startedAt.toISOString(),
-      focusScore: 0,
-      productivityScore: 0,
-      distraction: false,
-      idle: false,
-      appName: null,
-      category: null,
+  let runningFocus = session.focusScore > 0 ? Math.min(100, Math.max(50, session.focusScore * (session.focusScore <= 1 ? 100 : 1))) : 80;
+  let runningProd = session.productivityScore > 0 ? Math.min(100, Math.max(50, session.productivityScore * (session.productivityScore <= 1 ? 100 : 1))) : 80;
+
+  for (let s = 0; s < totalDurationSec; s++) {
+    const secMs = session.startedAt.getTime() + s * 1000;
+    const secDate = new Date(secMs);
+    const minuteIndex = Math.floor(s / 60);
+
+    // Active intervention at this exact second
+    const activeInv = session.interventions.find((inv) => {
+      const invStart = inv.detectedAt.getTime();
+      const invEnd = invStart + (inv.durationMs || 3000);
+      return secMs >= invStart && secMs <= invEnd;
     });
-  } else if (minuteLogs.length === 1) {
-    // Single minute log — just use it
-    const log = minuteLogs[0];
-    timeSeries.push({
-      second: 0,
-      timestamp: log.timestamp.toISOString(),
-      focusScore: Number(log.focusScore.toFixed(2)),
-      productivityScore: Number(log.productivityScore.toFixed(2)),
-      distraction: log.distractionFlag,
-      idle: log.idleFlag,
-      appName: log.appName,
-      category: log.category,
+
+    // Active activity at this exact second
+    const activeAct = activities.find((act) => {
+      return act.startTime.getTime() <= secMs && act.endTime.getTime() >= secMs;
     });
-  } else {
-    // Multiple minute logs — interpolate per-second between each pair
-    for (let i = 0; i < minuteLogs.length - 1; i++) {
-      const curr = minuteLogs[i];
-      const next = minuteLogs[i + 1];
 
-      const currSec = curr.minuteIndex * 60;
-      const nextSec = next.minuteIndex * 60;
-      const gapSec = nextSec - currSec;
+    const isDistraction = !!activeInv || (activeAct && (activeAct.category === "distracting" || activeAct.category === "entertainment" || activeAct.category === "social"));
+    const isIdle = !isDistraction && (activeAct?.category === "idle" || activeAct?.appName?.toLowerCase().includes("idle"));
 
-      const currFocus = curr.focusScore;
-      const nextFocus = next.focusScore;
-      const currProd = curr.productivityScore;
-      const nextProd = next.productivityScore;
+    const currentApp = activeInv?.appName || activeAct?.appName || (minuteLogMap.get(minuteIndex)?.appName) || "desktop";
+    const currentCategory = activeInv ? "distracting" : (activeAct?.category || minuteLogMap.get(minuteIndex)?.category || "productivity");
 
-      for (let s = 0; s < gapSec; s++) {
-        const t = gapSec > 0 ? s / gapSec : 0;
-        const focus = currFocus + (nextFocus - currFocus) * t;
-        const prod = currProd + (nextProd - currProd) * t;
+    // Dynamic per-second score response
+    if (isDistraction) {
+      runningFocus = Math.max(10, runningFocus - 2.5);
+      runningProd = Math.max(10, runningProd - 2.5);
+    } else if (isIdle) {
+      runningFocus = Math.max(20, runningFocus - 0.5);
+      runningProd = Math.max(20, runningProd - 0.5);
+    } else {
+      runningFocus = Math.min(100, runningFocus + 1.2);
+      runningProd = Math.min(100, runningProd + 1.2);
+    }
 
-        // Determine state: if either endpoint is distraction, mark as distraction
-        // (distractions are discrete events, not interpolated)
-        const isDistraction = curr.distractionFlag || next.distractionFlag;
-        const isIdle = !isDistraction && (curr.idleFlag || next.idleFlag);
+    const currentMinuteLog = minuteLogMap.get(minuteIndex);
+    const nextMinuteLog = minuteLogMap.get(minuteIndex + 1);
+    let finalSecFocus = runningFocus;
+    let finalSecProd = runningProd;
 
-        timeSeries.push({
-          second: currSec + s,
-          timestamp: new Date(curr.timestamp.getTime() + s * 1000).toISOString(),
-          focusScore: Number(focus.toFixed(2)),
-          productivityScore: Number(prod.toFixed(2)),
-          distraction: isDistraction,
-          idle: isIdle,
-          appName: s === 0 ? curr.appName : null, // only first second gets the app name
-          category: s === 0 ? curr.category : null,
-        });
+    if (currentMinuteLog) {
+      const curScore = currentMinuteLog.focusScore <= 1 ? currentMinuteLog.focusScore * 100 : currentMinuteLog.focusScore;
+      const curProdScore = currentMinuteLog.productivityScore <= 1 ? currentMinuteLog.productivityScore * 100 : currentMinuteLog.productivityScore;
+      if (nextMinuteLog) {
+        const nextScore = nextMinuteLog.focusScore <= 1 ? nextMinuteLog.focusScore * 100 : nextMinuteLog.focusScore;
+        const nextProdScore = nextMinuteLog.productivityScore <= 1 ? nextMinuteLog.productivityScore * 100 : nextMinuteLog.productivityScore;
+        const t = (s % 60) / 60;
+        const targetFocus = curScore + (nextScore - curScore) * t;
+        const targetProd = curProdScore + (nextProdScore - curProdScore) * t;
+        finalSecFocus = targetFocus * 0.7 + runningFocus * 0.3;
+        finalSecProd = targetProd * 0.7 + runningProd * 0.3;
+      } else {
+        finalSecFocus = curScore * 0.7 + runningFocus * 0.3;
+        finalSecProd = curProdScore * 0.7 + runningProd * 0.3;
       }
     }
 
-    // Add the last minute log's data point
-    const last = minuteLogs[minuteLogs.length - 1];
+    if (isDistraction) {
+      finalSecFocus = Math.min(finalSecFocus, 45);
+      finalSecProd = Math.min(finalSecProd, 45);
+    }
+
     timeSeries.push({
-      second: last.minuteIndex * 60,
-      timestamp: last.timestamp.toISOString(),
-      focusScore: Number(last.focusScore.toFixed(2)),
-      productivityScore: Number(last.productivityScore.toFixed(2)),
-      distraction: last.distractionFlag,
-      idle: last.idleFlag,
-      appName: last.appName,
-      category: last.category,
+      second: s,
+      timestamp: secDate.toISOString(),
+      focusScore: Number(Math.max(0, Math.min(100, finalSecFocus)).toFixed(1)),
+      productivityScore: Number(Math.max(0, Math.min(100, finalSecProd)).toFixed(1)),
+      distraction: !!isDistraction,
+      idle: !!isIdle,
+      appName: currentApp,
+      category: currentCategory,
     });
   }
 

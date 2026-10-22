@@ -8,6 +8,10 @@ const PROTECTED_EXECUTABLES = new Set([
   "system", "system idle process", "registry", "smss.exe", "csrss.exe",
   "wininit.exe", "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe",
   "dwm.exe", "explorer.exe", "taskhostw.exe", "node.exe", "electron.exe",
+  // Linux session processes: killing these takes down or unlocks the desktop.
+  "systemd", "hyprland", "xwayland", "hypridle", "hyprlock", "swaylock", "hyprpolkitagent",
+  "xdg-desktop-portal", "xdg-desktop-portal-hyprland", "waybar", "rofi", "wofi", "fuzzel",
+  "swaync", "mako", "dunst", "quickshell", "qs", "node", "electron",
 ]);
 
 const ALLOWED_EXECUTABLES = new Set([
@@ -181,7 +185,8 @@ function resultFromError(prefix, exeName, err) {
   const stdout = err.stdout ? String(err.stdout).trim() : "";
   const exitCode = err.status !== undefined ? err.status : -1;
   const detail = stderr || stdout || err.message || "unknown error";
-  const notFound = detail.toLowerCase().includes("not found");
+  // pkill exits 1 with no output when nothing matched.
+  const notFound = detail.toLowerCase().includes("not found") || (!isWindows && exitCode === 1);
 
   return {
     killed: false,
@@ -256,11 +261,14 @@ function killProcessByName(appName) {
       console.log(`[TaskKill] SUCCESS: taskkill /F /IM "${validation.exeName}" /T`);
       if (summary) console.log(`[TaskKill]   Output: ${summary}`);
     } else {
-      const output = execFileSync("pkill", ["-f", "-i", exeDisplay], {
+      // Match the exact process name. "-f" would match the pattern anywhere in
+      // every command line, so short names like "code" or "x" kill unrelated
+      // processes across the whole session.
+      const output = execFileSync("pkill", ["-x", "-i", exeDisplay], {
         timeout: 8000,
         encoding: "utf-8",
       });
-      console.log(`[TaskKill] SUCCESS: pkill -f -i "${exeDisplay}"`);
+      console.log(`[TaskKill] SUCCESS: pkill -x -i "${exeDisplay}"`);
       if (output.trim()) console.log(`[TaskKill]   Output: ${output.trim()}`);
     }
 

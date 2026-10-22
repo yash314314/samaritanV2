@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
 import { parse } from "url";
+import { isAllowedOrigin } from "../utils/origin";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -42,6 +43,8 @@ export function initWebSocket(server: Server) {
     server,
     path: "/ws",
     perMessageDeflate: false,
+    // Browsers let any page open a WebSocket to localhost; reject foreign origins.
+    verifyClient: ({ origin }: { origin?: string }) => isAllowedOrigin(origin),
   });
 
   wss.on("connection", (ws, req) => {

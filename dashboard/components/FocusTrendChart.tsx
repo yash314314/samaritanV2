@@ -10,9 +10,9 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  ReferenceArea,
   ReferenceLine,
 } from "recharts";
+import { ALERT_THRESHOLD, SAM, scoreLuminance } from "../lib/samaritanTheme";
 
 const BUCKET_OPTIONS = [
   { label: "Hour", value: 60 },
@@ -22,54 +22,75 @@ const BUCKET_OPTIONS = [
   { label: "1m", value: 1 },
 ];
 
+const DEEP_THRESHOLD = 75;
+
 function clampScore(value: any) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(100, n));
 }
 
-function scoreColor(score: number) {
-  if (score >= 75) return "#22c55e";
-  if (score >= 50) return "#38bdf8";
-  if (score >= 25) return "#f59e0b";
-  return "#fb7185";
+function pointColor(point: any) {
+  return point.focus < ALERT_THRESHOLD ? SAM.alert : scoreLuminance(Math.max(40, point.focus));
 }
 
 function CustomTooltip({ active, payload }: any) {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0]?.payload;
   const focus = clampScore(point?.focus);
+  const tracked = Number(point?.duration ?? 0) > 0;
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-950/95 p-3 text-xs shadow-xl">
-      <div className="mb-2 font-semibold text-zinc-100">
-        {point?.label ?? "Unknown"}
-      </div>
-      <div className="space-y-1 text-zinc-400">
-        <div>
-          Focus:{" "}
-          <span style={{ color: scoreColor(focus) }} className="font-semibold">
+    <div className="sam-ui border border-grid bg-void px-3 py-2 text-[11px]">
+      <div className="mb-1 tabular-nums text-signal">{point?.label ?? "--"}</div>
+      {tracked ? (
+        <div className="flex gap-3">
+          <span className="sam-key">Focus</span>
+          <span className={`tabular-nums ${focus < ALERT_THRESHOLD ? "text-alert" : "text-signal"}`}>
             {focus.toFixed(1)}
           </span>
         </div>
-      </div>
+      ) : (
+        <div className="text-key">No activity</div>
+      )}
     </div>
   );
 }
 
-function SummaryChip({
-  label,
-  value,
-  tone = "text-zinc-100",
+function Header({
+  bucketMinutes,
+  onBucketMinutesChange,
+  isLoading,
 }: {
-  label: string;
-  value: any;
-  tone?: string;
+  bucketMinutes: number;
+  onBucketMinutesChange?: (minutes: number) => void;
+  isLoading: boolean;
 }) {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs">
-      <span className="text-zinc-500">{label}</span>{" "}
-      <span className={`font-medium ${tone}`}>{value}</span>
+    <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-3">
+      <div className="flex items-baseline gap-4">
+        <h2 className="sam-head">Focus trend</h2>
+        <span className="sam-key">{isLoading ? "Updating" : `${bucketMinutes}-minute buckets`}</span>
+      </div>
+
+      <div className="flex items-center gap-4" role="group" aria-label="Bucket size">
+        {BUCKET_OPTIONS.map((option) => {
+          const active = option.value === bucketMinutes;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onBucketMinutesChange?.(option.value)}
+              aria-pressed={active}
+              className={`text-[11px] uppercase tracking-[0.08em] underline-offset-[6px] transition-colors ${
+                active ? "text-signal underline" : "text-key hover:text-trace"
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -95,7 +116,10 @@ export default function FocusTrendChart({
         focus: clampScore(d.focus ?? d.averageFocus ?? d.focusScore),
         duration: Number(d.duration ?? d.trackedMs ?? d.activeMs ?? 0),
       }))
-    .filter((d: any) => d.label !== "Unknown" || d.duration > 0 || d.focus > 0);
+    .filter((d: any) => d.label !== "Unknown" || d.duration > 0 || d.focus > 0)
+    // Untracked buckets are gaps, not zero focus: plotting them at 0 would
+    // draw a fake "no focus" reading across every empty hour.
+    .map((d: any) => ({ ...d, plotted: d.duration > 0 ? d.focus : null }));
 
   const activePoints = chartData.filter((point: any) => point.duration > 0);
   const weightedDuration = activePoints.reduce(
@@ -113,8 +137,8 @@ export default function FocusTrendChart({
     (best: any, point: any) => (point.focus > (best?.focus ?? -1) ? point : best),
     null
   );
-  const deepBuckets = activePoints.filter((point: any) => point.focus >= 75).length;
-  const lowBuckets = activePoints.filter((point: any) => point.focus > 0 && point.focus < 35).length;
+  const deepBuckets = activePoints.filter((point: any) => point.focus >= DEEP_THRESHOLD).length;
+  const lowBuckets = activePoints.filter((point: any) => point.focus > 0 && point.focus < ALERT_THRESHOLD).length;
 
   const pointWidth =
     bucketMinutes <= 1 ? 14 : bucketMinutes <= 5 ? 22 : bucketMinutes <= 15 ? 32 : 46;
@@ -124,117 +148,98 @@ export default function FocusTrendChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="samaritan-card flex min-h-[320px] w-full max-w-full flex-col overflow-hidden p-4">
-        <h2 className="text-sm font-semibold text-zinc-200">Focus Trend</h2>
-        <div className="flex min-h-[240px] flex-1 items-center justify-center text-sm text-zinc-500">
-          {isLoading ? "Loading..." : "No focus data yet"}
-        </div>
-      </div>
+      <section className="w-full max-w-full">
+        <Header bucketMinutes={bucketMinutes} onBucketMinutesChange={onBucketMinutesChange} isLoading={isLoading} />
+        <p className="text-[12px] text-key">
+          {isLoading ? "Loading focus readings." : "No focus readings for this day yet."}
+        </p>
+      </section>
     );
   }
 
+  const summary = [
+    { key: "Average", value: averageFocus.toFixed(1), alert: activePoints.length > 0 && averageFocus < ALERT_THRESHOLD },
+    { key: "Peak", value: peak ? `${peak.focus.toFixed(1)} at ${peak.label}` : "--" },
+    { key: "Deep buckets", value: deepBuckets },
+    { key: "Low buckets", value: lowBuckets, alert: lowBuckets > 0 },
+  ];
+
   return (
-    <div className="samaritan-card flex min-h-[340px] w-full max-w-full flex-col overflow-hidden p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-200">Focus Trend</h2>
-          <div className="mt-1 text-[11px] text-zinc-500">
-            {isLoading ? "Updating..." : `${bucketMinutes}-minute buckets`}
+    <section className="w-full max-w-full">
+      <Header bucketMinutes={bucketMinutes} onBucketMinutesChange={onBucketMinutesChange} isLoading={isLoading} />
+
+      <dl className="mb-5 flex flex-wrap gap-x-10 gap-y-2">
+        {summary.map((item) => (
+          <div key={item.key} className="flex items-baseline gap-3">
+            <dt className="sam-key">{item.key}</dt>
+            <dd className={`sam-value ${item.alert ? "text-alert" : ""}`}>{item.value}</dd>
           </div>
-        </div>
+        ))}
+      </dl>
 
-        <div className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 p-1">
-          {BUCKET_OPTIONS.map((option) => {
-            const active = option.value === bucketMinutes;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => onBucketMinutesChange?.(option.value)}
-                className={`rounded px-2.5 py-1 text-[11px] transition ${
-                  active
-                    ? "bg-zinc-700 text-white"
-                    : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                }`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        <SummaryChip label="Avg" value={averageFocus.toFixed(1)} tone="text-sky-300" />
-        {peak && (
-          <SummaryChip
-            label="Peak"
-            value={`${peak.focus.toFixed(1)} @ ${peak.label}`}
-            tone="text-emerald-400"
-          />
-        )}
-        <SummaryChip label="Deep" value={deepBuckets} tone="text-emerald-400" />
-        <SummaryChip label="Low" value={lowBuckets} tone="text-rose-300" />
-      </div>
-
-      <div className="relative w-full max-w-full overflow-x-auto">
+      <div className="sam-scroll relative w-full max-w-full overflow-x-auto">
         {isLoading && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px animate-pulse bg-sky-400/70" />
+          <div className="sam-pulse pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-signal text-void" />
         )}
         <div className="h-[240px] sm:h-[270px]" style={{ width: chartWidth }}>
           <ResponsiveContainer key={`${bucketMinutes}-${chartData.length}`} width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
-              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
-
-              <ReferenceArea y1={75} y2={100} fill="#14532d" fillOpacity={0.14} />
-              <ReferenceArea y1={50} y2={75} fill="#075985" fillOpacity={0.12} />
-              <ReferenceArea y1={25} y2={50} fill="#713f12" fillOpacity={0.12} />
-              <ReferenceArea y1={0} y2={25} fill="#881337" fillOpacity={0.1} />
+            <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+              <CartesianGrid stroke="var(--sam-track)" vertical={false} />
 
               <XAxis
                 dataKey="label"
-                interval={xInterval}
-                tick={{ fill: "#a1a1aa", fontSize: 11 }}
-                axisLine={{ stroke: "#3f3f46" }}
+                interval={bucketMinutes < 60 ? xInterval : "preserveStartEnd"}
+                minTickGap={8}
+                // Hour buckets read "00".."23", like the timeline and heatmap.
+                tickFormatter={(value) => (bucketMinutes === 60 ? String(value).replace(/:00$/, "") : value)}
+                tick={{ fill: SAM.key, fontSize: 11 }}
+                axisLine={{ stroke: SAM.grid }}
                 tickLine={false}
               />
 
               <YAxis
                 domain={[0, 100]}
-                tick={{ fill: "#a1a1aa", fontSize: 12 }}
-                axisLine={{ stroke: "#3f3f46" }}
+                ticks={[0, 25, 50, 75, 100]}
+                tick={{ fill: SAM.key, fontSize: 11 }}
+                axisLine={false}
                 tickLine={false}
               />
 
-              <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#71717a", strokeDasharray: "4 4" }} />
-              <ReferenceLine y={75} stroke="#22c55e" strokeDasharray="4 4" strokeOpacity={0.45} />
-              <ReferenceLine y={50} stroke="#38bdf8" strokeDasharray="4 4" strokeOpacity={0.3} />
-
-              <Line
-                type="monotone"
-                dataKey="focus"
-                stroke="#a855f7"
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 6, fill: "#f3e8ff", stroke: "#a855f7", strokeWidth: 2 }}
-                isAnimationActive={chartData.length <= 300}
-                animationDuration={900}
-                animationEasing="ease-out"
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: SAM.dim, strokeWidth: 1 }} />
+              <ReferenceLine
+                y={DEEP_THRESHOLD}
+                stroke={SAM.dim}
+                strokeDasharray="2 4"
+                label={{ value: "DEEP", position: "insideTopRight", fill: SAM.key, fontSize: 10 }}
+              />
+              <ReferenceLine
+                y={ALERT_THRESHOLD}
+                stroke={SAM.alert}
+                strokeOpacity={0.6}
+                strokeDasharray="2 4"
+                label={{ value: "LOW", position: "insideTopRight", fill: SAM.alert, fontSize: 10 }}
               />
 
-              <Scatter dataKey="focus" isAnimationActive={chartData.length <= 300} animationDuration={700}>
+              <Line
+                type="linear"
+                dataKey="plotted"
+                connectNulls={false}
+                stroke={SAM.signal}
+                strokeWidth={1.5}
+                dot={false}
+                activeDot={{ r: 4, fill: SAM.void, stroke: SAM.signal, strokeWidth: 1.5 }}
+                isAnimationActive={false}
+              />
+
+              <Scatter dataKey="plotted" isAnimationActive={false}>
                 {chartData.map((point: any, index: number) => (
-                  <Cell
-                    key={`focus-dot-${point.label}-${index}`}
-                    fill={point.duration > 0 ? scoreColor(point.focus) : "#3f3f46"}
-                    fillOpacity={point.duration > 0 ? 0.95 : 0.22}
-                  />
+                  <Cell key={`focus-dot-${point.label}-${index}`} fill={pointColor(point)} />
                 ))}
               </Scatter>
             </ComposedChart>
           </ResponsiveContainer>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

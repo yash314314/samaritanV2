@@ -42,9 +42,9 @@ export function ActiveSession() {
 
   const getEnforcementIcon = () => {
     switch (session.enforcement) {
-      case "block": return <Shield className="w-5 h-5 text-red-400" />;
-      case "warn": return <AlertTriangle className="w-5 h-5 text-yellow-400" />;
-      case "require_reason": return <ShieldCheck className="w-5 h-5 text-purple-400" />;
+      case "block": return <Shield className="w-5 h-5 text-red-500" />;
+      case "warn": return <AlertTriangle className="w-5 h-5 text-red-400" />;
+      case "require_reason": return <ShieldCheck className="w-5 h-5 text-red-400" />;
       default: return <Eye className="w-5 h-5 text-zinc-400" />;
     }
   };
@@ -83,7 +83,7 @@ export function ActiveSession() {
 
       <div className="w-full bg-zinc-800 rounded-full h-3 mb-6">
         <div
-          className={`h-3 rounded-full transition-all ${isExpired ? "bg-red-500" : "bg-blue-500"}`}
+          className={`h-3 rounded-full transition-all ${isExpired ? "bg-red-600 animate-pulse" : "bg-red-500"}`}
           style={{ width: `${Math.min(100, (session.elapsedMinutes / session.plannedMinutes) * 100)}%` }}
         />
       </div>
@@ -95,7 +95,7 @@ export function ActiveSession() {
         </div>
         <div className="bg-zinc-800 rounded-lg p-4">
           <div className="text-sm text-zinc-500 mb-1">Focus Score</div>
-          <div className="text-xl font-mono text-blue-400">{session.focusScore.toFixed(1)}</div>
+          <div className="text-xl font-mono text-zinc-100">{session.focusScore.toFixed(1)}</div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4">
           <div className="text-sm text-zinc-500 mb-1">Planned</div>
@@ -106,7 +106,7 @@ export function ActiveSession() {
       <div className="flex gap-3">
         <button
           onClick={() => handleEnd("completed")}
-          className="flex-1 bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="flex-1 bg-zinc-100 hover:bg-white text-black font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <StopCircle className="w-5 h-5" />
           Complete

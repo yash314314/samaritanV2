@@ -11,6 +11,7 @@ import {
   startDeepWorkSession
 } from "../services/deepWorkService";
 import { getDeepWorkSessionResult } from "../services/deepWorkService";
+import { parseUserId, sendRouteError } from "../utils/requestParams";
 const router = Router();
 
 function failure(res: any, error: unknown, fallback: string) {
@@ -20,25 +21,23 @@ function failure(res: any, error: unknown, fallback: string) {
 }
 
 router.get("/active", async (req, res) => {
-  const { userId } = req.query;
-
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
+  try {
+    const userId = parseUserId(req.query.userId);
+    const session = await getActiveDeepWorkSession(userId);
+    res.json(session);
+  } catch (error) {
+    sendRouteError(res, error, "Failed to get active session", "Get active deep work failed:");
   }
-
-  const session = await getActiveDeepWorkSession(userId);
-  res.json(session);
 });
 
 router.get("/history", async (req, res) => {
-  const { userId } = req.query;
-
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
+  try {
+    const userId = parseUserId(req.query.userId);
+    const sessions = await getDeepWorkSessionHistory(userId);
+    res.json(sessions);
+  } catch (error) {
+    sendRouteError(res, error, "Failed to get session history", "Get deep work history failed:");
   }
-
-  const sessions = await getDeepWorkSessionHistory(userId);
-  res.json(sessions);
 });
 
 router.post("/start", async (req, res) => {

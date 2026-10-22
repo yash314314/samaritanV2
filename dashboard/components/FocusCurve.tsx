@@ -31,21 +31,21 @@ export function FocusCurve({ data, plannedMinutes, height = 400 }: FocusCurvePro
     <div className="w-full">
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-grid)" />
           <XAxis 
             dataKey="minute" 
-            stroke="#888" 
+            stroke="var(--sam-dim)" 
             label={{ value: "Minutes", position: "insideBottom", offset: -10 }}
           />
           <YAxis 
-            stroke="#888" 
+            stroke="var(--sam-dim)" 
             domain={[0, 100]} 
             label={{ value: "Score", angle: -90, position: "insideLeft" }}
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: "#1a1a1a",
-              border: "1px solid #333",
+              backgroundColor: "var(--sam-void)",
+              border: "1px solid var(--sam-grid)",
               borderRadius: "8px",
             }}
             formatter={(value, name) => [
@@ -56,24 +56,24 @@ export function FocusCurve({ data, plannedMinutes, height = 400 }: FocusCurvePro
           <Legend />
           <ReferenceLine 
             x={plannedMinutes} 
-            stroke="#ff4444" 
+            stroke="var(--sam-alert)" 
             strokeDasharray="5 5" 
-            label={{ value: "Target", fill: "#ff4444" }}
+            label={{ value: "Target", fill: "var(--sam-alert)" }}
           />
           <Line
             type="monotone"
             dataKey="Focus"
-            stroke="#3b82f6"
+            stroke="var(--sam-series-2)"
             strokeWidth={2}
-            dot={{ fill: "#3b82f6", r: 3 }}
+            dot={{ fill: "var(--sam-series-2)", r: 3 }}
             activeDot={{ r: 6 }}
           />
           <Line
             type="monotone"
             dataKey="Productivity"
-            stroke="#10b981"
+            stroke="var(--sam-series-3)"
             strokeWidth={2}
-            dot={{ fill: "#10b981", r: 3 }}
+            dot={{ fill: "var(--sam-series-3)", r: 3 }}
             activeDot={{ r: 6 }}
           />
         </LineChart>

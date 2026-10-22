@@ -36,11 +36,19 @@ import { getCalendarIntelligence, suggestCalendarEventSlot } from '../services/c
 import { stopCalendarFocusForEvent } from '../services/calendarFocusService';
 import { normalizeAllDayCalendarRange, parseCalendarDate } from '../services/calendarTimeService';
 import { getCalendarWorkHoursUtilization } from '../services/calendarWorkHoursService';
+import { MAX_RANGE_DAYS } from '../utils/time';
 
 const router = Router();
 
 async function calendarTimezone(userId: string) {
   return (await getCalendarTrackingSettings(userId)).timezone;
+}
+
+const MAX_CALENDAR_RANGE_MS = MAX_RANGE_DAYS * 24 * 60 * 60 * 1000;
+
+/** Day-by-day calendar analyses reject ranges longer than MAX_RANGE_DAYS. */
+function rangeTooLong(startAt: Date, endAt: Date) {
+  return endAt.getTime() - startAt.getTime() > MAX_CALENDAR_RANGE_MS;
 }
 
 const FOCUS_ENFORCEMENT_LEVELS = new Set(['observe', 'warn', 'require_reason', 'block']);
@@ -83,6 +91,7 @@ router.get('/work-hours/utilization', async (req, res) => {
     const startAt = parseCalendarDate(from, timezone);
     const endAt = parseCalendarDate(to, timezone, true);
     if (!startAt || !endAt || endAt <= startAt) return res.status(400).json({ error: 'Invalid date range' });
+    if (rangeTooLong(startAt, endAt)) return res.status(400).json({ error: `Range too large: maximum is ${MAX_RANGE_DAYS} days` });
     res.json(await getCalendarWorkHoursUtilization(userId, startAt, endAt));
   } catch (error) {
     console.error('Calendar work-hours utilization error:', error);
@@ -157,6 +166,7 @@ router.get('/intelligence', async (req, res) => {
     const startAt = parseCalendarDate(from, timezone);
     const endAt = parseCalendarDate(to, timezone, true);
     if (!startAt || !endAt || endAt <= startAt) return res.status(400).json({ error: 'Invalid date range' });
+    if (rangeTooLong(startAt, endAt)) return res.status(400).json({ error: `Range too large: maximum is ${MAX_RANGE_DAYS} days` });
     res.json(await getCalendarIntelligence(userId, startAt, endAt));
   } catch (error) {
     console.error('Calendar intelligence fetch error:', error);
@@ -437,7 +447,7 @@ router.get('/overlay', async (req, res) => {
         userId,
         status: { not: 'cancelled' },
         startAt: { lte: rangeEnd },
-        endAt: { gte: rangeStart },
+        endAt: { gt: rangeStart },
       },
       orderBy: { startAt: 'asc' },
       include: {
@@ -491,7 +501,7 @@ router.get('/', async (req, res) => {
         return res.status(400).json({ error: 'Invalid date range' });
       }
       where.startAt = { lte: rangeEnd };
-      where.endAt = { gte: rangeStart };
+      where.endAt = { gt: rangeStart };
     }
 
     const events = await prisma.calendarEvent.findMany({
