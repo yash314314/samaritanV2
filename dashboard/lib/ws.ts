@@ -8,6 +8,9 @@ import { currentUser, getAccessToken, subscribeAuth } from "./auth";
 // The access token rides in the subprotocol list: browsers cannot set headers
 // on a WebSocket, and a token in the URL would end up in proxy logs.
 const WS_PROTOCOL = "samaritan";
+// The server closes a socket whose access token lapses unrenewed; refresh it
+// in band well inside the 15-minute token lifetime.
+const AUTH_RENEW_INTERVAL_MS = 4 * 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -40,6 +43,9 @@ class SamaritanWsClient {
   private stateListeners = new Set<(state: WsConnectionState) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private renewTimer: ReturnType<typeof setInterval> | null = null;
+  // Replayed on every (re)connect: subscriptions live on the server-side socket.
+  private deepWorkSubscriptions = new Set<string>();
   private reconnectAttempt = 0;
   private maxReconnectDelay = 30000;
   private baseReconnectDelay = 1000;
@@ -74,10 +80,20 @@ class SamaritanWsClient {
       this._setState({ connected: true, connecting: false, error: null, reconnectAttempt: 0 });
       console.log("[WS] Connected");
 
+      for (const deepWorkId of this.deepWorkSubscriptions) {
+        this.sendRaw(JSON.stringify({ type: "session:subscribe", payload: { deepWorkId } }));
+      }
       while (this.messageQueue.length > 0) {
         const msg = this.messageQueue.shift();
         if (msg) this.ws?.send(msg);
       }
+
+      this.renewTimer = setInterval(() => {
+        // The token sent must outlive the next tick, or the server closes the socket first.
+        void getAccessToken(AUTH_RENEW_INTERVAL_MS + 60 * 1000).then((fresh) => {
+          if (fresh) this.sendRaw(JSON.stringify({ type: "auth:renew", payload: { token: fresh } }));
+        });
+      }, AUTH_RENEW_INTERVAL_MS);
 
       this.pingTimer = setInterval(() => {
         this.sendRaw(JSON.stringify({ type: "ping", payload: {} }));
@@ -154,10 +170,12 @@ class SamaritanWsClient {
   }
 
   subscribeToDeepWork(deepWorkId: string) {
-    this.send("session:subscribe", { deepWorkId });
+    this.deepWorkSubscriptions.add(deepWorkId);
+    if (this.ws?.readyState === WebSocket.OPEN) this.sendRaw(JSON.stringify({ type: "session:subscribe", payload: { deepWorkId } }));
   }
 
   unsubscribeFromDeepWork(deepWorkId: string) {
+    this.deepWorkSubscriptions.delete(deepWorkId);
     this.send("session:unsubscribe", { deepWorkId });
   }
 
@@ -197,6 +215,10 @@ class SamaritanWsClient {
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
+    }
+    if (this.renewTimer) {
+      clearInterval(this.renewTimer);
+      this.renewTimer = null;
     }
     if (this.ws) {
       this.ws.onopen = null;

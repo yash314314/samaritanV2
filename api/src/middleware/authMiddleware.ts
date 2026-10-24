@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyAccessToken, TokenPayload } from "../utils/jwt";
-import { currentTokenVersion } from "../services/authService";
+import { verifyAccessToken, TokenPayload, VerifiedToken } from "../utils/jwt";
+import { currentTokenVersion, familyIsActive } from "../services/authService";
 
 export interface AuthenticatedRequest extends Request {
   user?: TokenPayload;
@@ -13,20 +13,27 @@ export function bearerToken(header: string | undefined): string | null {
 }
 
 /**
- * Verifies an access token and that it has not been revoked (user deleted,
- * password changed, logged out everywhere). Resolves the payload or null.
+ * Verifies an access token and that it has not been revoked: the user still
+ * exists, no password change or "sign out everywhere" happened since
+ * (tokenVersion), and its own login was not signed out (familyId).
+ * Resolves the payload or null.
  */
-export async function authenticateToken(token: string | null): Promise<TokenPayload | null> {
+export async function authenticateToken(token: string | null): Promise<VerifiedToken | null> {
   if (!token) return null;
-  let payload: TokenPayload;
+  let payload: VerifiedToken;
   try {
     payload = verifyAccessToken(token);
   } catch {
     return null;
   }
+  return (await tokenStillValid(payload)) ? payload : null;
+}
+
+/** Revocation checks for an already-verified token (also re-run for open sockets). */
+export async function tokenStillValid(payload: TokenPayload): Promise<boolean> {
   const version = await currentTokenVersion(payload.userId);
-  if (version === null || version !== payload.tokenVersion) return null;
-  return payload;
+  if (version === null || version !== payload.tokenVersion) return false;
+  return familyIsActive(payload.familyId, payload.userId);
 }
 
 /** Rejects the request with 401 unless it carries a valid `Authorization: Bearer` access token. */

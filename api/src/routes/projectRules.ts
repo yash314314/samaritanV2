@@ -1,4 +1,5 @@
 import { Router, type Request } from 'express';
+import { publicMessage } from "../utils/requestParams";
 import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { prisma } from '../prisma';
 import { emitProjectChanged } from '../websocket/broadcaster';
@@ -71,7 +72,7 @@ router.patch('/:projectId/rules/:ruleId', async (req, res) => {
     emitProjectChanged(existing.project.userId, 'rules-updated', { projectId, rule });
     res.json(rule);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to update rule' });
+    res.status(400).json({ error: publicMessage(error, 'Failed to update rule') });
   }
 });
 
@@ -85,7 +86,7 @@ router.post('/:projectId/rules/test', async (req, res) => {
     const result = await tagActivityToProject(project.userId, String(appName), domain ? String(domain) : null, windowTitle ? String(windowTitle) : null);
     res.json({ ...result, matchesProject: result.projectId === projectId });
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to test rule' });
+    res.status(400).json({ error: publicMessage(error, 'Failed to test rule') });
   }
 });
 

@@ -72,7 +72,10 @@ describe("auth configuration", () => {
 
 describe("outbound fetch guard", () => {
   test("private, loopback, link-local and metadata addresses are recognised", () => {
-    for (const address of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1"]) {
+    for (const address of [
+      "127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1",
+      "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "[::ffff:7f00:1]", "64:ff9b::7f00:1", "2002:7f00:1::1", "::127.0.0.1", "::",
+    ]) {
       assert.equal(isPrivateAddress(address), true, address);
     }
     for (const address of ["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111", "172.32.0.1"]) {
@@ -88,6 +91,9 @@ describe("outbound fetch guard", () => {
       await assert.rejects(fetchUntrustedText("https://user:pw@example.com/x.ics"), UnsafeUrlError);
       await assert.rejects(fetchUntrustedText("http://169.254.169.254/latest/meta-data"), UnsafeUrlError);
       await assert.rejects(fetchUntrustedText("http://[::1]:4000/health"), UnsafeUrlError);
+      await assert.rejects(fetchUntrustedText("http://[::ffff:127.0.0.1]:4000/health"), UnsafeUrlError);
+      await assert.rejects(fetchUntrustedText("http://[::ffff:169.254.169.254]/latest/meta-data"), UnsafeUrlError);
+      await assert.rejects(fetchUntrustedText("http://2130706433/"), UnsafeUrlError);
       await assert.rejects(fetchUntrustedText("http://localhost:4000/health"), UnsafeUrlError);
     } finally {
       delete process.env.ALLOW_PRIVATE_FETCH;

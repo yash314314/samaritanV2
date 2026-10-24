@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { publicMessage } from "../utils/requestParams";
 
 import {
   endSmartBreak,
@@ -21,7 +22,7 @@ function userIdFrom(value: unknown) {
 }
 
 function routeError(res: any, error: unknown) {
-  const message = error instanceof Error ? error.message : "Smart break request failed";
+  const message = publicMessage(error, "Smart break request failed");
   const notFound = /not found|no longer active/i.test(message);
   res.status(notFound ? 404 : 400).json({ error: message });
 }

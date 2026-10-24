@@ -11,11 +11,18 @@ export interface TokenPayload {
   role: string;
   /** Must match User.tokenVersion; a password change or "log out everywhere" bumps it. */
   tokenVersion: number;
+  /** The login (refresh-token family) this token was issued for; ending that login ends the token. */
+  familyId: string;
+}
+
+export interface VerifiedToken extends TokenPayload {
+  /** Expiry, epoch milliseconds. */
+  expiresAt: number;
 }
 
 export function generateAccessToken(payload: TokenPayload): string {
   return jwt.sign(
-    { email: payload.email, role: payload.role, tv: payload.tokenVersion, typ: "access" },
+    { email: payload.email, role: payload.role, tv: payload.tokenVersion, fid: payload.familyId, typ: "access" },
     authConfig.accessSecret,
     {
       algorithm: "HS256",
@@ -33,13 +40,19 @@ export function accessTokenExpiry(from = new Date()): Date {
 }
 
 /** Verifies signature, algorithm, issuer, audience and expiry. Throws on any failure. */
-export function verifyAccessToken(token: string): TokenPayload {
+export function verifyAccessToken(token: string): VerifiedToken {
   const decoded = jwt.verify(token, authConfig.accessSecret, {
     algorithms: ["HS256"],
     issuer: authConfig.issuer,
     audience: authConfig.audience,
   });
-  if (typeof decoded === "string" || typeof decoded.sub !== "string" || decoded.typ !== "access") {
+  if (
+    typeof decoded === "string" ||
+    typeof decoded.sub !== "string" ||
+    decoded.typ !== "access" ||
+    typeof decoded.fid !== "string" ||
+    typeof decoded.exp !== "number"
+  ) {
     throw new jwt.JsonWebTokenError("Malformed access token");
   }
   return {
@@ -47,5 +60,7 @@ export function verifyAccessToken(token: string): TokenPayload {
     email: typeof decoded.email === "string" ? decoded.email : null,
     role: typeof decoded.role === "string" ? decoded.role : "user",
     tokenVersion: typeof decoded.tv === "number" ? decoded.tv : -1,
+    familyId: decoded.fid,
+    expiresAt: decoded.exp * 1000,
   };
 }

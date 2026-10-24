@@ -111,9 +111,12 @@ export function refreshSession(): Promise<boolean> {
   return refreshing;
 }
 
-/** A usable access token, refreshing first when needed; null when signed out. */
-export async function getAccessToken(): Promise<string | null> {
-  if (state.accessToken && state.expiresAt - Date.now() > EXPIRY_MARGIN_MS) return state.accessToken;
+/**
+ * A usable access token, refreshing first when it would lapse within
+ * `minValidityMs`; null when signed out.
+ */
+export async function getAccessToken(minValidityMs = EXPIRY_MARGIN_MS): Promise<string | null> {
+  if (state.accessToken && state.expiresAt - Date.now() > minValidityMs) return state.accessToken;
   const refreshed = await refreshSession();
   return refreshed ? state.accessToken : null;
 }

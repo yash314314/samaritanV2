@@ -83,7 +83,8 @@ export async function createActivityFromTracker(data: {
   const classification = await classifyActivity(
     data.app,
     data.title,
-    data.domain ?? icon.domain ?? data.url ?? null
+    data.domain ?? icon.domain ?? data.url ?? null,
+    data.userId
   );
 
   // Auto-tag activity to project based on matching rules

@@ -7,6 +7,10 @@ const DEVICE_ID = auth.DEVICE_ID;
 // While signed out there is nothing to connect with; retry slowly until a
 // credential appears (auth.onChange below reconnects at once when it does).
 const SIGNED_OUT_RETRY_MS = 60 * 1000;
+// The server closes a socket whose access token lapses unrenewed; renew in
+// band well inside the 15-minute token lifetime.
+const AUTH_RENEW_INTERVAL_MS = 4 * 60 * 1000;
+let renewTimer = null;
 
 // ═══════════════════════════════════════════════════════════════════════
 // STATE
@@ -52,9 +56,19 @@ async function connect() {
   const url = `${WS_URL}?deviceId=${encodeURIComponent(DEVICE_ID)}&clientType=desktop`;
   ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
 
-  ws.on("unexpected-response", (_request, response) => {
+  // With this listener attached, ws neither aborts the request nor emits
+  // "close", so the socket would sit in CONNECTING for good: abort and retry.
+  const socket = ws;
+  socket.on("unexpected-response", (request, response) => {
     console.warn(`[WS] Handshake refused: HTTP ${response.statusCode}`);
-    if (response.statusCode === 401) auth.getAccessToken().catch(() => undefined);
+    // A 401 means the cached access token is no longer accepted (revoked,
+    // or issued before a server change): the retry must mint a new one.
+    if (response.statusCode === 401) auth.invalidateAccessToken();
+    request.destroy();
+    if (ws === socket) ws = null;
+    isConnected = false;
+    stopHeartbeat();
+    scheduleReconnect();
   });
 
   ws.on("open", () => {
@@ -68,6 +82,17 @@ async function connect() {
     }
 
     startHeartbeat();
+    clearInterval(renewTimer);
+    renewTimer = setInterval(() => {
+      // The token sent must outlive the next tick, or the server closes the socket first.
+      auth.getAccessToken(AUTH_RENEW_INTERVAL_MS + 60 * 1000)
+        .then((fresh) => {
+          if (fresh && ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "auth:renew", payload: { token: fresh } }));
+          }
+        })
+        .catch((err) => console.warn("[WS] Token renewal failed:", err.message));
+    }, AUTH_RENEW_INTERVAL_MS);
   });
 
   ws.on("message", (data) => {
@@ -82,6 +107,8 @@ async function connect() {
   ws.on("close", (code) => {
     isConnected = false;
     stopHeartbeat();
+    clearInterval(renewTimer);
+    renewTimer = null;
     // 4001: the server ended this login (sign-out everywhere, password change).
     scheduleReconnect(code === 4001 ? SIGNED_OUT_RETRY_MS : undefined);
   });

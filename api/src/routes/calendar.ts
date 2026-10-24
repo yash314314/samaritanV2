@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { publicMessage } from "../utils/requestParams";
 import { requireRole, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { fetchUntrustedText, UnsafeUrlError } from '../utils/safeFetch';
 import { assertOwnedProject } from '../services/ownership';
@@ -187,7 +188,7 @@ router.get('/intelligence/slot-suggestion', async (req, res) => {
     if (!suggestion) return res.status(404).json({ error: 'No open workday slot found in the next 14 days' });
     res.json(suggestion);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to find an open slot';
+    const message = publicMessage(error, 'Failed to find an open slot');
     res.status(message.includes('not found') ? 404 : 400).json({ error: message });
   }
 });
@@ -198,7 +199,7 @@ router.post('/sessions/manual/start', async (req, res) => {
   try {
     res.status(201).json(await startManualCalendarSession(userId, { type, title, projectId }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to start session';
+    const message = publicMessage(error, 'Failed to start session');
     res.status(message.includes('active manual') ? 409 : 400).json({ error: message });
   }
 });
@@ -221,7 +222,7 @@ router.post('/sessions/manual/log', async (req, res) => {
       projectId,
     }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to log session';
+    const message = publicMessage(error, 'Failed to log session');
     res.status(400).json({ error: message });
   }
 });
@@ -235,7 +236,7 @@ router.post('/sessions/:id/end', async (req, res) => {
     if (endedAt && !parsedEnd) throw new Error('Invalid session end time');
     res.json(await endManualCalendarSession(userId, req.params.id, parsedEnd));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to end session';
+    const message = publicMessage(error, 'Failed to end session');
     res.status(404).json({ error: message });
   }
 });
@@ -247,7 +248,7 @@ router.delete('/sessions/:id', async (req, res) => {
     await deleteManualCalendarSession(userId, req.params.id);
     res.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to delete session';
+    const message = publicMessage(error, 'Failed to delete session');
     res.status(404).json({ error: message });
   }
 });
@@ -261,7 +262,7 @@ router.post('/sessions/:id/review', async (req, res) => {
   try {
     res.json(await reviewCalendarSession(userId, id, action));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Review failed';
+    const message = publicMessage(error, 'Review failed');
     res.status(404).json({ error: message });
   }
 });
@@ -274,7 +275,7 @@ router.post('/sessions/review/bulk', async (req, res) => {
   try {
     res.json(await reviewCalendarSessions(userId, sessionIds.map(String), action));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Bulk review failed';
+    const message = publicMessage(error, 'Bulk review failed');
     res.status(400).json({ error: message });
   }
 });
@@ -296,7 +297,7 @@ router.patch('/sessions/:id', async (req, res) => {
       projectId,
     }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update calendar session';
+    const message = publicMessage(error, 'Failed to update calendar session');
     res.status(message.includes('not found') ? 404 : message.includes('active session') ? 409 : 400).json({ error: message });
   }
 });
@@ -329,7 +330,7 @@ router.post('/reminders/:id/snooze', async (req, res) => {
   try {
     res.json(await snoozeCalendarReminder(req.params.id, userId, Number(minutes)));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to snooze reminder';
+    const message = publicMessage(error, 'Failed to snooze reminder');
     res.status(message.includes('not found') ? 404 : 400).json({ error: message });
   }
 });
@@ -340,7 +341,7 @@ router.post('/reminders/:id/dismiss', async (req, res) => {
   try {
     res.json(await dismissCalendarReminder(req.params.id, userId));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to dismiss reminder';
+    const message = publicMessage(error, 'Failed to dismiss reminder');
     res.status(message.includes('not found') ? 404 : 400).json({ error: message });
   }
 });
@@ -633,7 +634,7 @@ router.post('/', async (req, res) => {
     res.json({ ...event, occurrenceCount: occurrences.length });
   } catch (error) {
     console.error('Event creation error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to create event';
+    const message = publicMessage(error, 'Failed to create event');
     res.status(message === 'Project not found' ? 404 : message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
   }
 });
@@ -764,7 +765,7 @@ router.patch('/:id', async (req, res) => {
     res.json({ ...event, occurrenceCount: occurrences.length });
   } catch (error) {
     console.error('Event update error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to update event';
+    const message = publicMessage(error, 'Failed to update event');
     res.status(message === 'Project not found' ? 404 : message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
   }
 });

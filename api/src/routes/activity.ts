@@ -4,7 +4,7 @@ import { getTimeline } from '../services/timelineservice';
 import { ActivityOwnershipError, createActivityFromTracker } from '../services/sessionService';
 import { reviewActivities } from '../services/activityReviewService';
 import { resolveISTDateRange } from '../utils/time';
-import { parseUserId, sendRouteError } from '../utils/requestParams';
+import { parseUserId, sendRouteError, publicMessage } from '../utils/requestParams';
 const router = Router();
 
 router.post('/', async (req, res) => {
@@ -83,7 +83,7 @@ router.post("/reviews", async (req, res) => {
     const result = await reviewActivities(userId, reviews);
     res.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Review failed";
+    const message = publicMessage(error, "Review failed");
     console.error("Activity review error:", error);
     res.status(400).json({ error: message });
   }

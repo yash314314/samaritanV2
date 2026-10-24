@@ -75,7 +75,7 @@ async function sendSessionToBackend(session) {
   console.log("[Samaritan] WS unavailable; using HTTP fallback");
   const outcome = await postSession(payload, session.app);
   if (outcome === "retry") {
-    outbox.enqueue(payload);
+    outbox.enqueue(payload, auth.activityOwnerId());
     console.warn("[Samaritan] Activity queued for later delivery. Outbox size:", outbox.size());
   }
 }
@@ -131,7 +131,7 @@ async function postSession(payload, appName) {
 
 /** Replays queued activity over HTTP, oldest first. Interventions are not replayed. */
 function flushOutbox() {
-  return outbox.flush((payload) => postSession(payload, null));
+  return outbox.flush((payload) => postSession(payload, null), auth.status().userId);
 }
 
 /* ---------------- INTERVENTION HANDLER ---------- */

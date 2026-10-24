@@ -819,7 +819,7 @@ export async function getDeepWorkSessionResult(sessionId: string, userId: string
   if (!session) return null;
 
   const enforcementEvents = await prisma.distractionBlockEvent.findMany({
-    where: { deepWorkId: session.id },
+    where: { deepWorkId: session.id, userId },
     orderBy: { occurredAt: "asc" },
   });
 

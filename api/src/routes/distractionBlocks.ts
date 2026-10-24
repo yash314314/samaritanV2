@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { publicMessage } from "../utils/requestParams";
 
 import {
   createDistractionBlock,
@@ -17,7 +18,7 @@ function userId(value: unknown) {
 }
 
 function failure(res: any, error: unknown) {
-  const message = error instanceof Error ? error.message : "Distraction blocker request failed";
+  const message = publicMessage(error, "Distraction blocker request failed");
   res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
 }
 

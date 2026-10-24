@@ -15,32 +15,39 @@ function items() {
   return Array.isArray(list) ? list : [];
 }
 
-function enqueue(payload) {
+/** Queues `payload` for `ownerId`, the account it was recorded under (null when unknown). */
+function enqueue(payload, ownerId = null) {
+  const entry = { ...payload, ownerId };
   const list = items();
-  const index = list.findIndex((entry) => entry.id && entry.id === payload.id);
+  const index = list.findIndex((queued) => queued.id && queued.id === entry.id);
   // The same session is sent repeatedly as it grows; keep only its latest state.
-  if (index !== -1) list[index] = payload;
-  else list.push(payload);
+  if (index !== -1) list[index] = entry;
+  else list.push(entry);
   if (list.length > MAX_ITEMS) list.splice(0, list.length - MAX_ITEMS);
   store.set("items", list);
 }
 
 /**
- * Sends queued payloads in order with `send`, which resolves "sent" (drop it),
- * "rejected" (the server refused it for good; drop it) or "retry" (stop and
- * keep the rest for later). Concurrent calls share one pass.
+ * Sends, oldest first, the queued payloads that belong to `ownerId` (or to no
+ * known account) with `send`, which resolves "sent" (drop it), "rejected" (the
+ * server refused it for good; drop it) or "retry" (stop and keep the rest).
+ * Another account's activity stays queued until that account signs in again.
+ * Concurrent calls share one pass.
  */
-function flush(send) {
+function flush(send, ownerId) {
   if (flushing) return flushing;
   flushing = (async () => {
     let sent = 0;
+    const deliverable = (entry) => !entry.ownerId || entry.ownerId === ownerId;
     for (;;) {
-      const list = items();
-      if (list.length === 0) break;
-      const outcome = await send(list[0]).catch(() => "retry");
+      const next = items().find(deliverable);
+      if (!next || !ownerId) break;
+      const { ownerId: _owner, ...payload } = next;
+      const outcome = await send(payload).catch(() => "retry");
       if (outcome === "retry") break;
       const remaining = items();
-      if (remaining.length && remaining[0].id === list[0].id) remaining.shift();
+      const index = remaining.findIndex((entry) => entry.id === next.id && deliverable(entry));
+      if (index !== -1) remaining.splice(index, 1);
       store.set("items", remaining);
       if (outcome === "sent") sent += 1;
     }

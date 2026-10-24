@@ -57,3 +57,17 @@ export function sendRouteError(res: Response, error: unknown, fallback: string, 
   console.error(logLabel ?? fallback, error);
   return res.status(500).json({ error: fallback });
 }
+
+/**
+ * The message a client may see for a failed request: only what our own code
+ * threw on purpose (a plain Error or an InvalidRequestError). Database and
+ * runtime errors (Prisma, TypeError, ...) carry internals, so they are logged
+ * and replaced by `fallback`.
+ */
+export function publicMessage(error: unknown, fallback: string): string {
+  if (error instanceof InvalidRequestError || (error instanceof Error && error.constructor === Error)) {
+    return error.message;
+  }
+  console.error(fallback, error);
+  return fallback;
+}

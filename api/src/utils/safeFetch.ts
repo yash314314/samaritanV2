@@ -22,38 +22,30 @@ function blockPrivateTargets(): boolean {
   return resolveDatabaseConfig().target === "global" || process.env.NODE_ENV === "production";
 }
 
-function ipv4Private(address: string): boolean {
-  const [a, b] = address.split(".").map(Number);
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224
-  );
+// Non-public ranges. BlockList also applies the IPv4 rules to IPv4-mapped
+// IPv6 forms, which URL parsing rewrites ([::ffff:127.0.0.1] -> ::ffff:7f00:1).
+const PRIVATE_RANGES = new net.BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
+  ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15],
+  ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+] as const) {
+  PRIVATE_RANGES.addSubnet(network, prefix, "ipv4");
+}
+for (const [network, prefix] of [
+  // IPv4-compatible (includes :: and ::1), NAT64, 6to4 (both embed an IPv4
+  // address a gateway may route), discard, documentation, ULA, link-local, multicast.
+  ["::", 96], ["64:ff9b::", 96], ["64:ff9b:1::", 48], ["2002::", 16], ["100::", 64],
+  ["2001:db8::", 32], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+] as const) {
+  PRIVATE_RANGES.addSubnet(network, prefix, "ipv6");
 }
 
 export function isPrivateAddress(address: string): boolean {
-  if (net.isIPv4(address)) return ipv4Private(address);
-  const lower = address.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return ipv4Private(mapped[1]);
-  return (
-    lower === "::" ||
-    lower === "::1" ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    lower.startsWith("fe8") ||
-    lower.startsWith("fe9") ||
-    lower.startsWith("fea") ||
-    lower.startsWith("feb") ||
-    lower.startsWith("ff")
-  );
+  const bare = address.replace(/^\[|\]$/g, "");
+  const family = net.isIP(bare);
+  if (family === 0) return true; // not an address at all: refuse rather than guess
+  return PRIVATE_RANGES.check(bare, family === 4 ? "ipv4" : "ipv6");
 }
 
 const guardedLookup: LookupFunction = (hostname, options, callback) => {
@@ -92,7 +84,8 @@ export async function fetchUntrustedText(
   let url = parseTarget(raw);
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    if (guard && net.isIP(url.hostname.replace(/^\[|\]$/g, "")) && isPrivateAddress(url.hostname.replace(/^\[|\]$/g, ""))) {
+    const literal = url.hostname.replace(/^\[|\]$/g, "");
+    if (guard && net.isIP(literal) && isPrivateAddress(literal)) {
       throw new UnsafeUrlError("Refusing to fetch a private address");
     }
     const result = await new Promise<{ status: number; location?: string; body?: string }>((resolve, reject) => {

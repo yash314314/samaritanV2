@@ -5,7 +5,7 @@ import { emitGoalChanged } from '../websocket/broadcaster';
 import { getGoalHistory, getGoalsDashboard, goalDateFromInput, hydrateGoalProgress, listGoalsWithProgress } from '../services/goalProgressService';
 import { getCalendarTrackingSettings } from '../services/calendarTrackingService';
 import { InvalidRequestError } from '../utils/time';
-import { parseIntegerParam } from '../utils/requestParams';
+import { parseIntegerParam, publicMessage } from '../utils/requestParams';
 import { dispatchWebhookEvent } from '../services/webhookService';
 
 const router = Router();
@@ -42,7 +42,7 @@ router.get('/dashboard', async (req, res) => {
   try {
     res.json(await getGoalsDashboard(userId, typeof period === 'string' ? period : undefined));
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to load goals dashboard' });
+    res.status(400).json({ error: publicMessage(error, 'Failed to load goals dashboard') });
   }
 });
 
@@ -54,7 +54,7 @@ router.get('/:id/history', async (req, res) => {
     res.json(await getGoalHistory(userId, req.params.id, periods));
   } catch (error) {
     if (error instanceof InvalidRequestError) return res.status(400).json({ error: error.message });
-    const message = error instanceof Error ? error.message : 'Failed to load goal history';
+    const message = publicMessage(error, 'Failed to load goal history');
     res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
   }
 });
@@ -69,7 +69,7 @@ router.post('/:id/restore', async (req, res) => {
     emitGoalChanged(goal.userId, 'updated', { goal: hydrated });
     res.json(hydrated);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to restore goal' });
+    res.status(400).json({ error: publicMessage(error, 'Failed to restore goal') });
   }
 });
 

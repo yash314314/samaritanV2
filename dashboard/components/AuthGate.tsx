@@ -7,10 +7,22 @@ import SamLoading from "./sam/SamLoading";
 
 export const PUBLIC_ROUTES = new Set(["/login", "/register"]);
 
-/** Only same-site paths are honoured as a post-login destination (no open redirects). */
+/**
+ * Only same-origin paths are honoured as a post-login destination. The value
+ * is resolved the way the browser will resolve it (which drops tabs and
+ * newlines, so "/\t/evil.example" becomes "//evil.example"), and anything
+ * that lands on another origin falls back to "/".
+ */
 export function safeNextPath(raw: string | null | undefined): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
-  return PUBLIC_ROUTES.has(raw.split(/[?#]/)[0]) ? "/" : raw;
+  if (!raw || typeof window === "undefined") return "/";
+  let target: URL;
+  try {
+    target = new URL(raw, window.location.origin);
+  } catch {
+    return "/";
+  }
+  if (target.origin !== window.location.origin) return "/";
+  return PUBLIC_ROUTES.has(target.pathname) ? "/" : `${target.pathname}${target.search}${target.hash}`;
 }
 
 /**

@@ -49,6 +49,8 @@ for arg in "$@"; do
 done
 
 mkdir -p "$LOG_DIR"
+# Logs, backups and the device enrollment key hold activity data or secrets: owner only.
+chmod 700 "$RUNTIME_DIR" "$LOG_DIR" 2>/dev/null || true
 find "$LOG_DIR" -name '*.log' -mtime +14 -delete 2>/dev/null || true
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 SETUP_LOG="$LOG_DIR/setup-$TIMESTAMP.log"

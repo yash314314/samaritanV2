@@ -19,6 +19,9 @@ process.env.ALLOW_REGISTRATION = "true";
 process.env.LOCAL_DEVICE_ENROLLMENT = "true";
 process.env.DEVICE_ENROLLMENT_KEY_FILE = path.join(os.tmpdir(), `samaritan-it-${process.pid}`, "device-enrollment.key");
 process.env.API_RATE_LIMIT_PER_MINUTE = "100000";
+// Socket auth sweep runs fast so expiry and revocation are observable in tests.
+process.env.WS_AUTH_SWEEP_MS = "300";
+process.env.WS_RENEWAL_GRACE_MS = "0";
 delete process.env.CORS_ORIGIN;
 delete process.env.AUTH_ORIGINS;
 delete process.env.LOCAL_OWNER_USER_ID;

@@ -2,8 +2,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage, Server } from "http";
 import { parse } from "url";
 import { isAllowedOrigin } from "../utils/origin";
-import { authenticateToken, bearerToken } from "../middleware/authMiddleware";
-import type { TokenPayload } from "../utils/jwt";
+import { authenticateToken, bearerToken, tokenStillValid } from "../middleware/authMiddleware";
+import type { VerifiedToken } from "../utils/jwt";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -23,6 +23,8 @@ export interface ClientMeta {
   connectedAt: Date;
   lastPing: Date;
   subscriptions: Set<string>;
+  /** The access token currently vouching for this socket; renewed in band with "auth:renew". */
+  auth: VerifiedToken;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -47,7 +49,13 @@ const externalHandlers: Array<(ws: WebSocket, msg: WsMessage, meta: ClientMeta) 
 const WS_PROTOCOL = "samaritan";
 const BEARER_PROTOCOL_PREFIX = "bearer.";
 
-type AuthenticatedUpgrade = IncomingMessage & { samaritanUser?: TokenPayload };
+type AuthenticatedUpgrade = IncomingMessage & { samaritanUser?: VerifiedToken };
+
+// A socket lives only as long as its access token. Clients renew in band
+// ("auth:renew" with a fresh token) before expiry; a socket that does not, or
+// whose login was signed out, is closed by the sweep below.
+const RENEWAL_GRACE_MS = Number(process.env.WS_RENEWAL_GRACE_MS ?? 60 * 1000);
+const AUTH_SWEEP_MS = Number(process.env.WS_AUTH_SWEEP_MS) || 30 * 1000;
 
 function upgradeToken(req: IncomingMessage): string | null {
   const fromHeader = bearerToken(req.headers.authorization);
@@ -102,6 +110,7 @@ export function initWebSocket(server: Server) {
       connectedAt: new Date(),
       lastPing: new Date(),
       subscriptions: new Set(),
+      auth: user,
     };
 
     clients.set(ws, meta);
@@ -138,6 +147,10 @@ export function initWebSocket(server: Server) {
       }
     }
   }, 60000);
+
+  setInterval(() => {
+    void sweepSocketAuth();
+  }, AUTH_SWEEP_MS).unref();
 
   console.log("[WS] Server initialized on /ws");
 }
@@ -193,6 +206,10 @@ function handleMessage(ws: WebSocket, msg: WsMessage, meta: ClientMeta) {
       if (deepWorkId) meta.subscriptions.delete(`deepwork:${deepWorkId}`);
       break;
     }
+    case "auth:renew": {
+      void renewSocketAuth(ws, meta, (msg.payload as { token?: unknown })?.token);
+      break;
+    }
     case "ping":
       send(ws, { type: "pong", payload: { time: Date.now() }, timestamp: new Date().toISOString() });
       break;
@@ -246,6 +263,36 @@ export function broadcastToSession<T>(userId: string, deepWorkId: string, type: 
     const meta = clients.get(ws);
     if (!meta || !meta.subscriptions.has(`deepwork:${deepWorkId}`)) continue;
     send(ws, msg);
+  }
+}
+
+async function renewSocketAuth(ws: WebSocket, meta: ClientMeta, token: unknown) {
+  const renewed = typeof token === "string" ? await authenticateToken(token).catch(() => null) : null;
+  if (!renewed || renewed.userId !== meta.userId) {
+    send(ws, { type: "auth:renew.failed", payload: {}, timestamp: new Date().toISOString() });
+    return;
+  }
+  meta.auth = renewed;
+  send(ws, { type: "auth:renewed", payload: { expiresAt: new Date(renewed.expiresAt).toISOString() }, timestamp: new Date().toISOString() });
+}
+
+/** Closes sockets whose token lapsed without renewal or whose login was signed out. */
+async function sweepSocketAuth() {
+  const now = Date.now();
+  for (const [ws, meta] of clients) {
+    if (now > meta.auth.expiresAt + RENEWAL_GRACE_MS) {
+      ws.close(4002, "Access token expired");
+      continue;
+    }
+    const valid = await tokenStillValid(meta.auth).catch(() => true);
+    if (!valid) ws.close(4001, "Session ended");
+  }
+}
+
+/** Closes the sockets opened under one login (token family), e.g. after that session is signed out. */
+export function disconnectFamily(familyId: string, reason: string) {
+  for (const [ws, meta] of clients) {
+    if (meta.auth.familyId === familyId) ws.close(4001, reason.slice(0, 120));
   }
 }
 

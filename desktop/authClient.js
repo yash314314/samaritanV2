@@ -66,6 +66,14 @@ function clearCredentials() {
   emit();
 }
 
+// Key-file enrollment signs the tracker in as the machine's owner. It runs
+// only until someone links the tracker from the dashboard or signs it out:
+// after that, a rejected credential leaves the tracker signed out instead of
+// silently switching it to another account.
+function autoEnrollAllowed() {
+  return store.get("auth.autoEnroll") !== false;
+}
+
 /** Takes in a session answer from the API (login, refresh, device link or enrollment). */
 function adopt(body) {
   if (!body || typeof body.accessToken !== "string" || !body.user?.id) {
@@ -75,6 +83,8 @@ function adopt(body) {
   const wasSignedOut = !access;
   const previousUser = store.get("auth.userId");
   store.set("auth.userId", body.user.id);
+  // Remembered past sign-out so queued activity is only ever delivered to its account.
+  store.set("auth.lastUserId", body.user.id);
   access = {
     token: body.accessToken,
     expiresAt: Date.parse(body.accessTokenExpiresAt) || Date.now() + 5 * 60 * 1000,
@@ -120,7 +130,7 @@ async function enrollLocally() {
 
 async function refresh() {
   const token = readRefreshToken();
-  if (!token) return (await enrollLocally()) ? access.token : null;
+  if (!token) return autoEnrollAllowed() && (await enrollLocally()) ? access.token : null;
 
   const response = await post("/api/auth/refresh", { refreshToken: token });
   if (response.status === 200) {
@@ -129,17 +139,25 @@ async function refresh() {
   }
   if (response.status === 401 || response.status === 403) {
     // Revoked, expired or replaced: start over rather than retry a dead token.
-    console.warn("[Auth] Device credential rejected (HTTP %d); enrolling again", response.status);
+    console.warn("[Auth] Device credential rejected (HTTP %d)", response.status);
     clearCredentials();
-    return (await enrollLocally()) ? access.token : null;
+    return autoEnrollAllowed() && (await enrollLocally()) ? access.token : null;
   }
   // Network trouble or a server error: keep the credential and let callers retry.
   throw new Error(`Token refresh failed: HTTP ${response.status}`);
 }
 
-/** A valid access token, or null when this device is not signed in. Concurrent callers share one refresh. */
-async function getAccessToken() {
-  if (access && access.expiresAt - Date.now() > EXPIRY_MARGIN_MS) return access.token;
+/** Drops the cached access token so the next request refreshes first. */
+function invalidateAccessToken() {
+  access = null;
+}
+
+/**
+ * A valid access token that lasts at least `minValidityMs`, or null when this
+ * device is not signed in. Concurrent callers share one refresh.
+ */
+async function getAccessToken(minValidityMs = EXPIRY_MARGIN_MS) {
+  if (access && access.expiresAt - Date.now() > minValidityMs) return access.token;
   if (!refreshing) {
     refreshing = refresh().finally(() => {
       refreshing = null;
@@ -176,6 +194,7 @@ async function linkFromDashboard(refreshToken) {
     throw new Error("Invalid device token");
   }
   writeRefreshToken(refreshToken);
+  store.set("auth.autoEnroll", false);
   access = null;
   const token = await getAccessToken();
   if (!token) throw new Error("The device token was refused");
@@ -186,7 +205,13 @@ async function linkFromDashboard(refreshToken) {
 async function signOut() {
   const token = readRefreshToken();
   if (token) await post("/api/auth/logout", { refreshToken: token }).catch(() => undefined);
+  store.set("auth.autoEnroll", false);
   clearCredentials();
+}
+
+/** The account queued activity belongs to: the signed-in one, else the last one. */
+function activityOwnerId() {
+  return access?.userId || store.get("auth.userId") || store.get("auth.lastUserId") || null;
 }
 
 function status() {
@@ -204,8 +229,10 @@ module.exports = {
   NotAuthenticatedError,
   authFetch,
   getAccessToken,
+  invalidateAccessToken,
   linkFromDashboard,
   signOut,
   status,
   onChange,
+  activityOwnerId,
 };

@@ -168,6 +168,12 @@ export async function recordDistractionBlockEvent(userId: string, input: {
     const owned = await prisma.distractionBlock.findFirst({ where: { id: ruleId, userId }, select: { id: true } });
     if (!owned) throw new Error("Blocker rule not found");
   }
+  // Events show up in that focus session's result, so the session must be the caller's.
+  const deepWorkId = typeof input.deepWorkId === "string" && input.deepWorkId ? input.deepWorkId : null;
+  if (deepWorkId) {
+    const session = await prisma.deepWorkSession.findFirst({ where: { id: deepWorkId, userId }, select: { id: true } });
+    if (!session) throw new Error("Focus session not found");
+  }
   const type = targetType(input.targetType);
   const outcome = String(input.outcome || "matched").toLowerCase();
   if (!OUTCOMES.has(outcome)) throw new Error("Invalid blocker outcome");
@@ -180,7 +186,7 @@ export async function recordDistractionBlockEvent(userId: string, input: {
         ...(id ? { id } : {}),
         userId,
         ruleId,
-        deepWorkId: typeof input.deepWorkId === "string" ? input.deepWorkId : null,
+        deepWorkId,
         targetType: type,
         target: requiredText(input.target, "Target", 120),
         appName: requiredText(input.appName, "App name", 160),

@@ -38,6 +38,8 @@ function validateReview(review: ActivityReviewInput) {
   }
 }
 
+const MAX_PATTERNS_PER_USER = 2000;
+
 function exactTitlePattern(title: string) {
   const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return `^${escaped}$`;
@@ -102,7 +104,7 @@ export async function reviewActivities(
 
       for (const context of contexts.values()) {
         const existing = await tx.appPattern.findFirst({
-          where: { appName: context.appName, titleRegex: context.titleRegex },
+          where: { userId, appName: context.appName, titleRegex: context.titleRegex },
           select: { id: true },
         });
         const data = {
@@ -116,8 +118,11 @@ export async function reviewActivities(
         if (existing) {
           await tx.appPattern.update({ where: { id: existing.id }, data });
         } else {
+          // Every pattern is scanned on each classification; a bounded set keeps that cheap.
+          if ((await tx.appPattern.count({ where: { userId } })) >= MAX_PATTERNS_PER_USER) continue;
           await tx.appPattern.create({
             data: {
+              userId,
               appName: context.appName,
               titleRegex: context.titleRegex,
               ...data,

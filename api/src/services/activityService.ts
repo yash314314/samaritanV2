@@ -30,7 +30,7 @@ export async function handleActivity(
 
   const session = await getOrCreateActiveSession(userId);
 
-  const classification = await classifyActivity(appName, windowTitle);
+  const classification = await classifyActivity(appName, windowTitle, null, userId);
 
   const effectiveStart = startTime ?? new Date();
   const effectiveEnd = endTime ?? new Date();

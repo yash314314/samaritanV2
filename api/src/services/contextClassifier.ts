@@ -3,12 +3,13 @@ import { prisma } from "../prisma";
 export async function classifyActivity(
   appName: string,
   title: string,
-  domainOrUrl?: string | null
+  domainOrUrl?: string | null,
+  userId?: string | null
 ) {
 
-  /* LAYER 1: STATIC RULES */
+  /* LAYER 1: STATIC RULES (the user's own learned patterns first, then the shared set) */
 
-  const pattern = await findAppPattern(appName, title);
+  const pattern = await findAppPattern(appName, title, userId);
 
   if (pattern) return pattern;
 
@@ -118,17 +119,25 @@ function classifyDomain(domain:string){
 
 export async function findAppPattern(
   appName: string,
-  windowTitle: string
+  windowTitle: string,
+  userId?: string | null
 ) {
 
-  const patterns = await prisma.appPattern.findMany();
+  // Shared patterns plus the caller's own; another user's reviews never apply.
+  const patterns = await prisma.appPattern.findMany({
+    where: userId ? { OR: [{ userId: null }, { userId }] } : { userId: null },
+  });
 
   if (!patterns.length) return null;
 
   const appAliases = getAppAliases(appName);
   const sortedPatterns = patterns
     .filter((pattern) => appAliases.has(normalizeAppName(pattern.appName)))
-    .sort((a, b) => specificityScore(b.titleRegex) - specificityScore(a.titleRegex));
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.userId)) - Number(Boolean(a.userId)) ||
+        specificityScore(b.titleRegex) - specificityScore(a.titleRegex)
+    );
 
   for (const pattern of sortedPatterns) {
 

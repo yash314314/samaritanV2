@@ -11,11 +11,11 @@ import {
   startDeepWorkSession
 } from "../services/deepWorkService";
 import { getDeepWorkSessionResult } from "../services/deepWorkService";
-import { parseUserId, sendRouteError } from "../utils/requestParams";
+import { parseUserId, sendRouteError, publicMessage } from "../utils/requestParams";
 const router = Router();
 
 function failure(res: any, error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : fallback;
+  const message = publicMessage(error, fallback);
   const status = /not found/i.test(message) ? 404 : /already active|already ended|already completed/i.test(message) ? 409 : 400;
   res.status(status).json({ error: message });
 }

@@ -20,7 +20,7 @@ import {
   type ClientKind,
   type IssuedSession,
 } from "../services/authService";
-import { disconnectUser } from "../websocket/manager";
+import { disconnectFamily, disconnectUser } from "../websocket/manager";
 
 // Browsers keep the refresh token in an HttpOnly, SameSite=Strict cookie and
 // the access token in memory only. The desktop tracker has no cookie jar: it
@@ -219,7 +219,10 @@ router.post("/logout", async (req, res) => {
 
   const raw = client === "desktop" ? req.body?.refreshToken : readCookie(req, authConfig.cookieName);
   try {
-    if (typeof raw === "string" && raw) await revokeByRefreshToken(raw, "logout");
+    if (typeof raw === "string" && raw) {
+      const familyId = await revokeByRefreshToken(raw, "logout");
+      if (familyId) disconnectFamily(familyId, "Signed out");
+    }
     clearRefreshCookie(res);
     return res.json({ message: "Logged out" });
   } catch (error) {
@@ -318,8 +321,10 @@ router.get("/sessions", authMiddleware, async (req: AuthenticatedRequest, res) =
 
 router.delete("/sessions/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
   try {
-    const revoked = await revokeSession(req.user!.userId, String(req.params.id));
+    const familyId = String(req.params.id);
+    const revoked = await revokeSession(req.user!.userId, familyId);
     if (!revoked) return res.status(404).json({ error: "Session not found" });
+    disconnectFamily(familyId, "Session ended");
     return res.json({ message: "Session ended" });
   } catch (error) {
     return sendAuthError(res, error, "Failed to end session");

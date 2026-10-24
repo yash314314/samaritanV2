@@ -259,12 +259,13 @@ const patterns = [
 async function main() {
   // --if-empty: container start-up seeds a fresh database once and never
   // replaces patterns that already exist.
-  if (process.argv.includes("--if-empty") && (await prisma.appPattern.count()) > 0) {
+  if (process.argv.includes("--if-empty") && (await prisma.appPattern.count({ where: { userId: null } })) > 0) {
     console.log("Classifier patterns already present; skipping seed.");
     return;
   }
   console.log("Seeding Samaritan classifier patterns...");
-  await prisma.appPattern.deleteMany();
+  // Only the shared set is replaced; patterns users taught through reviews survive.
+  await prisma.appPattern.deleteMany({ where: { userId: null } });
   await prisma.appPattern.createMany({ data: patterns });
   console.log(`Classifier patterns seeded: ${patterns.length}`);
 }

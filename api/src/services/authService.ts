@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
-import type { User } from "@prisma/client";
+import type { Prisma, User } from "@prisma/client";
 import { prisma } from "../prisma";
 import { authConfig } from "../config/auth";
 import { accessTokenExpiry, generateAccessToken } from "../utils/jwt";
@@ -76,16 +76,30 @@ export function toPublicUser(user: Pick<User, "id" | "email" | "name" | "role" |
   return { id: user.id, email: user.email, name: user.name, role: user.role, avatarUrl: user.avatarUrl };
 }
 
-function accessFor(user: Pick<User, "id" | "email" | "role" | "tokenVersion">, now: Date) {
+function accessFor(user: Pick<User, "id" | "email" | "role" | "tokenVersion">, familyId: string, now: Date) {
   return {
     accessToken: generateAccessToken({
       userId: user.id,
       email: user.email,
       role: user.role,
       tokenVersion: user.tokenVersion,
+      familyId,
     }),
     accessTokenExpiresAt: accessTokenExpiry(now),
   };
+}
+
+type Tx = Prisma.TransactionClient;
+
+/**
+ * Serialises every change to one user's logins (rotation, logout, sign-out
+ * everywhere, password change) on a transaction-scoped Postgres advisory
+ * lock. Without it a logout landing between a rotation's claim and its
+ * insert would leave the fresh token alive, and the loser of two concurrent
+ * refreshes could see no live token and sign the user out.
+ */
+async function lockUser(tx: Tx, userId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`auth:${userId}`}))`;
 }
 
 /** Starts a new login (a new token family) for `user`. */
@@ -107,93 +121,122 @@ export async function createSession(user: User, context: ClientContext): Promise
       lastUsedAt: now,
     },
   });
-  return { user: toPublicUser(user), ...accessFor(user, now), refreshToken, refreshTokenExpiresAt, familyId };
+  return { user: toPublicUser(user), ...accessFor(user, familyId, now), refreshToken, refreshTokenExpiresAt, familyId };
 }
+
+type RotationOutcome =
+  | { session: IssuedSession }
+  | { refused: "invalid" }
+  | { refused: "reuse"; familyId: string; userId: string };
 
 export async function rotateRefreshToken(raw: string, context: Omit<ClientContext, "client">): Promise<IssuedSession> {
-  const now = new Date();
-  const stored = await prisma.refreshToken.findUnique({ where: { token: hashToken(raw) }, include: { user: true } });
-  if (!stored) throw new AuthError(401, "Invalid or expired refresh token");
+  const hashed = hashToken(raw);
+  const located = await prisma.refreshToken.findUnique({ where: { token: hashed }, select: { userId: true } });
+  if (!located) throw new AuthError(401, "Invalid or expired refresh token");
 
-  if (stored.revokedAt) {
-    const withinGrace =
-      stored.revokedReason === "rotated" && now.getTime() - stored.revokedAt.getTime() < ROTATION_GRACE_MS;
-    if (withinGrace && (await familyIsLive(stored.familyId, now))) {
-      return { user: toPublicUser(stored.user), ...accessFor(stored.user, now), familyId: stored.familyId };
-    }
-    if (stored.revokedReason === "rotated") {
-      await revokeFamily(stored.familyId, "reuse");
-      console.warn(`[Auth] Rotated refresh token replayed; family ${stored.familyId} revoked (user ${stored.userId})`);
-    }
-    throw new AuthError(401, "Invalid or expired refresh token");
-  }
-  if (stored.expiresAt <= now) throw new AuthError(401, "Invalid or expired refresh token");
+  const outcome: RotationOutcome = await prisma.$transaction(async (tx): Promise<RotationOutcome> => {
+    await lockUser(tx, located.userId);
+    const now = new Date();
+    // Re-read under the lock: a concurrent rotation or logout has finished by now.
+    const stored = await tx.refreshToken.findUnique({ where: { token: hashed }, include: { user: true } });
+    if (!stored) return { refused: "invalid" };
 
-  const replacementId = randomUUID();
-  const claimed = await prisma.refreshToken.updateMany({
-    where: { id: stored.id, revokedAt: null },
-    data: { revokedAt: now, revokedReason: "rotated", replacedById: replacementId, lastUsedAt: now },
+    if (stored.revokedAt) {
+      const withinGrace =
+        stored.revokedReason === "rotated" && now.getTime() - stored.revokedAt.getTime() < ROTATION_GRACE_MS;
+      if (withinGrace && (await liveTokens(tx, stored.familyId, now)) > 0) {
+        return { session: { user: toPublicUser(stored.user), ...accessFor(stored.user, stored.familyId, now), familyId: stored.familyId } };
+      }
+      if (stored.revokedReason === "rotated") {
+        await revokeFamilyLocked(tx, stored.familyId, "reuse");
+        return { refused: "reuse", familyId: stored.familyId, userId: stored.userId };
+      }
+      return { refused: "invalid" };
+    }
+    if (stored.expiresAt <= now) return { refused: "invalid" };
+
+    const replacementId = randomUUID();
+    await tx.refreshToken.update({
+      where: { id: stored.id },
+      data: { revokedAt: now, revokedReason: "rotated", replacedById: replacementId, lastUsedAt: now },
+    });
+    const refreshToken = newRawToken();
+    const client = stored.client === "desktop" ? "desktop" : "web";
+    const refreshTokenExpiresAt = new Date(now.getTime() + refreshTtlMs(client));
+    await tx.refreshToken.create({
+      data: {
+        id: replacementId,
+        userId: stored.userId,
+        token: hashToken(refreshToken),
+        familyId: stored.familyId,
+        client,
+        deviceId: stored.deviceId,
+        userAgent: clip(context.userAgent, 300) ?? stored.userAgent,
+        createdByIp: clip(context.ip, 64),
+        expiresAt: refreshTokenExpiresAt,
+        lastUsedAt: now,
+      },
+    });
+    return {
+      session: {
+        user: toPublicUser(stored.user),
+        ...accessFor(stored.user, stored.familyId, now),
+        refreshToken,
+        refreshTokenExpiresAt,
+        familyId: stored.familyId,
+      },
+    };
   });
-  if (claimed.count === 0) {
-    // Lost a race with a concurrent refresh of the same token.
-    if (await familyIsLive(stored.familyId, now)) {
-      return { user: toPublicUser(stored.user), ...accessFor(stored.user, now), familyId: stored.familyId };
-    }
-    throw new AuthError(401, "Invalid or expired refresh token");
-  }
 
-  const refreshToken = newRawToken();
-  const client = stored.client === "desktop" ? "desktop" : "web";
-  const refreshTokenExpiresAt = new Date(now.getTime() + refreshTtlMs(client));
-  await prisma.refreshToken.create({
-    data: {
-      id: replacementId,
-      userId: stored.userId,
-      token: hashToken(refreshToken),
-      familyId: stored.familyId,
-      client,
-      deviceId: stored.deviceId,
-      userAgent: clip(context.userAgent, 300) ?? stored.userAgent,
-      createdByIp: clip(context.ip, 64),
-      expiresAt: refreshTokenExpiresAt,
-      lastUsedAt: now,
-    },
-  });
-  return {
-    user: toPublicUser(stored.user),
-    ...accessFor(stored.user, now),
-    refreshToken,
-    refreshTokenExpiresAt,
-    familyId: stored.familyId,
-  };
+  if ("session" in outcome) return outcome.session;
+  if (outcome.refused === "reuse") {
+    forgetFamily(outcome.familyId);
+    console.warn(`[Auth] Rotated refresh token replayed; family ${outcome.familyId} revoked (user ${outcome.userId})`);
+  }
+  throw new AuthError(401, "Invalid or expired refresh token");
 }
 
-async function familyIsLive(familyId: string, now: Date): Promise<boolean> {
-  const live = await prisma.refreshToken.count({ where: { familyId, revokedAt: null, expiresAt: { gt: now } } });
-  return live > 0;
+function liveTokens(tx: Tx, familyId: string, now: Date) {
+  return tx.refreshToken.count({ where: { familyId, revokedAt: null, expiresAt: { gt: now } } });
 }
 
-export async function revokeFamily(familyId: string, reason: string): Promise<number> {
-  const result = await prisma.refreshToken.updateMany({
+async function revokeFamilyLocked(tx: Tx, familyId: string, reason: string) {
+  const result = await tx.refreshToken.updateMany({
     where: { familyId, revokedAt: null },
     data: { revokedAt: new Date(), revokedReason: reason },
   });
   return result.count;
 }
 
-/** Ends the login a refresh token belongs to. Unknown tokens are ignored. */
-export async function revokeByRefreshToken(raw: string, reason = "logout"): Promise<void> {
+/** Ends one login (token family). Its access tokens stop working at once. */
+export async function revokeFamily(familyId: string, reason: string): Promise<number> {
+  const owner = await prisma.refreshToken.findFirst({ where: { familyId }, select: { userId: true } });
+  if (!owner) return 0;
+  const count = await prisma.$transaction(async (tx) => {
+    await lockUser(tx, owner.userId);
+    return revokeFamilyLocked(tx, familyId, reason);
+  });
+  forgetFamily(familyId);
+  return count;
+}
+
+/** Ends the login a refresh token belongs to; resolves its family id, or null for an unknown token. */
+export async function revokeByRefreshToken(raw: string, reason = "logout"): Promise<string | null> {
   const stored = await prisma.refreshToken.findUnique({ where: { token: hashToken(raw) }, select: { familyId: true } });
-  if (stored) await revokeFamily(stored.familyId, reason);
+  if (!stored) return null;
+  await revokeFamily(stored.familyId, reason);
+  return stored.familyId;
 }
 
 /** Ends every login of a user and invalidates their outstanding access tokens. */
 export async function revokeAllSessions(userId: string, reason: string): Promise<void> {
-  await prisma.$transaction([
-    prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } }),
-    prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await lockUser(tx, userId);
+    await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } });
+    await tx.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
+  });
   tokenVersionCache.delete(userId);
+  for (const [familyId, entry] of familyCache) if (entry.userId === userId) familyCache.delete(familyId);
 }
 
 export interface SessionSummary {
@@ -233,11 +276,16 @@ export async function listSessions(userId: string, currentFamilyId?: string | nu
 }
 
 export async function revokeSession(userId: string, familyId: string): Promise<boolean> {
-  const result = await prisma.refreshToken.updateMany({
-    where: { userId, familyId, revokedAt: null },
-    data: { revokedAt: new Date(), revokedReason: "logout" },
+  const count = await prisma.$transaction(async (tx) => {
+    await lockUser(tx, userId);
+    const result = await tx.refreshToken.updateMany({
+      where: { userId, familyId, revokedAt: null },
+      data: { revokedAt: new Date(), revokedReason: "logout" },
+    });
+    return result.count;
   });
-  return result.count > 0;
+  forgetFamily(familyId);
+  return count > 0;
 }
 
 export async function familyOfRefreshToken(raw: string | null | undefined): Promise<string | null> {
@@ -262,6 +310,21 @@ export async function currentTokenVersion(userId: string): Promise<number | null
 
 export function forgetTokenVersion(userId: string) {
   tokenVersionCache.delete(userId);
+}
+
+const familyCache = new Map<string, { live: boolean; userId: string; at: number }>();
+
+/** Whether a login still has an unrevoked, unexpired refresh token, i.e. was not signed out. */
+export async function familyIsActive(familyId: string, userId: string): Promise<boolean> {
+  const cached = familyCache.get(familyId);
+  if (cached && Date.now() - cached.at < TOKEN_VERSION_CACHE_MS) return cached.live && cached.userId === userId;
+  const live = await prisma.refreshToken.count({ where: { familyId, userId, revokedAt: null, expiresAt: { gt: new Date() } } });
+  familyCache.set(familyId, { live: live > 0, userId, at: Date.now() });
+  return live > 0;
+}
+
+function forgetFamily(familyId: string) {
+  familyCache.delete(familyId);
 }
 
 /** Deletes refresh tokens that expired or were revoked more than 30 days ago. */

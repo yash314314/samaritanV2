@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { publicMessage } from "../utils/requestParams";
 
 import {
   WEBHOOK_EVENTS,
@@ -19,7 +20,7 @@ function owner(value: unknown) {
 }
 
 function failure(res: any, error: unknown) {
-  const message = error instanceof Error ? error.message : "Webhook request failed";
+  const message = publicMessage(error, "Webhook request failed");
   res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
 }
 
