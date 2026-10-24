@@ -5,7 +5,8 @@ import type { IntentShare } from "./types";
 
 const MAX_ROWS = 8;
 const TIME_COLOR = "var(--sam-series-1)";
-const FOCUS_COLOR = "var(--sam-series-2)";
+// Slot 4 stays clearly apart from series 1 (signal ink) in every palette.
+const FOCUS_COLOR = "var(--sam-series-4)";
 
 function label(intent: string) {
   const text = intent.replace(/_/g, " ");

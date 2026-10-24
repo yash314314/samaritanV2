@@ -38,6 +38,26 @@ export function isSamaritanAudioEnabled(): boolean {
 export function setSamaritanAudioEnabled(enabled: boolean): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY_ENABLED, enabled ? "true" : "false");
+  notifyAudioPreferenceListeners();
+}
+
+const audioPreferenceListeners = new Set<() => void>();
+
+function notifyAudioPreferenceListeners() {
+  audioPreferenceListeners.forEach((listener) => listener());
+}
+
+/**
+ * Subscribes to audio preference changes made in this tab or another one,
+ * in the shape `useSyncExternalStore` expects.
+ */
+export function subscribeSamaritanAudioPreferences(listener: () => void): () => void {
+  audioPreferenceListeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    audioPreferenceListeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
 }
 
 /**
@@ -60,6 +80,7 @@ export function setSamaritanAudioVolume(volume: number): void {
   if (typeof window === "undefined") return;
   const clamped = Math.max(0, Math.min(1, volume));
   localStorage.setItem(STORAGE_KEY_VOLUME, clamped.toString());
+  notifyAudioPreferenceListeners();
 }
 
 /**

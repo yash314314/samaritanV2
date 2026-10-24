@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import PageHeader from "@/components/sam/PageHeader";
@@ -28,18 +28,21 @@ import {
   istDateKey,
   istHour,
 } from "@/lib/analyticsTime";
+import { authFetch, getUserId } from "@/lib/auth";
+import { API_BASE } from "@/lib/apiBase";
 
 // ═══════════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const API_BASE = "http://localhost:4000";
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 const MAX_ACTIVE_SECONDS_PER_DAY = 20 * 3600;
 // An hour or a day needs this much active time before its scores mean
 // anything; a few seconds of activity would read as 0% or 100%.
 const MIN_ACTIVE_MINUTES_PER_HOUR = 5;
 const MIN_ACTIVE_MINUTES_PER_DAY = 15;
+// Productivity is drawn beside focus (series 1). Slot 4 is the one that stays
+// clearly apart from signal ink in every palette, Monochrome included.
+const SECOND_SERIES = "var(--sam-series-4)";
 
 type AnalyticsRange = "day" | "7d" | "30d";
 type AnalyticsTab = "overview" | "heatmap";
@@ -72,7 +75,7 @@ const clampPct = (n: number) => Math.min(100, Math.max(0, finite(n)));
 // ═══════════════════════════════════════════════════════════
 
 async function fetcher<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await authFetch(url, { cache: "no-store" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error ?? `HTTP ${res.status}`);
@@ -198,7 +201,7 @@ function TrendTooltip({ active, point, minimum }: { active?: boolean; point?: Tr
         <dl className="space-y-0.5 tabular-nums">
           {[
             ["Focus", point.focus, "var(--sam-series-1)"],
-            ["Productivity", point.productivity, "var(--sam-series-3)"],
+            ["Productivity", point.productivity, SECOND_SERIES],
           ].map(([name, value, color]) => (
             <div key={name as string} className="flex items-center justify-between gap-4">
               <dt className="flex items-center gap-1.5 text-trace">
@@ -231,7 +234,7 @@ const STATUS_TONE = { ok: "text-ok", warn: "text-warn", alert: "text-alert" } as
 // ═══════════════════════════════════════════════════════════
 
 export default function AnalyticsPage() {
-  const userId = USER_ID;
+  const userId = getUserId();
   const { selectedDate } = useAppContext();
   const [timeRange, setTimeRange] = useState<AnalyticsRange>("day");
   const [activeTab, setActiveTab] = useState<AnalyticsTab>("overview");
@@ -417,15 +420,13 @@ export default function AnalyticsPage() {
 
   // Bar width follows the chart's width: each slot's focus/productivity pair
   // takes about 60% of the slot and stays side by side at any width.
-  const trendRef = useRef<HTMLDivElement>(null);
   const [trendWidth, setTrendWidth] = useState(0);
-  useEffect(() => {
-    const node = trendRef.current;
+  const trendRef = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const observer = new ResizeObserver(([entry]) => setTrendWidth(entry.contentRect.width));
     observer.observe(node);
     return () => observer.disconnect();
-  }, [trendHasData]);
+  }, []);
   const trendSlot = trend.length > 0 ? Math.max(0, trendWidth - 40) / trend.length : 0;
   const trendBarSize = Math.max(2, Math.min(18, Math.floor((trendSlot * 0.6 - 2) / 2)));
   const trackedDays = (dashboard?.growth ?? []).filter((point) => point.trackedMinutes > 0).length;
@@ -661,7 +662,7 @@ export default function AnalyticsPage() {
                       Focus <span className="tabular-nums text-signal">{round0(assistant.focusScore)}%</span>
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <LegendSwatch color="var(--sam-series-3)" />
+                      <LegendSwatch color={SECOND_SERIES} />
                       Productivity <span className="tabular-nums text-signal">{round0(assistant.productivityScore)}%</span>
                     </span>
                   </div>
@@ -697,7 +698,7 @@ export default function AnalyticsPage() {
                     <Bar
                       dataKey="productivity"
                       name="Productivity"
-                      fill="var(--sam-series-3)"
+                      fill={SECOND_SERIES}
                       minPointSize={2}
                       isAnimationActive={animateTrend}
                       animationDuration={700}

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
 jobs:
   audit-and-build:
     name: Build & Verify Samaritan Stack
@@ -26,14 +29,18 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    env:
+      # Integration tests truncate tables, so they get their own database.
+      TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/acpe_test?schema=public
+
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install API Dependencies & Generate Prisma Client
@@ -43,7 +50,7 @@ jobs:
           npm ci
           npx prisma generate
           # migrate deploy (not db push) so a schema change without a migration fails CI
-          npx prisma migrate deploy
+          npm run db:migrate
           npm run bootstrap:user
 
       - name: Type Check & Verify Express API
@@ -53,19 +60,40 @@ jobs:
           npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "postgresql://postgres:password@localhost:5432/postgres" --exit-code
           npm test
 
+      - name: Auth & Isolation Integration Tests
+        run: |
+          cd api
+          psql "postgresql://postgres:password@localhost:5432/postgres" -c "CREATE DATABASE acpe_test"
+          DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+          npm run test:integration
+
+      # Blocks on critical advisories. Prisma 6 still carries high ones that
+      # only its 7.x major fixes; `npm audit --omit=dev` lists them.
+      - name: Dependency Audit (production dependencies)
+        run: |
+          cd api && npm audit --omit=dev --audit-level=critical
+          cd ../dashboard && npm audit --omit=dev --audit-level=critical
+
       - name: Verify Desktop Tracker Logic
         run: |
           cd desktop
           npm ci --ignore-scripts
           npm test
-          npm run verify:widget
+          for file in *.js; do node --check "$file"; done
 
-      - name: Install Dashboard Dependencies & Build Next.js
+      - name: Install Dashboard Dependencies, Lint & Build Next.js
         run: |
           cd dashboard
           npm ci
+          npx tsc --noEmit
+          npx eslint . --quiet
           npm run build
 
       - name: Build Docker Container Stack
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          JWT_SECRET: ci-only-secret-0123456789-abcdefghijklmnopqrstuv
+          PUBLIC_ORIGIN: http://localhost
         run: |
+          docker compose -f docker-compose.prod.yml config --quiet
           docker compose -f docker-compose.prod.yml build

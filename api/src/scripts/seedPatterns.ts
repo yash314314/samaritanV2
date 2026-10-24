@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+// Shared client: follows DATABASE_TARGET like the API does.
+import { prisma } from "../prisma";
 
-const prisma = new PrismaClient();
 
 type PatternSeed = {
   appNames: string[];
@@ -257,6 +257,12 @@ const patterns = [
 ];
 
 async function main() {
+  // --if-empty: container start-up seeds a fresh database once and never
+  // replaces patterns that already exist.
+  if (process.argv.includes("--if-empty") && (await prisma.appPattern.count()) > 0) {
+    console.log("Classifier patterns already present; skipping seed.");
+    return;
+  }
   console.log("Seeding Samaritan classifier patterns...");
   await prisma.appPattern.deleteMany();
   await prisma.appPattern.createMany({ data: patterns });

@@ -5,6 +5,8 @@ import PageHeader from "@/components/sam/PageHeader";
 import { Decode } from "@/components/sam/Decode";
 import SamLoading from "@/components/sam/SamLoading";
 import { Download, RefreshCw, TrendingUp, Zap, AlertTriangle } from "lucide-react";
+import { authFetch } from "@/lib/auth";
+import { API_BASE } from "@/lib/apiBase";
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<any[]>([]);
@@ -13,8 +15,6 @@ export default function ReportsPage() {
   const [selectedPeriod, setSelectedPeriod] = useState<string>("");
   const [activeReport, setActiveReport] = useState<any | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-
   useEffect(() => {
     fetchReports();
   }, [selectedPeriod]);
@@ -22,11 +22,8 @@ export default function ReportsPage() {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("samaritan_token") : null;
       const url = `${API_BASE}/api/reports${selectedPeriod ? `?period=${selectedPeriod}` : ""}`;
-      const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(url, { cache: "no-store" });
       const data = await res.json();
       if (data.success) {
         setReports(data.reports);
@@ -44,13 +41,9 @@ export default function ReportsPage() {
   const handleGenerateReport = async (period: "daily" | "weekly" | "monthly") => {
     setGenerating(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("samaritan_token") : null;
-      const res = await fetch(`${API_BASE}/api/reports/generate`, {
+      const res = await authFetch(`${API_BASE}/api/reports/generate`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period }),
       });
       const data = await res.json();

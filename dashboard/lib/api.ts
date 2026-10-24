@@ -1,28 +1,28 @@
 import axios from "axios";
+import { API_BASE } from "./apiBase";
+import { authFetch, getAccessToken, getUserId, refreshSession, subscribeAuth } from "./auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+export { getUserId };
 
 export const api = axios.create({
   baseURL: API_BASE,
   headers: { "Content-Type": "application/json" },
 });
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
-
-export const getUserId = () => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("samaritan_token");
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        return payload.userId || USER_ID;
-      } catch (e) {
-        // Fallback
-      }
-    }
+// Same token handling as authFetch for the axios-based focus client.
+api.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
+  if (token) config.headers.set("Authorization", `Bearer ${token}`);
+  return config;
+});
+api.interceptors.response.use(undefined, async (error) => {
+  const config = error?.config;
+  if (error?.response?.status === 401 && config && !config._samaritanRetried) {
+    config._samaritanRetried = true;
+    if (await refreshSession()) return api.request(config);
   }
-  return USER_ID;
-};
+  throw error;
+});
 
 // ─── CLIENT-SIDE RESPONSE CACHE ───
 // The dashboard loads a lot of aggregate analytics that changes infrequently.
@@ -36,6 +36,16 @@ const responseCache = new Map<string, { at: number; data: unknown }>();
 export function clearApiCache() {
   responseCache.clear();
 }
+
+// Cached responses belong to whoever was signed in when they were fetched.
+let cachedFor = "";
+subscribeAuth(() => {
+  const userId = getUserId();
+  if (userId !== cachedFor) {
+    cachedFor = userId;
+    responseCache.clear();
+  }
+});
 
 function isCacheableGet(endpoint: string): boolean {
   // Never cache live session/status endpoints (their responses are time-sensitive).
@@ -56,19 +66,12 @@ async function request(endpoint: string, init: RequestInit = {}) {
     }
   }
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("samaritan_token") : null;
-  const authHeaders: Record<string, string> = {};
-  if (token) {
-    authHeaders["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await authFetch(`${API_BASE}${endpoint}`, {
     cache: "no-store",
     ...init,
     headers: {
       ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...authHeaders,
-      ...(init.headers || {})
+      ...((init.headers as Record<string, string> | undefined) || {})
     }
   });
 
@@ -106,22 +109,22 @@ export const focusApi = {
     totalRounds?: number;
     ambientSound?: "none" | "white" | "pink" | "brown" | "rain";
     ambientVolume?: number;
-  }) => api.post("/focus/start", { userId: USER_ID, ...data }),
+  }) => api.post("/focus/start", { userId: getUserId(), ...data }),
 
   end: (id: string, status: "completed" | "abandoned") =>
-    api.post(`/focus/${id}/end`, { userId: USER_ID, status }),
+    api.post(`/focus/${id}/end`, { userId: getUserId(), status }),
 
-  pause: (id: string) => api.post(`/focus/${id}/pause`, { userId: USER_ID }),
-  resume: (id: string) => api.post(`/focus/${id}/resume`, { userId: USER_ID }),
-  skipBreak: (id: string) => api.post(`/focus/${id}/skip-break`, { userId: USER_ID }),
+  pause: (id: string) => api.post(`/focus/${id}/pause`, { userId: getUserId() }),
+  resume: (id: string) => api.post(`/focus/${id}/resume`, { userId: getUserId() }),
+  skipBreak: (id: string) => api.post(`/focus/${id}/skip-break`, { userId: getUserId() }),
 
-  getActive: () => api.get(`/focus/active?userId=${USER_ID}`),
-  getActiveStatus: () => api.get(`/focus/active/status?userId=${USER_ID}`),
-  getHistory: () => api.get(`/focus/history?userId=${USER_ID}`),
-  getResult: (id: string) => api.get(`/focus/${id}/result?userId=${USER_ID}`),
+  getActive: () => api.get(`/focus/active?userId=${getUserId()}`),
+  getActiveStatus: () => api.get(`/focus/active/status?userId=${getUserId()}`),
+  getHistory: () => api.get(`/focus/history?userId=${getUserId()}`),
+  getResult: (id: string) => api.get(`/focus/${id}/result?userId=${getUserId()}`),
   
   resolveIntervention: (id: string, reason: string, action?: string) =>
-    api.post(`/focus/interventions/${id}/resolve`, { userId: USER_ID, reason, action }),
+    api.post(`/focus/interventions/${id}/resolve`, { userId: getUserId(), reason, action }),
 };
 
 // â”€â”€â”€ LEGACY FETCH WRAPPERS â”€â”€â”€
@@ -136,7 +139,7 @@ export function fetchDeepWorkHistory(userId: string) {
 export function startDeepWorkSession(payload: any) {
   return request("/focus/start", {
     method: "POST",
-    body: JSON.stringify({ ...payload, userId: USER_ID })
+    body: JSON.stringify({ ...payload, userId: getUserId() })
   });
 }
 
@@ -150,7 +153,7 @@ export function endDeepWorkSession(id: string, userId: string, status = "complet
 export function resolveFocusIntervention(id: string, reason?: string, action = "allowed_once") {
   return request(`/focus/interventions/${id}/resolve`, {
     method: "POST",
-    body: JSON.stringify({ userId: USER_ID, reason, action })
+    body: JSON.stringify({ userId: getUserId(), reason, action })
   });
 }
 
@@ -174,7 +177,7 @@ export const fetchTimeline = async (
   if (to) params.append("to", to);
   if (date) params.append("date", date);
 
-  const res = await fetch(`${API_BASE}/analytics/timeline?${params}`);
+  const res = await authFetch(`${API_BASE}/analytics/timeline?${params}`);
   if (!res.ok) throw new Error(`Timeline fetch failed: ${res.status}`);
   return res.json();
 };
@@ -211,7 +214,7 @@ export const fetchHeatmap = async (
   if (colorMode) params.append("colorMode", colorMode);
   if (category) params.append("category", category);
 
-  const res = await fetch(`${API_BASE}/analytics/heatmap?${params}`);
+  const res = await authFetch(`${API_BASE}/analytics/heatmap?${params}`);
   if (!res.ok) throw new Error(`Heatmap fetch failed: ${res.status}`);
   return res.json();
 };
@@ -450,7 +453,7 @@ export const ratingsApi = {
   createRating: (data: { rating: number; deepWorkId?: string; note?: string }) =>
     request("/api/ratings", {
       method: "POST",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
+      body: JSON.stringify({ userId: getUserId(), ...data }),
     }),
   create: (data: { userId: string; rating: number; deepWorkId?: string; note?: string }) =>
     request("/api/ratings", {
@@ -467,8 +470,8 @@ export const ratingsApi = {
 
 // SMART BREAKS API
 export const breaksApi = {
-  next: () => request(`/api/breaks/next-suggestion?${new URLSearchParams({ userId: USER_ID })}`),
-  settings: () => request(`/api/breaks/settings?${new URLSearchParams({ userId: USER_ID })}`),
+  next: () => request(`/api/breaks/next-suggestion?${new URLSearchParams({ userId: getUserId() })}`),
+  settings: () => request(`/api/breaks/settings?${new URLSearchParams({ userId: getUserId() })}`),
   updateSettings: (data: {
     enabled?: boolean;
     workThresholdMinutes?: number;
@@ -478,27 +481,27 @@ export const breaksApi = {
     workHoursOnly?: boolean;
   }) => request("/api/breaks/settings", {
     method: "PATCH",
-    body: JSON.stringify({ userId: USER_ID, ...data }),
+    body: JSON.stringify({ userId: getUserId(), ...data }),
   }),
   start: (data: { breakId?: string; recommendedMinutes?: number; reason?: string } = {}) =>
     request("/api/breaks/start", {
       method: "POST",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
+      body: JSON.stringify({ userId: getUserId(), ...data }),
     }),
   snooze: (id: string, minutes?: number) => request(`/api/breaks/${id}/snooze`, {
     method: "POST",
-    body: JSON.stringify({ userId: USER_ID, minutes }),
+    body: JSON.stringify({ userId: getUserId(), minutes }),
   }),
   skip: (id: string) => request(`/api/breaks/${id}/skip`, {
     method: "POST",
-    body: JSON.stringify({ userId: USER_ID }),
+    body: JSON.stringify({ userId: getUserId() }),
   }),
   end: (id: string) => request(`/api/breaks/${id}/end`, {
     method: "POST",
-    body: JSON.stringify({ userId: USER_ID }),
+    body: JSON.stringify({ userId: getUserId() }),
   }),
   history: (from?: string, to?: string) => {
-    const params = new URLSearchParams({ userId: USER_ID });
+    const params = new URLSearchParams({ userId: getUserId() });
     if (from) params.append("from", from);
     if (to) params.append("to", to);
     return request(`/api/breaks/history?${params}`);
@@ -506,19 +509,19 @@ export const breaksApi = {
 };
 
 export const distractionBlocksApi = {
-  dashboard: () => request(`/api/distraction-blocks?${new URLSearchParams({ userId: USER_ID })}`),
-  active: () => request(`/api/distraction-blocks/active?${new URLSearchParams({ userId: USER_ID })}`),
+  dashboard: () => request(`/api/distraction-blocks?${new URLSearchParams({ userId: getUserId() })}`),
+  active: () => request(`/api/distraction-blocks/active?${new URLSearchParams({ userId: getUserId() })}`),
   create: (data: { targetType: "app" | "domain"; target: string; scope: "always" | "during_focus" }) =>
     request("/api/distraction-blocks", {
       method: "POST",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
+      body: JSON.stringify({ userId: getUserId(), ...data }),
     }),
   update: (id: string, data: { active?: boolean; scope?: "always" | "during_focus"; target?: string }) =>
     request(`/api/distraction-blocks/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ userId: USER_ID, ...data }),
+      body: JSON.stringify({ userId: getUserId(), ...data }),
     }),
-  delete: (id: string) => request(`/api/distraction-blocks/${id}?${new URLSearchParams({ userId: USER_ID })}`, {
+  delete: (id: string) => request(`/api/distraction-blocks/${id}?${new URLSearchParams({ userId: getUserId() })}`, {
     method: "DELETE",
   }),
 };

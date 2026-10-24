@@ -2,8 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:4000/ws";
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
+import { wsUrl } from "./apiBase";
+import { currentUser, getAccessToken, subscribeAuth } from "./auth";
+
+// The access token rides in the subprotocol list: browsers cannot set headers
+// on a WebSocket, and a token in the URL would end up in proxy logs.
+const WS_PROTOCOL = "samaritan";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -47,13 +51,23 @@ class SamaritanWsClient {
     reconnectAttempt: 0,
   };
 
-  connect(userId: string = USER_ID) {
+  async connect() {
     if (this.ws?.readyState === WebSocket.OPEN || this._state.connecting) return;
 
     this._setState({ connecting: true, error: null });
 
-    const url = `${WS_URL}?userId=${userId}&clientType=dashboard`;
-    this.ws = new WebSocket(url);
+    const token = await getAccessToken().catch(() => null);
+    if (!token) {
+      // Signed out: connect again once someone signs in (see subscribeAuth below).
+      this._setState({ connecting: false, error: "Signed out" });
+      return;
+    }
+    if (this.ws) {
+      this._setState({ connecting: false });
+      return;
+    }
+
+    this.ws = new WebSocket(`${wsUrl()}?clientType=dashboard`, [WS_PROTOCOL, `bearer.${token}`]);
 
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
@@ -82,7 +96,7 @@ class SamaritanWsClient {
     this.ws.onclose = () => {
       this._cleanup();
       this._setState({ connected: false, connecting: false });
-      this._scheduleReconnect(userId);
+      this._scheduleReconnect();
     };
 
     this.ws.onerror = (err) => {
@@ -196,7 +210,7 @@ class SamaritanWsClient {
     }
   }
 
-  private _scheduleReconnect(userId: string) {
+  private _scheduleReconnect() {
     if (this.reconnectTimer) return;
     const delay = Math.min(
       this.baseReconnectDelay * Math.pow(2, this.reconnectAttempt),
@@ -207,7 +221,7 @@ class SamaritanWsClient {
     console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect(userId);
+      void this.connect();
     }, delay);
   }
 }
@@ -220,7 +234,17 @@ let clientInstance: SamaritanWsClient | null = null;
 
 export function getWsClient(): SamaritanWsClient {
   if (!clientInstance) {
-    clientInstance = new SamaritanWsClient();
+    const client = new SamaritanWsClient();
+    clientInstance = client;
+    // Follow the signed-in user: drop the socket on sign-out, reopen it as the new user.
+    let socketUser = currentUser()?.id ?? null;
+    subscribeAuth(() => {
+      const userId = currentUser()?.id ?? null;
+      if (userId === socketUser) return;
+      socketUser = userId;
+      client.disconnect();
+      if (userId) void client.connect();
+    });
   }
   return clientInstance;
 }

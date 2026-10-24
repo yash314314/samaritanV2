@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { prisma } from '../prisma';
 import { emitGoalChanged } from '../websocket/broadcaster';
 import { getGoalHistory, getGoalsDashboard, goalDateFromInput, hydrateGoalProgress, listGoalsWithProgress } from '../services/goalProgressService';
@@ -59,9 +60,9 @@ router.get('/:id/history', async (req, res) => {
 });
 
 router.post('/:id/restore', async (req, res) => {
-  const { userId } = req.body;
+  const userId = (req as AuthenticatedRequest).user!.userId;
   try {
-    const goal = await prisma.goal.findFirst({ where: { id: req.params.id, ...(userId ? { userId } : {}) } });
+    const goal = await prisma.goal.findFirst({ where: { id: req.params.id, userId } });
     if (!goal) return res.status(404).json({ error: 'Goal not found' });
     const restored = await prisma.goal.update({ where: { id: goal.id }, data: { active: true } });
     const hydrated = await hydrateGoalProgress(restored);
@@ -166,7 +167,7 @@ router.patch('/:id', async (req, res) => {
   } = req.body;
 
   try {
-    const existing = await prisma.goal.findUnique({ where: { id } });
+    const existing = await prisma.goal.findFirst({ where: { id, userId: (req as AuthenticatedRequest).user!.userId } });
     if (!existing) return res.status(404).json({ error: 'Goal not found' });
     if (target !== undefined && (!Number.isFinite(Number(target)) || Number(target) <= 0)) return res.status(400).json({ error: 'Target must be greater than zero' });
     if (type !== undefined && !['focus_minutes', 'hours', 'project_minutes', 'productive_minutes', 'sessions'].includes(type)) return res.status(400).json({ error: 'Unsupported goal type' });
@@ -228,7 +229,9 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const goal = await prisma.goal.update({ where: { id }, data: { active: false } });
+    const owned = await prisma.goal.findFirst({ where: { id, userId: (req as AuthenticatedRequest).user!.userId }, select: { id: true } });
+    if (!owned) return res.status(404).json({ error: 'Goal not found' });
+    const goal = await prisma.goal.update({ where: { id: owned.id }, data: { active: false } });
     emitGoalChanged(goal.userId, 'deleted', { id });
     void dispatchWebhookEvent(goal.userId, 'goal.changed', { action: 'deleted', id }, `${id}:deleted`)
       .catch((error) => console.error('Goal webhook dispatch failed:', error));

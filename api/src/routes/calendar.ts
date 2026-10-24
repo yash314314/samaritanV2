@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { requireRole, type AuthenticatedRequest } from '../middleware/authMiddleware';
+import { fetchUntrustedText, UnsafeUrlError } from '../utils/safeFetch';
+import { assertOwnedProject } from '../services/ownership';
 import { prisma } from '../prisma';
 import ical from 'node-ical';
 import { emitCalendarChanged } from '../websocket/broadcaster';
@@ -298,7 +301,8 @@ router.patch('/sessions/:id', async (req, res) => {
   }
 });
 
-router.post('/tracking/reconcile', async (_req, res) => {
+// Runs the lifecycle for every user, so it is an admin operation.
+router.post('/tracking/reconcile', requireRole('admin'), async (_req, res) => {
   try {
     await processCalendarLifecycle();
     res.json({ success: true, processedAt: new Date().toISOString() });
@@ -358,9 +362,11 @@ router.post('/import', async (req, res) => {
     let parsed: any;
 
     if (url) {
-      parsed = await ical.async.fromURL(url as string);
+      if (typeof url !== 'string') return res.status(400).json({ error: 'url must be a string' });
+      parsed = ical.sync.parseICS(await fetchUntrustedText(url));
     } else {
-      parsed = ical.sync.parseICS(ics as string);
+      if (typeof ics !== 'string' || ics.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'ics must be a string under 5 MB' });
+      parsed = ical.sync.parseICS(ics);
     }
 
     const events: any[] = [];
@@ -418,6 +424,7 @@ router.post('/import', async (req, res) => {
     res.json({ imported: events.length, events });
   } catch (error) {
     console.error('Calendar import error:', error);
+    if (error instanceof UnsafeUrlError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to import calendar events' });
   }
 });
@@ -560,6 +567,12 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    const owner = (req as AuthenticatedRequest).user!.userId;
+    // Links to another user's project or focus session are refused, not stored.
+    await assertOwnedProject(owner, projectId);
+    if (deepWorkId && !(await prisma.deepWorkSession.findFirst({ where: { id: String(deepWorkId), userId: owner }, select: { id: true } }))) {
+      return res.status(404).json({ error: 'Focus session not found' });
+    }
     const timezone = await calendarTimezone(userId);
     let parsedStart = parseCalendarDate(startAt, timezone);
     let parsedEnd = parseCalendarDate(endAt, timezone);
@@ -621,7 +634,7 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Event creation error:', error);
     const message = error instanceof Error ? error.message : 'Failed to create event';
-    res.status(message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
+    res.status(message === 'Project not found' ? 404 : message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
   }
 });
 
@@ -656,10 +669,16 @@ router.patch('/:id', async (req, res) => {
     recurrenceScope,
   } = req.body;
 
-  const existing = await prisma.calendarEvent.findFirst({ where: { id, ...(userId ? { userId } : {}) } });
+  const existing = await prisma.calendarEvent.findFirst({ where: { id, userId: (req as AuthenticatedRequest).user!.userId } });
   if (!existing) return res.status(404).json({ error: 'Calendar event not found' });
 
   try {
+    const owner = (req as AuthenticatedRequest).user!.userId;
+    // Links to another user's project or focus session are refused, not stored.
+    await assertOwnedProject(owner, projectId);
+    if (deepWorkId && !(await prisma.deepWorkSession.findFirst({ where: { id: String(deepWorkId), userId: owner }, select: { id: true } }))) {
+      return res.status(404).json({ error: 'Focus session not found' });
+    }
     const timezone = await calendarTimezone(existing.userId);
     let parsedStart = startAt !== undefined ? parseCalendarDate(startAt, timezone) : existing.startAt;
     let parsedEnd = endAt !== undefined ? parseCalendarDate(endAt, timezone) : existing.endAt;
@@ -746,7 +765,7 @@ router.patch('/:id', async (req, res) => {
   } catch (error) {
     console.error('Event update error:', error);
     const message = error instanceof Error ? error.message : 'Failed to update event';
-    res.status(message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
+    res.status(message === 'Project not found' ? 404 : message.includes('recurrence') || message.includes('Recurrence') ? 400 : 500).json({ error: message });
   }
 });
 
@@ -754,9 +773,10 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   const scope = req.query.scope === 'series' ? 'series' : 'occurrence';
+  const userId = (req as AuthenticatedRequest).user!.userId;
 
   try {
-    const existing = await prisma.calendarEvent.findUnique({ where: { id } });
+    const existing = await prisma.calendarEvent.findFirst({ where: { id, userId } });
     if (!existing) return res.status(404).json({ error: 'Calendar event not found' });
     if (existing.recurrenceParentId && scope === 'occurrence') {
       await stopCalendarFocusForEvent(id);

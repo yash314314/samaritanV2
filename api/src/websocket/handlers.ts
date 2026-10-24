@@ -33,7 +33,8 @@ registerHandler(async (ws: WebSocket, msg: WsMessage, meta: ClientMeta) => {
 
       await createActivityFromTracker({
         id: data.id,
-        userId: data.userId,
+        // The socket's authenticated user, never a userId the client claims.
+        userId: meta.userId,
         app: data.app,
         title: data.title,
         iconUrl: data.iconUrl,

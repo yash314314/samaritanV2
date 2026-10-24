@@ -22,10 +22,10 @@
         track: "#141414",
         raised: "#0a0a0a",
         control: "#3a3a3a",
-        alert: "#d92b2b",
-        ok: "#3ecf72",
-        warn: "#e5a50a",
-        info: "#4fa3f7",
+        alert: "#fb0915",
+        ok: "#f8f8ff",
+        warn: "#fb0915",
+        info: "#d6d6d6",
       },
     },
     "samaritan-dim": {
@@ -40,10 +40,10 @@
         track: "#1a1a1f",
         raised: "#16161a",
         control: "#3b3b43",
-        alert: "#e0484a",
-        ok: "#4cc17a",
-        warn: "#d9a23a",
-        info: "#5b9ee8",
+        alert: "#ef4444",
+        ok: "#e4e4e9",
+        warn: "#ef4444",
+        info: "#c2c2c9",
       },
     },
     "samaritan-light": {
@@ -58,21 +58,19 @@
         track: "#efeded",
         raised: "#f7f6f6",
         control: "#c9c4c4",
-        alert: "#c41e1e",
-        ok: "#1a7f3c",
-        warn: "#a86400",
-        info: "#1f63c7",
+        alert: "#b91c1c",
+        ok: "#110a0a",
+        warn: "#b91c1c",
+        info: "#2b2525",
       },
     },
   };
 
   const ACCENTS = {
-    red: { dark: "#d92b2b", light: "#d92b2b" },
-    amber: { dark: "#e5a50a", light: "#b07400" },
-    cyan: { dark: "#22c7e8", light: "#0b7d99" },
-    green: { dark: "#3ecf72", light: "#18843f" },
-    violet: { dark: "#a78bfa", light: "#6d3fd6" },
+    red: { dark: "#fb0915", light: "#b91c1c" },
+    crimson: { dark: "#ef4444", light: "#991b1b" },
     mono: { dark: "#f8f8ff", light: "#110a0a" },
+    silver: { dark: "#d6d6d6", light: "#2b2525" },
   };
 
   // Family names are declared with @font-face in widget.css.

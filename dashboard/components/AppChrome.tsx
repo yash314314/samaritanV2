@@ -9,6 +9,7 @@ import ElectronFocusBridge from "./ElectronFocusBridge";
 import SmartBreakController from "./SmartBreakController";
 import PageScrollBridge from "./PageScrollBridge";
 import RouteStage from "./sam/RouteStage";
+import AuthGate, { PUBLIC_ROUTES } from "./AuthGate";
 
 // Routes that are embedded as small fixed-size frames and render on their own.
 const BARE_ROUTES = new Set(["/widget"]);
@@ -17,11 +18,24 @@ export default function AppChrome({ children }: { children: ReactNode }) {
   const pathname = (usePathname() || "/").replace(/(.)\/$/, "$1");
 
   if (BARE_ROUTES.has(pathname)) {
-    return <div className="bg-void text-trace">{children}</div>;
+    return (
+      <AuthGate>
+        <div className="bg-void text-trace">{children}</div>
+      </AuthGate>
+    );
+  }
+
+  // Sign-in pages stand alone: no navigation into pages that need a session.
+  if (PUBLIC_ROUTES.has(pathname)) {
+    return (
+      <AuthGate>
+        <div className="min-h-screen bg-void text-trace">{children}</div>
+      </AuthGate>
+    );
   }
 
   return (
-    <>
+    <AuthGate>
       <GuidedTour />
       <div className="flex min-h-screen bg-void text-trace">
         <ElectronFocusBridge />
@@ -34,6 +48,6 @@ export default function AppChrome({ children }: { children: ReactNode }) {
           <RouteStage className="min-h-0 flex-1 pb-8">{children}</RouteStage>
         </main>
       </div>
-    </>
+    </AuthGate>
   );
 }

@@ -1,16 +1,20 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { prisma } from '../prisma';
 import { emitProjectChanged } from '../websocket/broadcaster';
 import { tagActivityToProject } from '../services/projectTagger';
 
 const router = Router();
 
+// Rules hang off a project, so every lookup goes through a project the caller owns.
+const ownerOf = (req: Request) => (req as AuthenticatedRequest).user!.userId;
+
 // GET /api/projects/:projectId/rules
 router.get('/:projectId/rules', async (req, res) => {
   const { projectId } = req.params;
 
   try {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+    const project = await prisma.project.findFirst({ where: { id: projectId, userId: ownerOf(req) }, select: { id: true } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
     const rules = await prisma.projectRule.findMany({
       where: { projectId },
@@ -28,7 +32,7 @@ router.post('/:projectId/rules', async (req, res) => {
   const { appName, domain, titleKeyword, matchType } = req.body;
 
   try {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    const project = await prisma.project.findFirst({ where: { id: projectId, userId: ownerOf(req) }, select: { userId: true } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!appName && !domain && !titleKeyword) return res.status(400).json({ error: 'Add an app, domain, or title keyword' });
     if (!['exact', 'contains'].includes(matchType || 'exact')) return res.status(400).json({ error: 'Match type must be exact or contains' });
@@ -53,10 +57,10 @@ router.patch('/:projectId/rules/:ruleId', async (req, res) => {
   const { projectId, ruleId } = req.params;
   const { appName, domain, titleKeyword, matchType } = req.body;
   try {
-    const existing = await prisma.projectRule.findFirst({ where: { id: ruleId, projectId }, include: { project: { select: { userId: true } } } });
+    const existing = await prisma.projectRule.findFirst({ where: { id: ruleId, projectId, project: { userId: ownerOf(req) } }, include: { project: { select: { userId: true } } } });
     if (!existing) return res.status(404).json({ error: 'Project rule not found' });
     const rule = await prisma.projectRule.update({
-      where: { id: ruleId },
+      where: { id: existing.id },
       data: {
         ...(appName !== undefined && { appName: appName || null }),
         ...(domain !== undefined && { domain: domain || null }),
@@ -75,7 +79,7 @@ router.post('/:projectId/rules/test', async (req, res) => {
   const { projectId } = req.params;
   const { appName, domain, windowTitle } = req.body;
   try {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    const project = await prisma.project.findFirst({ where: { id: projectId, userId: ownerOf(req) }, select: { userId: true } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!appName) return res.status(400).json({ error: 'App name is required' });
     const result = await tagActivityToProject(project.userId, String(appName), domain ? String(domain) : null, windowTitle ? String(windowTitle) : null);
@@ -90,9 +94,9 @@ router.delete('/:projectId/rules/:ruleId', async (req, res) => {
   const { projectId, ruleId } = req.params;
 
   try {
-    const existing = await prisma.projectRule.findFirst({ where: { id: ruleId, projectId }, include: { project: { select: { userId: true } } } });
+    const existing = await prisma.projectRule.findFirst({ where: { id: ruleId, projectId, project: { userId: ownerOf(req) } }, include: { project: { select: { userId: true } } } });
     if (!existing) return res.status(404).json({ error: 'Project rule not found' });
-    await prisma.projectRule.delete({ where: { id: ruleId } });
+    await prisma.projectRule.delete({ where: { id: existing.id } });
     emitProjectChanged(existing.project.userId, 'rules-updated', { projectId, ruleId });
     res.json({ success: true });
   } catch (error) {

@@ -218,7 +218,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   // Time allocation (from backend — accurate session accumulators)
   let productiveMin = metrics.productiveMinutes ?? 0;
   let distractionMin = metrics.distractionMinutes ?? 0;
-  let idleMin = metrics.idleMinutes ?? 0;
+  const idleMin = metrics.idleMinutes ?? 0;
   let totalTrackedMin = metrics.totalTrackedMinutes ?? (productiveMin + distractionMin + idleMin);
 
   // Fallback: if backend accumulator was 0, calculate from session focus duration and interruptions
@@ -329,7 +329,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
             <span className="text-red-500 text-xs animate-pulse leading-none" aria-hidden="true">
               ▼
             </span>
-            <span className="text-zinc-500 uppercase">/// SYS.DIRECTIVE //</span>
+            <span className="text-zinc-500 uppercase">{"/// SYS.DIRECTIVE //"}</span>
             <span className="font-bold uppercase text-white">DEEP_WORK.METRICS_EVAL</span>
           </div>
           <div className="flex items-center gap-2 text-zinc-500">

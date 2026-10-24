@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+// Shared client: follows DATABASE_TARGET like the API does.
+import { prisma } from "./prisma";
 
-const prisma = new PrismaClient();
 
 
 

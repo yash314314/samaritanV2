@@ -97,7 +97,7 @@ export default function ReflectionModal({
             <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
               ▼
             </span>
-            <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
             <span className="font-bold uppercase text-white">EVAL.REFLECTION</span>
           </div>
           <div className="flex items-center gap-2 text-zinc-500">

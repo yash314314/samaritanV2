@@ -1,7 +1,9 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { Server } from "http";
+import { IncomingMessage, Server } from "http";
 import { parse } from "url";
 import { isAllowedOrigin } from "../utils/origin";
+import { authenticateToken, bearerToken } from "../middleware/authMiddleware";
+import type { TokenPayload } from "../utils/jwt";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -38,25 +40,60 @@ const externalHandlers: Array<(ws: WebSocket, msg: WsMessage, meta: ClientMeta) 
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════════════════
 
+// Browsers cannot set headers on a WebSocket, so the dashboard offers its
+// access token as a subprotocol ("samaritan", "bearer.<jwt>"); native clients
+// send a normal Authorization header. Tokens never travel in the URL, where
+// proxies and logs would keep them.
+const WS_PROTOCOL = "samaritan";
+const BEARER_PROTOCOL_PREFIX = "bearer.";
+
+type AuthenticatedUpgrade = IncomingMessage & { samaritanUser?: TokenPayload };
+
+function upgradeToken(req: IncomingMessage): string | null {
+  const fromHeader = bearerToken(req.headers.authorization);
+  if (fromHeader) return fromHeader;
+  const offered = String(req.headers["sec-websocket-protocol"] || "")
+    .split(",")
+    .map((value) => value.trim());
+  const bearer = offered.find((value) => value.startsWith(BEARER_PROTOCOL_PREFIX));
+  return bearer ? bearer.slice(BEARER_PROTOCOL_PREFIX.length) : null;
+}
+
 export function initWebSocket(server: Server) {
   wss = new WebSocketServer({
     server,
     path: "/ws",
     perMessageDeflate: false,
-    // Browsers let any page open a WebSocket to localhost; reject foreign origins.
-    verifyClient: ({ origin }: { origin?: string }) => isAllowedOrigin(origin),
+    maxPayload: 1024 * 1024,
+    // Browsers let any page open a WebSocket to localhost; reject foreign origins,
+    // then require a valid access token before the upgrade completes.
+    verifyClient: (info: { origin?: string; req: IncomingMessage }, done: (ok: boolean, code?: number, message?: string) => void) => {
+      if (!isAllowedOrigin(info.origin)) return done(false, 403, "Origin not allowed");
+      authenticateToken(upgradeToken(info.req))
+        .then((user) => {
+          if (!user) return done(false, 401, "Unauthorized");
+          (info.req as AuthenticatedUpgrade).samaritanUser = user;
+          done(true);
+        })
+        .catch(() => done(false, 500, "Authentication failed"));
+    },
+    handleProtocols: (protocols: Set<string>) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
   });
 
   wss.on("connection", (ws, req) => {
     const { query } = parse(req.url || "", true);
-    const userId = query.userId as string;
-    const deviceId = query.deviceId as string | undefined;
-    const clientType = (query.clientType as "dashboard" | "desktop") || "dashboard";
-
-    if (!userId) {
-      ws.close(4001, "Missing userId");
+    const user = (req as AuthenticatedUpgrade).samaritanUser;
+    if (!user) {
+      ws.close(4001, "Unauthorized");
       return;
     }
+    const userId = user.userId;
+    if (query.userId && query.userId !== userId) {
+      ws.close(4003, "userId does not match the authenticated user");
+      return;
+    }
+    const deviceId = typeof query.deviceId === "string" ? query.deviceId.slice(0, 128) : undefined;
+    const clientType = query.clientType === "desktop" ? "desktop" : "dashboard";
 
     const meta: ClientMeta = {
       userId,
@@ -210,6 +247,13 @@ export function broadcastToSession<T>(userId: string, deepWorkId: string, type: 
     if (!meta || !meta.subscriptions.has(`deepwork:${deepWorkId}`)) continue;
     send(ws, msg);
   }
+}
+
+/** Closes every socket of a user, e.g. after a password change or "log out everywhere". */
+export function disconnectUser(userId: string, reason: string) {
+  const room = userRooms.get(userId);
+  if (!room) return;
+  for (const ws of [...room]) ws.close(4001, reason.slice(0, 120));
 }
 
 export function sendToSocket<T>(ws: WebSocket, type: string, payload: T) {

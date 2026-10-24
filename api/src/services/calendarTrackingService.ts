@@ -1,4 +1,5 @@
 import type { Activity, CalendarEvent, CalendarSession } from "@prisma/client";
+import { assertOwnedProject } from "./ownership";
 import { prisma } from "../prisma";
 import {
   classifyCalendarEvent,
@@ -547,6 +548,7 @@ export async function updateCalendarSession(
   const existing = await prisma.calendarSession.findFirst({ where: { id: sessionId, userId } });
   if (!existing) throw new Error("Calendar session not found");
   if (existing.status === "active") throw new Error("End an active session before correcting it");
+  if (input.projectId) await assertOwnedProject(userId, input.projectId);
 
   const type = input.type ?? existing.type;
   validateManualSessionType(type);
@@ -604,6 +606,7 @@ export async function startManualCalendarSession(
   input: { type: string; title?: string; projectId?: string | null }
 ) {
   validateManualSessionType(input.type);
+  await assertOwnedProject(userId, input.projectId);
   const active = await prisma.calendarSession.findFirst({
     where: { userId, source: "manual", status: "active", actualEnd: null },
   });
@@ -629,6 +632,7 @@ export async function logManualCalendarSession(
   input: { type: string; title?: string; startAt: Date; endAt: Date; projectId?: string | null }
 ) {
   validateManualSessionType(input.type);
+  await assertOwnedProject(userId, input.projectId);
   if (Number.isNaN(input.startAt.getTime()) || Number.isNaN(input.endAt.getTime())) {
     throw new Error("Provide valid start and end times");
   }

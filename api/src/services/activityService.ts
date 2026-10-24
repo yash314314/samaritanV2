@@ -5,7 +5,7 @@ import { classifyActivity } from "./contextClassifier";
 import { tagActivityToProject } from "./projectTagger";
 import type { ISTDateRange } from "../utils/time";
 import { loadResolvedActivities } from "./rangeActivityQuery";
-import { detectDeepWorkBlocks } from "./rangeMetrics";
+import { deepWorkSessionBlocks } from "./rangeMetrics";
 import {
   clamp,
   clamp01,
@@ -298,8 +298,6 @@ export async function getTimeline(userId: string, range: ISTDateRange) {
 /*                              DEEP WORK BLOCKS                              */
 /* -------------------------------------------------------------------------- */
 
-const MIN_FOCUS_BLOCK_MS = 10 * 60 * 1000;
-
 /**
  * Contiguous deep_work blocks of at least ten minutes inside the IST day range.
  * Blocks break on any other activity (including idle) or a gap over two
@@ -307,5 +305,5 @@ const MIN_FOCUS_BLOCK_MS = 10 * 60 * 1000;
  */
 export async function getFocusBlocks(userId: string, range: ISTDateRange) {
   const items = await loadResolvedActivities(userId, range.start, range.end);
-  return detectDeepWorkBlocks(items).filter((block) => block.duration >= MIN_FOCUS_BLOCK_MS);
+  return deepWorkSessionBlocks(items);
 }

@@ -231,7 +231,7 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
             <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
               ▼
             </span>
-            <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
             <span className="font-bold uppercase text-white">DEEP_WORK.CONFIG</span>
           </div>
           <div className="flex items-center gap-2 text-zinc-500">
@@ -618,6 +618,21 @@ export default function DeepWorkConfigModal({ open, onClose, onStart, defaultDur
   );
 }
 
+// Keeps what the user types as a draft and only clamps when the field is left
+// (or Enter is pressed): clamping every keystroke made values whose first digit
+// is below `min` impossible to type, and an emptied field snap back.
 function TimerInput({ label, value, min, max, onChange, suffix = "m" }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void; suffix?: string }) {
-  return <label className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"><span className="block text-[10px] text-zinc-600">{label}</span><span className="mt-1 flex items-center gap-1"><input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value) || min)))} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-zinc-200 outline-none" /><span className="text-[10px] text-zinc-600">{suffix}</span></span></label>;
+  const [draft, setDraft] = useState(String(value));
+  const [syncedValue, setSyncedValue] = useState(value);
+  if (value !== syncedValue) {
+    setSyncedValue(value);
+    setDraft(String(value));
+  }
+  const commit = () => {
+    const parsed = Number(draft);
+    const next = Number.isFinite(parsed) && draft.trim() !== "" ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
+    setDraft(String(next));
+    if (next !== value) onChange(next);
+  };
+  return <label className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"><span className="block text-[10px] text-zinc-600">{label}</span><span className="mt-1 flex items-center gap-1"><input type="number" inputMode="numeric" min={min} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-zinc-200 outline-none" /><span className="text-[10px] text-zinc-600">{suffix}</span></span></label>;
 }

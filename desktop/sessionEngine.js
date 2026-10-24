@@ -2,12 +2,13 @@ const { app, Notification, BrowserWindow } = require("electron");
 const { streamActivity } = require("./wsClient");
 const { killProcess } = require("./taskkill");
 const crypto = require("crypto");
+const auth = require("./authClient");
+const outbox = require("./outbox");
 
 let currentSession = null;
 
 const MIN_SESSION_DURATION = 2000;
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
-const BACKEND_URL = "http://localhost:4000/activity/session";
+const BACKEND_URL = `${auth.API_BASE}/activity/session`;
 
 function now() {
   return Date.now();
@@ -46,7 +47,6 @@ function startNewSession(event) {
 async function sendSessionToBackend(session) {
   const payload = {
     id: session.id,
-    userId: USER_ID,
     app: session.app,
     title: session.title,
     iconUrl: session.icon,
@@ -70,56 +70,68 @@ async function sendSessionToBackend(session) {
     return;
   }
 
-  // Fallback: HTTP POST for reliability when WS is down.
+  // Fallback: HTTP POST for reliability when WS is down. Anything the API
+  // cannot take right now waits in the outbox instead of being lost.
   console.log("[Samaritan] WS unavailable; using HTTP fallback");
+  const outcome = await postSession(payload, session.app);
+  if (outcome === "retry") {
+    outbox.enqueue(payload);
+    console.warn("[Samaritan] Activity queued for later delivery. Outbox size:", outbox.size());
+  }
+}
+
+/** POSTs one activity. Resolves "sent", "rejected" (4xx, never retried) or "retry". */
+async function postSession(payload, appName) {
+  let response;
   try {
-    const response = await fetch(BACKEND_URL, {
+    response = await auth.authFetch(BACKEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-
-    const text = await response.text();
-
-    if (!response.ok) {
-      console.error(
-        "[Samaritan] HTTP fallback rejected.",
-        "\n Status:", response.status,
-        "\n Response:", text
-      );
-      return;
-    }
-
-    console.log("[Samaritan] HTTP fallback acknowledged.");
-
-    try {
-      const data = JSON.parse(text);
-      const focusIntervention = data?.focusIntervention;
-
-      if (focusIntervention) {
-        const appName =
-          focusIntervention.intervention?.appName || session.app;
-
-        console.log(
-          "[Samaritan] Strict focus intervention.",
-          "\n Action:", focusIntervention.intervention?.action,
-          "\n App:", appName,
-          "\n Message:", focusIntervention.message
-        );
-
-        handleFocusIntervention(focusIntervention, appName);
-      }
-    } catch {
-      // Backend returned a valid acknowledgement without JSON intervention data.
-    }
-
   } catch (err) {
-    console.error(
-      "[Samaritan] HTTP fallback failed.",
-      "\n Error:", err.message
-    );
-    // WS already sent the data, so no data loss
+    console.error("[Samaritan] HTTP fallback failed.", "\n Error:", err.message);
+    return "retry";
   }
+
+  const text = await response.text();
+  if (!response.ok) {
+    console.error(
+      "[Samaritan] HTTP fallback rejected.",
+      "\n Status:", response.status,
+      "\n Response:", text
+    );
+    return response.status >= 500 || response.status === 401 || response.status === 429 ? "retry" : "rejected";
+  }
+
+  console.log("[Samaritan] HTTP fallback acknowledged.");
+
+  try {
+    const data = JSON.parse(text);
+    const focusIntervention = data?.focusIntervention;
+
+    if (focusIntervention && appName) {
+      const interventionApp =
+        focusIntervention.intervention?.appName || appName;
+
+      console.log(
+        "[Samaritan] Strict focus intervention.",
+        "\n Action:", focusIntervention.intervention?.action,
+        "\n App:", interventionApp,
+        "\n Message:", focusIntervention.message
+      );
+
+      handleFocusIntervention(focusIntervention, interventionApp);
+    }
+  } catch {
+    // Backend returned a valid acknowledgement without JSON intervention data.
+  }
+  return "sent";
+}
+
+/** Replays queued activity over HTTP, oldest first. Interventions are not replayed. */
+function flushOutbox() {
+  return outbox.flush((payload) => postSession(payload, null));
 }
 
 /* ---------------- INTERVENTION HANDLER ---------- */
@@ -317,4 +329,4 @@ process.on("unhandledRejection", (err) => {
   console.error("Details:", err);
 });
 
-module.exports = { handleEvent, closeSession, flushCurrentSession, handleFocusIntervention };
+module.exports = { handleEvent, closeSession, flushCurrentSession, handleFocusIntervention, flushOutbox };

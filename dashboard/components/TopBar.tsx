@@ -62,7 +62,7 @@ export default function TopBar() {
               <span className="text-[12px] text-signal">{user.name}</span>
               <span className="text-[11px] text-key">{user.email}</span>
             </div>
-            <button type="button" onClick={logout} className="sam-button">
+            <button type="button" onClick={() => void logout()} className="sam-button">
               Log out
             </button>
           </div>

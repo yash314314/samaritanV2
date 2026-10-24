@@ -11,8 +11,8 @@ import {
 import { useAppContext } from "../context/AppContext";
 import { useRealtimeRefresh } from "../lib/useRealtimeRefresh";
 import RizeHomeDashboard from "@/components/RizeHomeDashboard";
+import { getUserId } from "@/lib/auth";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 const MemoRizeHomeDashboard = memo(RizeHomeDashboard);
 
 export default function Home() {
@@ -35,9 +35,9 @@ export default function Home() {
 
   const loadDashboard = useCallback(async () => {
     const [dailyData, heatmapData, timelineData] = await Promise.all([
-      fetchDaily(USER_ID, dateString),
-      fetchHeatmap(USER_ID, dateString),
-      fetchTimeline(USER_ID, undefined, undefined, dateString)
+      fetchDaily(getUserId(), dateString),
+      fetchHeatmap(getUserId(), dateString),
+      fetchTimeline(getUserId(), undefined, undefined, dateString)
     ]);
 
     setDaily(dailyData);
@@ -53,7 +53,7 @@ export default function Home() {
     }
     try {
       const trend = await fetchDailyFocusTrend(
-        USER_ID,
+        getUserId(),
         dateString,
         focusBucketMinutes
       );
@@ -97,7 +97,7 @@ export default function Home() {
 
   return (
     <MemoRizeHomeDashboard
-      userId={USER_ID}
+      userId={getUserId()}
       date={dateString}
       daily={daily}
       heatmap={heatmap}

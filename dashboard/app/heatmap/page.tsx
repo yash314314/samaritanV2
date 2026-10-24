@@ -29,8 +29,8 @@ import { DecodeText } from "../../components/sam/Decode";
 import SamLoading from "../../components/sam/SamLoading";
 import AppCategoryTags from "../../components/AppCategoryTags";
 import { playSamaritanDialogSequence, playSamaritanDismiss } from "../../lib/samaritanAudio";
+import { getUserId } from "@/lib/auth";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 // ═══════════════════════════════════════════════════════════
 //  TYPES
@@ -635,7 +635,7 @@ const SessionDetailModal = ({
             <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
               ▼
             </span>
-            <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
             <span className="font-bold uppercase text-white">SESSION.TELEMETRY</span>
           </div>
           <div className="flex items-center gap-2 text-zinc-500">
@@ -895,12 +895,12 @@ const HourDetailDrawer = ({
             <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
               ▼
             </span>
-            <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
             <span className="font-bold uppercase text-white">TEMPORAL.ANALYSIS</span>
           </div>
           <div className="flex items-center gap-2 text-zinc-500">
             <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" aria-hidden="true" />
-            <span className="font-mono">[{date} // {hour.toString().padStart(2, "0")}:00]</span>
+            <span className="font-mono">[{date} {"//"} {hour.toString().padStart(2, "0")}:00]</span>
           </div>
         </div>
 
@@ -1106,8 +1106,8 @@ export default function HeatmapPage() {
     setError(null);
     try {
       const [hData, tData] = await Promise.all([
-        fetchHeatmap(USER_ID, from, to, viewMode, categoryFilter),
-        fetchTimeline(USER_ID, from, to),
+        fetchHeatmap(getUserId(), from, to, viewMode, categoryFilter),
+        fetchTimeline(getUserId(), from, to),
       ]);
       setHeatmap(hData ?? null);
       setTimeline(Array.isArray(tData) ? tData : []);

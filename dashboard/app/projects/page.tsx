@@ -30,8 +30,8 @@ import {
 import { projectRulesApi, projectsApi } from "@/lib/api";
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import { playSamaritanDialogSequence, playSamaritanDismiss } from "@/lib/samaritanAudio";
+import { getUserId } from "@/lib/auth";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 type Project = {
   id: string;
@@ -109,13 +109,13 @@ export default function ProjectsPage() {
   const selectedProject = projects.find((project) => project.id === selectedId) || null;
 
   const loadProjects = useCallback(async () => {
-    const data = await projectsApi.list(USER_ID, showArchived) as Project[];
+    const data = await projectsApi.list(getUserId(), showArchived) as Project[];
     setProjects(data);
     setSelectedId((current) => current && data.some((project) => project.id === current) ? current : data[0]?.id || null);
   }, [showArchived]);
 
   const loadDashboard = useCallback(async (id: string) => {
-    setDashboard(await projectsApi.dashboard(id, USER_ID, days) as Dashboard);
+    setDashboard(await projectsApi.dashboard(id, getUserId(), days) as Dashboard);
   }, [days]);
 
   const refresh = useCallback(async () => {
@@ -135,7 +135,7 @@ export default function ProjectsPage() {
   useEffect(() => { setTargetProjectId(selectedId || ""); }, [selectedId]);
   useEffect(() => {
     if (tab !== "unassigned") return;
-    projectsApi.unassigned(USER_ID).then((data) => setUnassigned(data as Activity[])).catch(console.error);
+    projectsApi.unassigned(getUserId()).then((data) => setUnassigned(data as Activity[])).catch(console.error);
   }, [tab]);
 
   useRealtimeRefresh(refresh, {
@@ -170,8 +170,8 @@ export default function ProjectsPage() {
   async function saveProject(event: FormEvent) {
     event.preventDefault();
     await action("project", () => editing
-      ? projectsApi.update(editing.id, { ...form, userId: USER_ID })
-      : projectsApi.create({ ...form, userId: USER_ID }));
+      ? projectsApi.update(editing.id, { ...form, userId: getUserId() })
+      : projectsApi.create({ ...form, userId: getUserId() }));
     setShowModal(false);
   }
 
@@ -187,7 +187,7 @@ export default function ProjectsPage() {
 
   async function assignSelected(projectId: string | null, rememberChoice = false) {
     if (!selectedActivities.length) return;
-    await action("assign", () => projectsApi.assignActivities({ userId: USER_ID, activityIds: selectedActivities, projectId, remember: rememberChoice }));
+    await action("assign", () => projectsApi.assignActivities({ userId: getUserId(), activityIds: selectedActivities, projectId, remember: rememberChoice }));
     setUnassigned((items) => items.filter((item) => !selectedActivities.includes(item.id)));
     setSelectedActivities([]);
   }
@@ -234,7 +234,7 @@ export default function ProjectsPage() {
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-semibold" style={{ backgroundColor: `${selectedProject.color}20`, color: selectedProject.color }}>{selectedProject.icon || selectedProject.name.slice(0, 1).toUpperCase()}</span>
                 <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{selectedProject.name}</h2><p className="truncate text-xs text-zinc-600">{selectedProject.description || `${dashboard.project.rules.length} attribution rules`}</p></div>
                 <select value={days} onChange={(event) => setDays(Number(event.target.value))} className="h-8 rounded-lg border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-400"><option value={7}>7 days</option><option value={14}>14 days</option><option value={30}>30 days</option><option value={60}>60 days</option></select>
-                {selectedProject.active ? <><button title="Edit project" onClick={() => openProject(selectedProject)} className="sam-button h-8 w-8 px-0"><Pencil size={14} /></button><button title="Archive project" onClick={() => { if (confirm(`Archive ${selectedProject.name}?`)) void action("archive", () => projectsApi.delete(selectedProject.id)); }} className="sam-button h-8 w-8 px-0"><Archive size={14} /></button></> : <button title="Restore project" onClick={() => void action("restore", () => projectsApi.restore(selectedProject.id, USER_ID))} className="flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 text-xs text-red-400 hover:bg-red-500/10"><RotateCcw size={13} /> Restore</button>}
+                {selectedProject.active ? <><button title="Edit project" onClick={() => openProject(selectedProject)} className="sam-button h-8 w-8 px-0"><Pencil size={14} /></button><button title="Archive project" onClick={() => { if (confirm(`Archive ${selectedProject.name}?`)) void action("archive", () => projectsApi.delete(selectedProject.id)); }} className="sam-button h-8 w-8 px-0"><Archive size={14} /></button></> : <button title="Restore project" onClick={() => void action("restore", () => projectsApi.restore(selectedProject.id, getUserId()))} className="flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 text-xs text-red-400 hover:bg-red-500/10"><RotateCcw size={13} /> Restore</button>}
               </div>
 
               <div className="grid shrink-0 grid-cols-4 border-b border-zinc-900">
@@ -314,7 +314,7 @@ export default function ProjectsPage() {
                 <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
                   ▼
                 </span>
-                <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+                <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
                 <span className="font-bold uppercase text-white">PROJECT.CONFIG</span>
               </div>
               <div className="flex items-center gap-2 text-zinc-500">

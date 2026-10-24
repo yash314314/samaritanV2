@@ -27,11 +27,10 @@ import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import { ThemedDatePicker } from "./DatePicker";
 // Goal dates are calendar-day keys; build and read them from local date
 // parts (toISOString would shift them to the previous day in IST).
-import { format, parseISO } from "date-fns";
 import { useWsMessage } from "@/lib/ws";
 import { playSamaritanDialogSequence, playSamaritanDismiss } from "@/lib/samaritanAudio";
+import { getUserId } from "@/lib/auth";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 type Project = { id: string; name: string; color: string };
 type Goal = {
@@ -63,7 +62,9 @@ type Goal = {
 type Summary = { active: number; completed: number; onTrack: number; atRisk: number; averageProgress: number; bestStreak: number };
 type Snapshot = { id: string; periodStart: string; periodEnd: string; progress: number; target: number; completed: boolean };
 
-const emptyForm = { title: "", description: "", type: "focus_minutes", unit: "", target: 60, period: "daily", priority: "medium", startDate: "", endDate: "", projectId: "" };
+// Target stays a string while editing so the field can be cleared and can hold
+// a half-typed decimal such as "1."; it becomes a number on submit.
+const emptyForm = { title: "", description: "", type: "focus_minutes", unit: "", target: "60", period: "daily", priority: "medium", startDate: "", endDate: "", projectId: "" };
 
 function unit(goal: Pick<Goal, "unit" | "type">) {
   if (goal.unit) return goal.unit;
@@ -121,8 +122,8 @@ export default function GoalsPage() {
     try {
       const selectedPeriod = period === "all" ? undefined : period;
       const [data, allGoals] = await Promise.all([
-        goalsApi.dashboard(USER_ID, selectedPeriod) as Promise<{ goals: Goal[]; summary: Summary }>,
-        showArchived ? goalsApi.list(USER_ID, selectedPeriod, true) as Promise<Goal[]> : Promise.resolve(null),
+        goalsApi.dashboard(getUserId(), selectedPeriod) as Promise<{ goals: Goal[]; summary: Summary }>,
+        showArchived ? goalsApi.list(getUserId(), selectedPeriod, true) as Promise<Goal[]> : Promise.resolve(null),
       ]);
       const visibleGoals = allGoals || data.goals;
       setGoals(visibleGoals);
@@ -138,7 +139,7 @@ export default function GoalsPage() {
 
   const loadHistory = useCallback(async (goalId: string) => {
     try {
-      const data = await goalsApi.history(goalId, USER_ID, 14) as { history: Snapshot[] };
+      const data = await goalsApi.history(goalId, getUserId(), 14) as { history: Snapshot[] };
       setHistory(data.history);
     } catch (caught) {
       console.error(caught);
@@ -146,7 +147,7 @@ export default function GoalsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { projectsApi.list(USER_ID).then((data) => setProjects(data as Project[])).catch(console.error); }, []);
+  useEffect(() => { projectsApi.list(getUserId()).then((data) => setProjects(data as Project[])).catch(console.error); }, []);
   useEffect(() => {
     if (!selectedId) return setHistory([]);
     void loadHistory(selectedId);
@@ -180,16 +181,25 @@ export default function GoalsPage() {
 
   function openEdit(goal: Goal) {
     setEditingId(goal.id);
-    setForm({ title: goal.title, description: goal.description || "", type: goal.type, unit: goal.unit || "", target: goal.target, period: goal.period, priority: goal.priority, startDate: goal.startDate?.slice(0, 10) || "", endDate: goal.endDate?.slice(0, 10) || "", projectId: goal.project?.id || goal.projectId || "" });
+    setForm({ title: goal.title, description: goal.description || "", type: goal.type, unit: goal.unit || "", target: String(goal.target), period: goal.period, priority: goal.priority, startDate: goal.startDate?.slice(0, 10) || "", endDate: goal.endDate?.slice(0, 10) || "", projectId: goal.project?.id || goal.projectId || "" });
     setError(null);
     setShowModal(true);
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const target = Number(form.target);
+    if (!form.target.trim() || !Number.isFinite(target) || target <= 0) {
+      setError("Target must be a number above 0.");
+      return;
+    }
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      setError("Custom end must be on or after custom start.");
+      return;
+    }
     setBusy(true);
     setError(null);
-    const payload = { userId: USER_ID, ...form, unit: form.unit || undefined, startDate: form.startDate || undefined, endDate: form.endDate || undefined, projectId: form.projectId || undefined };
+    const payload = { userId: getUserId(), ...form, target, unit: form.unit || undefined, startDate: form.startDate || undefined, endDate: form.endDate || undefined, projectId: form.projectId || undefined };
     try {
       if (editingId) await goalsApi.update(editingId, payload);
       else await goalsApi.create(payload);
@@ -212,7 +222,7 @@ export default function GoalsPage() {
     setBusy(true);
     setError(null);
     try {
-      await goalsApi.restore(goal.id, USER_ID);
+      await goalsApi.restore(goal.id, getUserId());
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to restore goal");
@@ -297,7 +307,7 @@ export default function GoalsPage() {
                 <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
                   ▼
                 </span>
-                <span className="uppercase text-zinc-500">/// SYS.DIRECTIVE //</span>
+                <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
                 <span className="font-bold uppercase text-white">GOALS.TARGET_SPEC</span>
               </div>
               <div className="flex items-center gap-2 text-zinc-500">
@@ -358,10 +368,11 @@ export default function GoalsPage() {
                   <input
                     required
                     min={0.1}
-                    step={0.1}
+                    step="any"
                     type="number"
+                    inputMode="decimal"
                     value={form.target}
-                    onChange={(event) => setForm({ ...form, target: Number(event.target.value) })}
+                    onChange={(event) => setForm({ ...form, target: event.target.value })}
                     className="h-10 w-full rounded-none border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100"
                   />
                 </label>
@@ -422,20 +433,18 @@ export default function GoalsPage() {
                 <label>
                   <span className="mb-1.5 block font-mono text-xs uppercase text-zinc-400">Custom start</span>
                   <ThemedDatePicker
-                    selected={form.startDate ? parseISO(form.startDate) : null}
-                    onChange={(date) =>
-                      setForm({ ...form, startDate: date ? format(date, "yyyy-MM-dd") : "" })
-                    }
+                    value={form.startDate}
+                    max={form.endDate || undefined}
+                    onChange={(startDate) => setForm((current) => ({ ...current, startDate }))}
                     placeholder="Start date"
                   />
                 </label>
                 <label>
                   <span className="mb-1.5 block font-mono text-xs uppercase text-zinc-400">Custom end</span>
                   <ThemedDatePicker
-                    selected={form.endDate ? parseISO(form.endDate) : null}
-                    onChange={(date) =>
-                      setForm({ ...form, endDate: date ? format(date, "yyyy-MM-dd") : "" })
-                    }
+                    value={form.endDate}
+                    min={form.startDate || undefined}
+                    onChange={(endDate) => setForm((current) => ({ ...current, endDate }))}
                     placeholder="End date"
                   />
                 </label>

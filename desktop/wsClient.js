@@ -1,13 +1,12 @@
 const WebSocket = require("ws");
-const Store = require("electron-store");
 const crypto = require("crypto");
+const auth = require("./authClient");
 
-const store = new Store();
-const WS_URL = process.env.WS_URL || "ws://localhost:4000/ws";
-const USER_ID = store.get("userId") || process.env.USER_ID || "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
-const AUTH_TOKEN = store.get("authToken") || process.env.AUTH_TOKEN || "";
-const DEVICE_ID = store.get("deviceId") || require("uuid").v4();
-store.set("deviceId", DEVICE_ID);
+const WS_URL = process.env.WS_URL || `${auth.API_BASE.replace(/^http/, "ws")}/ws`;
+const DEVICE_ID = auth.DEVICE_ID;
+// While signed out there is nothing to connect with; retry slowly until a
+// credential appears (auth.onChange below reconnects at once when it does).
+const SIGNED_OUT_RETRY_MS = 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════
 // STATE
@@ -27,11 +26,36 @@ const listeners = new Map();
 // CONNECTION
 // ═══════════════════════════════════════════════════════════════════════
 
-function connect() {
-  if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+let connecting = false;
+let socketUserId = null;
 
-  const url = `${WS_URL}?userId=${USER_ID}&deviceId=${DEVICE_ID}&clientType=desktop${AUTH_TOKEN ? `&token=${AUTH_TOKEN}` : ""}`;
-  ws = new WebSocket(url);
+async function connect() {
+  if (connecting || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+  connecting = true;
+  let token;
+  try {
+    token = await auth.getAccessToken();
+  } catch (err) {
+    console.warn("[WS] Could not obtain an access token:", err.message);
+    connecting = false;
+    scheduleReconnect();
+    return;
+  }
+  connecting = false;
+  if (!token) {
+    console.warn("[WS] Desktop is not signed in; waiting for a device credential");
+    scheduleReconnect(SIGNED_OUT_RETRY_MS);
+    return;
+  }
+
+  socketUserId = auth.status().userId;
+  const url = `${WS_URL}?deviceId=${encodeURIComponent(DEVICE_ID)}&clientType=desktop`;
+  ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
+
+  ws.on("unexpected-response", (_request, response) => {
+    console.warn(`[WS] Handshake refused: HTTP ${response.statusCode}`);
+    if (response.statusCode === 401) auth.getAccessToken().catch(() => undefined);
+  });
 
   ws.on("open", () => {
     reconnectAttempt = 0;
@@ -55,10 +79,11 @@ function connect() {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", (code) => {
     isConnected = false;
     stopHeartbeat();
-    scheduleReconnect();
+    // 4001: the server ended this login (sign-out everywhere, password change).
+    scheduleReconnect(code === 4001 ? SIGNED_OUT_RETRY_MS : undefined);
   });
 
   ws.on("error", (err) => {
@@ -81,9 +106,9 @@ function disconnect() {
   reconnectAttempt = 0;
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(fixedDelay) {
   if (reconnectTimer) return;
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 30000);
+  const delay = fixedDelay ?? Math.min(1000 * Math.pow(2, reconnectAttempt), 30000);
   reconnectAttempt++;
   console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempt})`);
   reconnectTimer = setTimeout(() => {
@@ -167,10 +192,7 @@ function streamActivity(activity) {
 
   ws.send(JSON.stringify({
     type: "activity:stream",
-    payload: {
-      userId: USER_ID,
-      ...activity,
-    }
+    payload: activity
   }));
 
   return true;
@@ -185,7 +207,6 @@ function streamCurrentActivity(context) {
   ws.send(JSON.stringify({
     type: "activity:current",
     payload: {
-      userId: USER_ID,
       sourceDeviceId: DEVICE_ID,
       sourceSessionId,
       sourceSequence: ++currentActivitySequence,
@@ -217,6 +238,21 @@ function unsubscribeFromDeepWork(deepWorkId) {
 // ═══════════════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════════════
+
+// A new or replaced credential (dashboard link, re-enrollment) reconnects straight away.
+auth.onChange((state) => {
+  if (!state.linked) return;
+  if (ws?.readyState === WebSocket.OPEN) {
+    // Same account: the socket stays valid. Another account: reconnect as it.
+    if (state.userId !== socketUserId) ws.close(1000, "Credential changed");
+    return;
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  connect();
+});
 
 module.exports = {
   connect,

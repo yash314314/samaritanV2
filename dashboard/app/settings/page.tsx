@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { useAppearance } from "../../context/AppearanceContext";
 import { DecodeText } from "../../components/sam/Decode";
+import SecurityPanel from "../../components/settings/SecurityPanel";
 import {
   ACCENTS,
   CATEGORIES,
@@ -19,6 +20,7 @@ import {
   setSamaritanAudioEnabled,
   getSamaritanAudioVolume,
   setSamaritanAudioVolume,
+  subscribeSamaritanAudioPreferences,
   playSamaritanRev,
   playSamaritanLock,
   playSamaritanDialogSequence,
@@ -82,23 +84,18 @@ function OptionTile({
 
 export default function SettingsPage() {
   const { appearance, setAppearance, resetAppearance, saveState, saveError } = useAppearance();
-  const [audioEnabled, setAudioEnabledState] = useState(true);
-  const [audioVolume, setAudioVolumeState] = useState(0.28);
-
-  useEffect(() => {
-    setAudioEnabledState(isSamaritanAudioEnabled());
-    setAudioVolumeState(getSamaritanAudioVolume());
-  }, []);
+  // The prerendered page has no localStorage, so it renders the defaults
+  // and the stored preference takes over after hydration.
+  const audioEnabled = useSyncExternalStore(subscribeSamaritanAudioPreferences, isSamaritanAudioEnabled, () => true);
+  const audioVolume = useSyncExternalStore(subscribeSamaritanAudioPreferences, getSamaritanAudioVolume, () => 0.28);
 
   const handleToggleAudio = (enabled: boolean) => {
     setSamaritanAudioEnabled(enabled);
-    setAudioEnabledState(enabled);
     if (enabled) playSamaritanLock(0.9);
   };
 
   const handleVolumeChange = (vol: number) => {
     setSamaritanAudioVolume(vol);
-    setAudioVolumeState(vol);
   };
 
   const mode = THEMES[appearance.theme].mode;
@@ -333,6 +330,10 @@ export default function SettingsPage() {
           <p className={`sam-rule pt-4 text-[12px] ${saveState === "error" ? "text-alert" : "text-key"}`} role="status" aria-live="polite">
             {status}
           </p>
+
+          <OptionGroup legend="Security" help="Change your password, see where your account is signed in, and end sessions you do not recognise.">
+            <SecurityPanel />
+          </OptionGroup>
         </div>
 
         <aside className="min-w-0 xl:sticky xl:top-6 xl:self-start" aria-label="Preview">

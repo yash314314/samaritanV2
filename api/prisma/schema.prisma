@@ -14,8 +14,11 @@ model User {
   name         String
   role         String   @default("user") // admin | user
   avatarUrl    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  /// Bumped on password change and "log out everywhere"; access tokens carry it.
+  tokenVersion Int       @default(0)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   sessions                 Session[]
   deepWorkSessions         DeepWorkSession[]
@@ -50,15 +53,26 @@ model UserPreference {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the opaque refresh token; the raw value is never stored.
+  token         String    @unique
+  /// Every rotation of one login shares a family, so a replayed token can revoke the whole chain.
+  familyId      String
+  client        String    @default("web") // web | desktop
+  deviceId      String?
+  userAgent     String?
+  createdByIp   String?
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  revokedReason String? // rotated | logout | logout_all | password | reuse
+  replacedById  String?
+  createdAt     DateTime  @default(now())
 
   @@index([userId])
-  @@index([token])
+  @@index([familyId])
 }
 
 model Report {

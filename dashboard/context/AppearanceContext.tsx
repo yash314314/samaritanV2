@@ -8,10 +8,10 @@ import {
   resolveAppearance,
   type Appearance,
 } from "../lib/appearance";
-import { getUserId } from "../lib/api";
+import { AuthRequiredError, authFetch, currentUser, subscribeAuth } from "../lib/auth";
+import { API_BASE } from "../lib/apiBase";
 import { useWsMessage } from "../lib/ws";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 // A broadcast arriving this soon after a local change is our own echo (or
 // older); applying it could undo a newer choice.
@@ -70,11 +70,14 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const saveTimer = useRef<number | undefined>(undefined);
   const lastLocalChange = useRef(0);
 
-  // The API copy wins on load: it follows the user between the browser and
-  // the desktop app, which keep separate local storage.
+  const signedInUserId = useSyncExternalStore(subscribeAuth, () => currentUser()?.id ?? null, () => null);
+
+  // The API copy wins once someone is signed in: it follows the user between
+  // the browser and the desktop app, which keep separate local storage.
   useEffect(() => {
+    if (!signedInUserId) return;
     let cancelled = false;
-    fetch(`${API_BASE}/api/preferences/appearance?userId=${encodeURIComponent(getUserId())}`, { cache: "no-store" })
+    authFetch(`${API_BASE}/api/preferences/appearance`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (!cancelled && data?.appearance && Date.now() - lastLocalChange.current > ECHO_WINDOW_MS) {
@@ -87,7 +90,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [signedInUserId]);
 
   useWsMessage<Partial<Appearance>>("appearance:changed", (payload) => {
     if (Date.now() - lastLocalChange.current < ECHO_WINDOW_MS) return;
@@ -104,10 +107,10 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     setSaveState("saving");
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      fetch(`${API_BASE}/api/preferences/appearance`, {
+      authFetch(`${API_BASE}/api/preferences/appearance`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: getUserId(), appearance: next }),
+        body: JSON.stringify({ appearance: next }),
       })
         .then(async (response) => {
           if (!response.ok) {
@@ -123,7 +126,9 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
           setSaveError(
             error instanceof TypeError
               ? "Saved on this device only. The API is unreachable, so other devices will not see this change."
-              : `Saved on this device only. ${error.message}`
+              : error instanceof AuthRequiredError
+                ? "Saved on this device only. Sign in to keep it on your account."
+                : `Saved on this device only. ${error.message}`
           );
         });
     }, SAVE_DELAY_MS);

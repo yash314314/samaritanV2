@@ -39,11 +39,11 @@
   --sam-track: #141414;
   --sam-raised: #0a0a0a;
   --sam-control: #3a3a3a;
-  --sam-alert: #d92b2b;
-  --sam-ok: #3ecf72;
-  --sam-warn: #e5a50a;
-  --sam-info: #4fa3f7;
-  --sam-accent: #d92b2b;
+  --sam-alert: #fb0915;
+  --sam-ok: #f8f8ff;
+  --sam-warn: #fb0915;
+  --sam-info: #d6d6d6;
+  --sam-accent: #fb0915;
   --sam-font-display: "Samaritan Display", monospace;
   --sam-font-text: "Samaritan Text", monospace;
   color-scheme: dark;

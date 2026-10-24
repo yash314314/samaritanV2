@@ -94,7 +94,7 @@ export default function SamDialog({
                 <span className="text-red-500 text-xs animate-pulse leading-none" aria-hidden="true">
                   ▼
                 </span>
-                <span className="text-zinc-500 uppercase">/// SYS.DIRECTIVE //</span>
+                <span className="text-zinc-500 uppercase">{"/// SYS.DIRECTIVE //"}</span>
                 <span className="font-bold uppercase text-white">{directiveTag}</span>
               </div>
               <div className="flex items-center gap-2 text-zinc-500">

@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
   DEEP_WORK_DAY_THRESHOLD_MS,
   deepWorkMsByISTDay,
+  deepWorkSessionBlocks,
   deepWorkStreak,
   detectDeepWorkBlocks,
   focusScoreOf,
@@ -193,6 +194,18 @@ describe("range scores", () => {
       activity("2026-10-22 15:00:00", "2026-10-22 15:20:00", { category: "deep_work" }),
     ], day.start.getTime(), day.end.getTime());
     assert.deepEqual(detectDeepWorkBlocks(gapped).map((block) => block.duration), [29 * MIN, 20 * MIN]);
+  });
+
+  test("only blocks of ten minutes or more count as deep-work sessions", () => {
+    const day = buildISTDateRange("2026-10-22", "2026-10-22");
+    const items = resolveActivityTime([
+      activity("2026-10-22 09:00:00", "2026-10-22 09:00:40", { category: "deep_work" }),
+      activity("2026-10-22 09:00:40", "2026-10-22 09:05:00", { category: "entertainment" }),
+      activity("2026-10-22 10:00:00", "2026-10-22 10:12:00", { category: "deep_work" }),
+      activity("2026-10-22 11:00:00", "2026-10-22 11:09:59", { category: "deep_work" }),
+    ], day.start.getTime(), day.end.getTime());
+    assert.equal(detectDeepWorkBlocks(items).length, 3);
+    assert.deepEqual(deepWorkSessionBlocks(items).map((block) => block.duration), [12 * MIN]);
   });
 });
 

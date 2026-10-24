@@ -51,6 +51,8 @@ export async function getOrCreateActiveSession(userId: string) {
   return session;
 }
 
+export class ActivityOwnershipError extends Error {}
+
 export async function createActivityFromTracker(data: {
   id?: string
   userId: string
@@ -66,8 +68,12 @@ export async function createActivityFromTracker(data: {
 }) {
   const session = await getOrCreateActiveSession(data.userId);
   const previousActivity = data.id
-    ? await prisma.activity.findUnique({ where: { id: data.id } })
+    ? await prisma.activity.findUnique({ where: { id: data.id }, include: { session: { select: { userId: true } } } })
     : null;
+  // Tracker ids are client-generated; an id already owned by someone else is never upserted.
+  if (previousActivity && previousActivity.session.userId !== data.userId) {
+    throw new ActivityOwnershipError("Activity id belongs to another user");
+  }
 
   const icon = resolveActivityIcon({
     appName: data.app,

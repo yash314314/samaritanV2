@@ -1,0 +1,7 @@
+# Never ship local secrets or host build output into an image.
+.env
+.env.*
+node_modules
+.next
+out
+*.log

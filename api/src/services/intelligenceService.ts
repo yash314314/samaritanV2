@@ -14,6 +14,7 @@ import {
 import {
   PRODUCTIVE_CATEGORIES,
   activeMsBySession,
+  deepWorkSessionBlocks,
   detectDeepWorkBlocks,
   energyScoreOf,
   focusScoreOf,
@@ -72,6 +73,8 @@ const EMPTY_ASSISTANT = {
  *   productivityScore share of active time in productive categories
  *                     (same as /analytics/daily productivityBreakdown)
  *   energyScore       mean energy impact mapped to 0-100 (50 = neutral)
+ * deepWorkSessions and avgFocusBlockMinutes only count focus blocks of at
+ * least ten minutes, the same blocks /analytics/focus-blocks lists.
  */
 function assistantFromItems(items: Items) {
   const totals = summarizeActivities(items);
@@ -85,7 +88,7 @@ function assistantFromItems(items: Items) {
   const fragmentationScore = fragmentationScoreOf(switchingRate);
   const cognitiveStability = Math.max(0, 100 - fragmentationScore);
   const energyScore = energyScoreOf(totals);
-  const blocks = detectDeepWorkBlocks(items);
+  const blocks = deepWorkSessionBlocks(items);
   const avgFocusBlock = blocks.length
     ? blocks.reduce((sum, block) => sum + block.duration, 0) / blocks.length
     : 0;

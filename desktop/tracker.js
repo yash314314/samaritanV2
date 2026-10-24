@@ -9,7 +9,6 @@ const pathModule = require("path");
 const { resolveAppIcon, ICON_SIZE } = require("./linuxIcons");
 const { resolveBrowserContext } = require("./browserUrlResolver");
 const { findMatchingDistractionRule } = require("./distractionMatcher");
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 const idleThreshold = 120; // seconds
 const SAMPLE_INTERVAL = 500;

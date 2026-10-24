@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { handleActivity } from '../services/activityService';
 import { getTimeline } from '../services/timelineservice';
-import { createActivityFromTracker } from '../services/sessionService';
+import { ActivityOwnershipError, createActivityFromTracker } from '../services/sessionService';
 import { reviewActivities } from '../services/activityReviewService';
 import { resolveISTDateRange } from '../utils/time';
 import { parseUserId, sendRouteError } from '../utils/requestParams';
@@ -67,6 +67,7 @@ router.post("/session", async (req, res) => {
 
     res.json(activity);
   } catch (err) {
+    if (err instanceof ActivityOwnershipError) return res.status(409).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }

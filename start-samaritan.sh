@@ -224,6 +224,13 @@ if [ ! -f "$API_DIR/.env" ]; then
     cp "$API_DIR/.env.example" "$API_DIR/.env"
     log_info "Created api/.env from api/.env.example"
 fi
+chmod 600 "$API_DIR/.env" 2>/dev/null || true
+
+# A persistent signing secret keeps access tokens valid across API restarts.
+if ! grep -Eq '^JWT_SECRET=.{32,}' "$API_DIR/.env"; then
+    printf '\nJWT_SECRET="%s"\n' "$(node -e "process.stdout.write(require('crypto').randomBytes(48).toString('base64url'))")" >>"$API_DIR/.env"
+    log_info "Generated JWT_SECRET in api/.env"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. PostgreSQL
@@ -247,7 +254,7 @@ fi
 log_info "Deploying database migrations & bootstrapping local user..."
 (
     cd "$API_DIR"
-    run_step "Prisma migrate deploy" node_modules/.bin/prisma migrate deploy
+    run_step "Prisma migrate deploy" npm run --silent db:migrate
     run_step "Prisma generate" node_modules/.bin/prisma generate
     run_step "Local user bootstrap" npm run --silent bootstrap:user
 

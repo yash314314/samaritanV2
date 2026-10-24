@@ -1,20 +1,6 @@
 import "dotenv/config"; // Must run first: modules below read process.env at load time
-import express from 'express';
 import { createServer } from "http";
-import authRoutes from './routes/auth';
-import reportsRoutes from './routes/reports';
-import activityRoutes from './routes/activity';
-import analyticsRoutes from './routes/analytics';
-import focusRoutes from './routes/focus';
-import projectsRoutes from './routes/projects';
-import projectRulesRoutes from './routes/projectRules';
-import calendarRoutes from './routes/calendar';
-import goalsRoutes from './routes/goals';
-import ratingsRoutes from './routes/ratings';
-import breaksRoutes from './routes/breaks';
-import distractionBlocksRoutes from './routes/distractionBlocks';
-import preferencesRoutes from './routes/preferences';
-import cors from 'cors';
+import { createApp } from "./app";
 import { startMinuteLogger } from "./services/minuteLogger";
 import { startSessionExpiryChecker } from './services/sessionExpiry';
 import { startProjectTimeAggregation } from "./jobs/aggregateProjectTime";
@@ -23,57 +9,38 @@ import { startCalendarTrackingLifecycle } from "./services/calendarTrackingServi
 import { startCalendarReminderScheduler } from "./services/calendarReminderService";
 import { startSmartBreakLifecycle } from "./services/smartBreakService";
 import { startReportScheduler } from "./services/reportScheduler";
-import { isAllowedOrigin } from "./utils/origin";
+import { ensureEnrollmentKey, pruneRefreshTokens } from "./services/authService";
+import { authConfig } from "./config/auth";
+import { databaseConfig } from "./prisma";
+import { databaseWarnings, describeDatabase } from "./config/database";
 import "./websocket/handlers"; // Register WS message handlers
 
-const app = express();
+const app = createApp();
 const server = createServer(app);
-
-app.use(express.json());
-app.use(
-  cors({
-    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
-  })
-);
-
-// Auth & Reports Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/reports', reportsRoutes);
-
-// Core Modules Routes
-app.use('/activity', activityRoutes);
-app.use('/analytics', analyticsRoutes);
-app.use('/focus', focusRoutes);
-app.use('/api/projects', projectsRoutes);
-app.use('/api/projects', projectRulesRoutes);
-app.use('/api/calendar', calendarRoutes);
-app.use('/api/goals', goalsRoutes);
-app.use('/api/ratings', ratingsRoutes);
-app.use('/api/breaks', breaksRoutes);
-app.use('/api/distraction-blocks', distractionBlocksRoutes);
-app.use('/api/preferences', preferencesRoutes);
-
-app.get('/health', (req, res) => {
-  res.json({ status: "OK", ws: true, timestamp: new Date().toISOString() });
-});
-
-// Global error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("Unhandled API Error:", err);
-  const status = typeof err.status === "number" ? err.status : 500;
-  res.status(status).json({
-    error: err.message || "Internal server error",
-  });
-});
 
 // Attach WebSocket server to same HTTP server
 initWebSocket(server);
 
 const PORT = Number(process.env.PORT) || 4000;
-// Loopback by default: the API has no enforced auth. Containers set HOST=0.0.0.0.
+// Loopback by default. Containers set HOST=0.0.0.0 and sit behind nginx.
 const HOST = process.env.HOST || "127.0.0.1";
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+const database = describeDatabase(databaseConfig);
+console.log(`[DB] target=${database.target} host=${database.host}:${database.port} db=${database.database} tls=${database.ssl}`);
+for (const warning of databaseWarnings(databaseConfig)) console.warn(`[DB] WARNING: ${warning}`);
+if (authConfig.ephemeralSecret) {
+  console.warn("[Auth] JWT_SECRET is not set: using a per-process secret. Access tokens end at every restart (refresh tokens survive).");
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`Samaritan API + WS running on ${HOST}:${PORT}`);
+  ensureEnrollmentKey().then((file) => {
+    if (file) console.log(`[Auth] Local device enrollment key: ${file}`);
+  });
+  const prune = () => pruneRefreshTokens().catch((error) => console.error("[Auth] Token prune failed:", error));
+  prune();
+  setInterval(prune, PRUNE_INTERVAL_MS).unref();
   startSessionExpiryChecker();
   startMinuteLogger();
   startProjectTimeAggregation();

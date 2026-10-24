@@ -6,8 +6,9 @@ import timezone from "dayjs/plugin/timezone";
 import { prisma } from "../prisma";
 import { getCalendarTrackingSettings } from "./calendarTrackingService";
 import { getProjectTimeRange } from "./projectTimeService";
-import { isIdleActivity } from "./metricEngine";
 import { parseCalendarDate } from "./calendarTimeService";
+import { loadResolvedActivities } from "./rangeActivityQuery";
+import { summarizeActivities, type EffectiveActivity, type RangeActivity } from "./rangeMetrics";
 import { InvalidRequestError, isValidDateKey } from "../utils/time";
 
 dayjs.extend(utc);
@@ -67,6 +68,19 @@ export function goalPeriodRange(
   return { start: start.toDate(), end: start.add(1, "day").subtract(1, "millisecond").toDate() };
 }
 
+/**
+ * Minutes in productive categories (the time behind productivityScore and
+ * report focus hours) of resolved activities: clipped to the period, overlaps
+ * resolved, idle excluded. With `projectId`, only that project's activities.
+ */
+export function productiveMinutesOf(
+  items: EffectiveActivity<RangeActivity & { projectId?: string | null }>[],
+  projectId?: string | null
+) {
+  const scoped = projectId ? items.filter((item) => item.activity.projectId === projectId) : items;
+  return summarizeActivities(scoped).productiveMs / MINUTE_MS;
+}
+
 function previousAnchor(range: GoalRange) {
   return new Date(range.start.getTime() - 1);
 }
@@ -112,19 +126,10 @@ async function progressForGoal(goal: Goal, range: GoalRange, now = new Date()) {
     return goal.type === "hours" ? minutes / 60 : minutes;
   }
 
-  const activities = await prisma.activity.findMany({
-    where: {
-      session: { userId: goal.userId },
-      ...projectFilter,
-      startTime: { lt: endExclusive },
-      endTime: { gt: range.start },
-    },
-  });
-  return activities.reduce((sum, activity) => {
-    if (isIdleActivity(activity) || activity.category === "distracting") return sum;
-    const overlap = Math.max(0, Math.min(activity.endTime.getTime(), endExclusive.getTime()) - Math.max(activity.startTime.getTime(), range.start.getTime()));
-    return sum + Math.min(overlap, Math.max(0, activity.duration)) / MINUTE_MS;
-  }, 0);
+  // productive_minutes: every activity is resolved, project or not, so idle
+  // backdated over an active row is not counted twice.
+  const items = await loadResolvedActivities(goal.userId, range.start, endExclusive);
+  return productiveMinutesOf(items, goal.projectId);
 }
 
 async function upsertSnapshot(goal: Goal, range: GoalRange, progress: number, now = new Date()) {

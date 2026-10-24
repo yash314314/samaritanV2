@@ -2,7 +2,7 @@
 
 Samaritan is a local-first desktop activity tracker and focus dashboard inspired by Rize. It observes the foreground Windows application, groups observations into sessions, classifies work by category and intent, calculates focus and productivity metrics, and streams changes to the dashboard in real time.
 
-The project is intended for local development. It currently uses one fixed development user and has no authentication or production deployment configuration.
+It runs locally for one owner by default and can serve many users from a shared (global) database. Every API route and WebSocket requires a JWT access token; see "Authentication and Security" and "Production Deployment" below.
 
 ## What It Includes
 
@@ -114,20 +114,15 @@ These credentials are for local development only.
 
 ### 3. Configure Environment Variables
 
-Create `api/.env` (or copy `api/.env.example`):
+Copy `api/.env.example` to `api/.env` (`start-samaritan.sh` does this and generates a `JWT_SECRET`). The essentials:
 
 ```dotenv
+DATABASE_TARGET=local
 DATABASE_URL="postgresql://postgres:password@localhost:5432/acpe?schema=public"
+JWT_SECRET="<48 random characters>"
 ```
 
-Create `dashboard/.env.local`:
-
-```dotenv
-NEXT_PUBLIC_API_URL=http://localhost:4000
-NEXT_PUBLIC_WS_URL=ws://localhost:4000/ws
-```
-
-`NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` have localhost fallbacks, but declaring both makes the runtime configuration explicit.
+The dashboard needs no environment file for local use: it calls the API on port 4000 of whichever host served it, so `localhost:4001` and `127.0.0.1:4001` both keep the sign-in cookie same-site. Set `NEXT_PUBLIC_API_URL` only when the API lives elsewhere (it is baked in at build time).
 
 Do not commit environment files.
 
@@ -345,11 +340,12 @@ Use `block` carefully. Broad process names can terminate every matching process,
 
 ## REST API Overview
 
-All endpoints are served from `http://localhost:4000`.
+All endpoints are served from `http://localhost:4000`. Everything except `/health` and `/api/auth/*` requires `Authorization: Bearer <access token>`.
 
 | Area | Main endpoints |
 | --- | --- |
 | Health | `GET /health` |
+| Auth | `POST /api/auth/login`, `/register`, `/refresh`, `/logout`, `/logout-all`, `/password`, `/device`, `/device/local`; `GET /api/auth/me`, `/config`, `/sessions`; `DELETE /api/auth/sessions/:id` |
 | Activity | `POST /activity`, `POST /activity/session`, `POST /activity/reviews` |
 | Analytics | `GET /analytics/daily`, `/timeline`, `/heatmap`, `/daily-focus-trend`, `/readiness` |
 | Deep work | `GET /focus/active`, `GET /focus/active/status`, `GET /focus/history`, `GET /focus/:id/result`, `POST /focus/start`, `POST /focus/:id/pause`, `POST /focus/:id/resume`, `POST /focus/:id/skip-break`, `POST /focus/:id/end` |
@@ -358,8 +354,35 @@ All endpoints are served from `http://localhost:4000`.
 | Calendar | CRUD, import, and overlay under `/api/calendar` |
 | Goals | CRUD, `/dashboard`, and `/:id/history` under `/api/goals` |
 | Ratings | Create and list under `/api/ratings` |
+| System (admin) | `GET /api/system/database` |
 
-Most endpoints require `userId` in the query string or request body. There is currently no authentication layer.
+Routes still accept `userId` in the query or body, but the token decides: a missing `userId` is filled in from it and any other value is refused with 403.
+
+## Authentication and Security
+
+- **Tokens.** Sign-in returns a 15-minute JWT access token (HS256, issuer/audience checked) and an opaque refresh token. Only the refresh token's SHA-256 is stored. Every refresh rotates it, and replaying a rotated token revokes that whole login. A password change or "sign out everywhere" also invalidates outstanding access tokens and closes WebSockets.
+- **Browser.** The access token lives in memory only. The refresh token is an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/auth`, usable only from the dashboard origin (`AUTH_ORIGINS`). Signed-out visitors are redirected to `/login`.
+- **Desktop tracker.** It holds a 90-day device credential, encrypted with the OS keychain when Electron offers one. On the local database it enrolls itself with `.runtime/device-enrollment.key`, a mode-600 file the API writes. Otherwise the signed-in dashboard window links it. Activity recorded while it is offline or signed out waits in an on-disk outbox.
+- **WebSocket.** The access token is required at the handshake: a subprotocol (`samaritan`, `bearer.<jwt>`) for browsers, an `Authorization` header for native clients.
+- **Accounts.** Self-registration is off for the local database and on for the global one (`ALLOW_REGISTRATION`). Reset a password from the terminal with `npm run user:password -- --email you@example.com`. Settings → Security changes passwords and ends sessions.
+- **Abuse limits.** Sign-in, refresh and registration are rate limited. Calendar feed imports cannot reach private networks when serving the global database or in production.
+
+Tests: `npm run test:integration` in `api/` runs the auth and cross-user isolation suite against a database whose name must end in `_test` (`TEST_DATABASE_URL`, default `acpe_test`).
+
+## Database Target (local or global)
+
+One environment switch, read at startup by the API, the Prisma CLI and the container entrypoint:
+
+| `DATABASE_TARGET` | Connection | Defaults |
+| --- | --- | --- |
+| `local` (default) | `LOCAL_DATABASE_URL`, else `DATABASE_URL` | registration closed, key-file device enrollment |
+| `global` | `GLOBAL_DATABASE_URL` | registration open, `JWT_SECRET` mandatory, warning when a remote host is reached without `sslmode=require` |
+
+To switch: set the variables, run `npm run db:migrate` (it migrates whichever database the target selects), then restart the API. Admins can confirm the result at `GET /api/system/database`. That endpoint never returns credentials. Switching is deliberately not an HTTP action, since sessions and in-flight writes belong to the database they were made on.
+
+## Production Deployment
+
+`docker-compose.prod.yml` runs Postgres, the API, the static dashboard and nginx; only nginx publishes a port. Copy `.env.production.example` to `.env` and fill in `POSTGRES_PASSWORD`, `JWT_SECRET` and `PUBLIC_ORIGIN`; compose refuses to start without them. nginx serves the API under `/svc/` (the dashboard is built with `NEXT_PUBLIC_API_URL=/svc`), sets CSP and related headers, and rate-limits `/svc/api/auth/`. The API container migrates and seeds the classifier on start, runs as an unprivileged user with all capabilities dropped, and serves the global database (the bundled Postgres, or a managed one via `GLOBAL_DATABASE_URL`). Terminate TLS in front of nginx (secure cookies require HTTPS; `AUTH_COOKIE_SECURE=false` is only for a plain-HTTP trial on localhost), then enable the commented `Strict-Transport-Security` header.
 
 ## Realtime Events
 
@@ -504,13 +527,7 @@ Afterward, repeat the database, migration, local-user, and pattern-seed steps.
 
 ## Current Development Constraints
 
-- One hardcoded local user ID is shared across the dashboard and desktop tracker.
-- API CORS and WebSocket connections accept only `localhost` origins unless `CORS_ORIGIN` is set.
-- API and desktop URLs are primarily hardcoded for localhost development.
-- Authentication and authorization are not implemented.
-- The Docker credentials are not suitable for production.
+- Prisma 6 carries high-severity advisories that only its 7.x major fixes; Electron 40 needs a major upgrade for its advisories (see `npm audit --omit=dev`).
 - Electron packaging is not wired to the dashboard export path as a complete release workflow.
-- Automated test coverage is limited to API unit tests (`npm test` in `api/`) and the desktop verification scripts (`npm test` in `desktop/`); use type checks, builds, health checks, and manual end-to-end verification beyond that.
 - Time-oriented analytics and scheduled aggregation are designed around IST (`Asia/Kolkata`).
-
-These constraints should be addressed before exposing the application beyond a trusted local machine.
+- Rate limits are kept in process memory, so they hold per API instance.

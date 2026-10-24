@@ -15,6 +15,7 @@ import {
 
 import { breaksApi } from "@/lib/api";
 import { useWsMessage } from "@/lib/ws";
+import NumberInput from "@/components/sam/NumberInput";
 
 type SmartBreakItem = {
   id: string;
@@ -287,7 +288,7 @@ function BreakSettings({ settings, saving, onSave }: { settings: SmartBreakSetti
   const numberField = (key: "workThresholdMinutes" | "breakDurationMinutes" | "snoozeMinutes" | "resetIdleMinutes", label: string, min: number, max: number) => (
     <label className="flex items-center justify-between gap-3 text-[12px] text-trace">
       <span>{label}</span>
-      <input type="number" min={min} max={max} value={draft[key]} onChange={(event) => setDraft({ ...draft, [key]: Number(event.target.value) })} className="sam-input h-8 w-20 text-right" />
+      <NumberInput integer min={min} max={max} value={draft[key]} onValueChange={(next) => setDraft((current) => ({ ...current, [key]: next }))} className="sam-input h-8 w-20 text-right" />
     </label>
   );
 

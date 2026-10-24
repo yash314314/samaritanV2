@@ -1,109 +1,67 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  currentUser,
+  linkDesktopTracker,
+  login as signIn,
+  logout as signOut,
+  logoutEverywhere as signOutEverywhere,
+  register as signUp,
+  restoreSession,
+  subscribeAuth,
+  type AuthUser,
+} from "../lib/auth";
 
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  avatarUrl?: string;
-}
+export type User = AuthUser;
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
+  /** True until the first session restore attempt has finished. */
   loading: boolean;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  logoutEverywhere: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const user = useSyncExternalStore(subscribeAuth, currentUser, () => null);
   const [loading, setLoading] = useState(true);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-
   useEffect(() => {
-    const savedToken = localStorage.getItem("samaritan_token");
-    if (savedToken) {
-      setToken(savedToken);
-      fetchUser(savedToken);
-    } else {
-      setLoading(false);
-    }
+    let cancelled = false;
+    restoreSession().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const fetchUser = async (authToken: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data.user);
-      } else {
-        localStorage.removeItem("samaritan_token");
-        setToken(null);
-      }
-    } catch {
-      // API down or network issue
-    } finally {
-      setLoading(false);
-    }
+  // Inside the Electron app, keep the tracker recording for whoever is signed in.
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId) return;
+    linkDesktopTracker().catch((error: Error) => console.warn("[Auth] Desktop tracker link failed:", error.message));
+  }, [userId]);
+
+  const value: AuthContextType = {
+    user,
+    loading,
+    login: async (email, pass) => {
+      await signIn(email, pass);
+    },
+    register: async (name, email, pass) => {
+      await signUp(name, email, pass);
+    },
+    logout: signOut,
+    logoutEverywhere: signOutEverywhere,
   };
 
-  const login = async (email: string, pass: string) => {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pass }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "Login failed");
-    }
-
-    const data = await res.json();
-    setUser(data.user);
-    setToken(data.accessToken);
-    localStorage.setItem("samaritan_token", data.accessToken);
-  };
-
-  const register = async (name: string, email: string, pass: string) => {
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password: pass }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "Registration failed");
-    }
-
-    const data = await res.json();
-    setUser(data.user);
-    setToken(data.accessToken);
-    localStorage.setItem("samaritan_token", data.accessToken);
-  };
-
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem("samaritan_token");
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

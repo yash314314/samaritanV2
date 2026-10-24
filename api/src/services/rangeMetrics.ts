@@ -30,6 +30,8 @@ export const DISTRACTING_CATEGORIES = new Set(["media", "entertainment"]);
 export const DEEP_WORK_DAY_THRESHOLD_MS = 10 * 60 * 1000;
 /** Deep-work activities separated by at most this gap form one focus block. */
 export const FOCUS_BLOCK_MAX_GAP_MS = 2 * 60 * 1000;
+/** A focus block counts as a deep-work session once it holds this much deep_work time. */
+export const MIN_FOCUS_BLOCK_MS = 10 * 60 * 1000;
 
 export type RangeActivity = ActivityMetricInput & {
   id: string;
@@ -385,6 +387,11 @@ export function detectDeepWorkBlocks(items: EffectiveActivity[], maxGapMs = FOCU
   }
   flush();
   return blocks;
+}
+
+/** Focus blocks long enough to count as deep-work sessions (MIN_FOCUS_BLOCK_MS). */
+export function deepWorkSessionBlocks(items: EffectiveActivity[]) {
+  return detectDeepWorkBlocks(items).filter((block) => block.duration >= MIN_FOCUS_BLOCK_MS);
 }
 
 /** Active time per session (used to weight session-level scores). */

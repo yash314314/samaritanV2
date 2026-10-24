@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, screen, shell } = require("electron");
 const path = require("path");
 const {
   startTracking,
@@ -14,14 +14,15 @@ const {
   unsubscribeFromDeepWork,
   send: sendWs,
 } = require("./wsClient");
-const { flushCurrentSession, handleFocusIntervention } = require("./sessionEngine");
+const { flushCurrentSession, handleFocusIntervention, flushOutbox } = require("./sessionEngine");
 const hyprland = require("./hyprland");
+const auth = require("./authClient");
 
-const API_BASE = "http://localhost:4000";
+const API_BASE = auth.API_BASE;
 const DASHBOARD_URL = (process.env.SAMARITAN_DASHBOARD_URL || "http://localhost:4001").replace(/\/+$/, "");
 const OPEN_DEVTOOLS = process.env.SAMARITAN_DEVTOOLS === "1";
 const WIDGET_TITLE = "Samaritan Widget";
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
+const OUTBOX_FLUSH_INTERVAL_MS = 60 * 1000;
 
 let mainWindow;
 let widgetWindow;
@@ -67,7 +68,7 @@ function setActiveDeepWork(session) {
 
 async function hydrateActiveDeepWork() {
   try {
-    const response = await fetch(`${API_BASE}/focus/active?userId=${USER_ID}`);
+    const response = await auth.authFetch(`${API_BASE}/focus/active`);
     if (!response.ok) return;
 
     const session = await response.json();
@@ -83,7 +84,7 @@ async function hydrateActiveDeepWork() {
 
 async function hydrateDistractionBlocks() {
   try {
-    const response = await fetch(`${API_BASE}/api/distraction-blocks/active?userId=${USER_ID}`);
+    const response = await auth.authFetch(`${API_BASE}/api/distraction-blocks/active`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = await response.json();
     setDistractionRulesRef(state.rules || []);
@@ -94,7 +95,7 @@ async function hydrateDistractionBlocks() {
 
 async function hydrateAppearance() {
   try {
-    const response = await fetch(`${API_BASE}/api/preferences/appearance?userId=${USER_ID}`);
+    const response = await auth.authFetch(`${API_BASE}/api/preferences/appearance`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const { appearance } = await response.json();
     widgetAppearance = appearance;
@@ -172,11 +173,10 @@ async function resolveActiveIntervention(reason) {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/focus/interventions/${activeIntervention.id}/resolve`, {
+    const response = await auth.authFetch(`${API_BASE}/focus/interventions/${encodeURIComponent(activeIntervention.id)}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId: USER_ID,
         reason,
         action: "allowed_once"
       })
@@ -195,6 +195,32 @@ async function resolveActiveIntervention(reason) {
   }
 }
 
+// Device linking for the dashboard window. Only the dashboard page itself may
+// call these: the sender frame's origin is checked on every call.
+function fromDashboard(event) {
+  try {
+    return new URL(event.senderFrame?.url || "").origin === new URL(DASHBOARD_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+function registerAuthIpc() {
+  ipcMain.handle("auth:status", (event) => {
+    if (!fromDashboard(event)) throw new Error("Not allowed");
+    return auth.status();
+  });
+  ipcMain.handle("auth:link", async (event, refreshToken) => {
+    if (!fromDashboard(event)) throw new Error("Not allowed");
+    return auth.linkFromDashboard(refreshToken);
+  });
+  ipcMain.handle("auth:unlink", async (event) => {
+    if (!fromDashboard(event)) throw new Error("Not allowed");
+    await auth.signOut();
+    return auth.status();
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 600,
@@ -205,6 +231,18 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // The window only ever shows the dashboard; anything else opens in the browser.
+  const dashboardOrigin = new URL(DASHBOARD_URL).origin;
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin === dashboardOrigin) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
   });
 
   mainWindow.loadURL(DASHBOARD_URL);
@@ -317,6 +355,7 @@ app.whenReady().then(async () => {
   }
 
   // Connect WebSocket
+  registerAuthIpc();
   connectWs();
   hydrateActiveDeepWork();
   hydrateDistractionBlocks();
@@ -327,7 +366,16 @@ app.whenReady().then(async () => {
     hydrateDistractionBlocks();
     hydrateAppearance();
     sendWs("widget.subscribe", {});
+    flushOutbox();
   });
+
+  auth.onChange((state) => {
+    console.log("[Auth] Device credential:", state.linked ? `linked to ${state.userId}` : "none");
+    if (state.linked) flushOutbox();
+  });
+  setInterval(() => {
+    flushOutbox();
+  }, OUTBOX_FLUSH_INTERVAL_MS).unref();
 
   onWs("appearance:changed", (appearance) => {
     widgetAppearance = appearance;

@@ -50,8 +50,9 @@ import {
   calendarTimeLabel,
   floatingCalendarDateTime,
 } from "@/lib/calendarTime";
+import { getUserId } from "@/lib/auth";
+import NumberInput from "@/components/sam/NumberInput";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 const COMMON_TIMEZONES = [
   "Asia/Kolkata",
   "UTC",
@@ -481,13 +482,13 @@ export default function CalendarPage() {
     setCalendarError("");
     try {
       const [eventData, heatmapData, sessionData, summaryData, insightsData, intelligenceData, utilizationData] = await Promise.all([
-        calendarApi.list(USER_ID, calendarFrom, calendarTo),
-        fetchHeatmap(USER_ID, calendarFrom, calendarTo, "focus"),
-        calendarApi.sessions(USER_ID, calendarFrom, calendarTo),
-        calendarApi.sessionSummary(USER_ID, insightFrom, insightTo),
-        calendarApi.meetingInsights(USER_ID, insightFrom, insightTo),
-        calendarApi.intelligence(USER_ID, insightFrom, insightTo),
-        calendarApi.workHoursUtilization(USER_ID, insightFrom, insightTo),
+        calendarApi.list(getUserId(), calendarFrom, calendarTo),
+        fetchHeatmap(getUserId(), calendarFrom, calendarTo, "focus"),
+        calendarApi.sessions(getUserId(), calendarFrom, calendarTo),
+        calendarApi.sessionSummary(getUserId(), insightFrom, insightTo),
+        calendarApi.meetingInsights(getUserId(), insightFrom, insightTo),
+        calendarApi.intelligence(getUserId(), insightFrom, insightTo),
+        calendarApi.workHoursUtilization(getUserId(), insightFrom, insightTo),
       ]);
       setEvents(Array.isArray(eventData) ? eventData : []);
       setMonthHeatmap(heatmapData ?? {});
@@ -505,17 +506,17 @@ export default function CalendarPage() {
   }, [calendarFrom, calendarTo, insightFrom, insightTo]);
 
   const loadSelectedDay = useCallback(async () => {
-    const data = await fetchTimeline(USER_ID, undefined, undefined, selectedKey);
+    const data = await fetchTimeline(getUserId(), undefined, undefined, selectedKey);
     setSelectedTimeline(Array.isArray(data) ? data : []);
   }, [selectedKey]);
 
   const loadReminders = useCallback(async () => {
-    const data = await calendarApi.reminders(USER_ID);
+    const data = await calendarApi.reminders(getUserId());
     setReminders(Array.isArray(data) ? data : []);
   }, []);
 
   const loadReviews = useCallback(async () => {
-    const data = await calendarApi.sessions(USER_ID, undefined, undefined, "tentative");
+    const data = await calendarApi.sessions(getUserId(), undefined, undefined, "tentative");
     setReviewSessions(Array.isArray(data) ? data : []);
   }, []);
 
@@ -528,8 +529,8 @@ export default function CalendarPage() {
 
   useEffect(() => {
     loadMonth().catch(console.error);
-    projectsApi.list(USER_ID).then((data) => setProjects(data)).catch(console.error);
-    calendarApi.trackingSettings(USER_ID).then(setTrackingSettings).catch(console.error);
+    projectsApi.list(getUserId()).then((data) => setProjects(data)).catch(console.error);
+    calendarApi.trackingSettings(getUserId()).then(setTrackingSettings).catch(console.error);
     loadReminders().catch(console.error);
     loadReviews().catch(console.error);
   }, [loadMonth, loadReminders, loadReviews]);
@@ -632,13 +633,13 @@ export default function CalendarPage() {
   }
 
   async function snoozeReminder(id: string, minutes: number) {
-    const updated = await calendarApi.snoozeReminder(id, USER_ID, minutes);
+    const updated = await calendarApi.snoozeReminder(id, getUserId(), minutes);
     upsertReminder(updated);
     setReminderToast((current) => current?.id === id ? null : current);
   }
 
   async function dismissReminder(id: string) {
-    await calendarApi.dismissReminder(id, USER_ID);
+    await calendarApi.dismissReminder(id, getUserId());
     setReminders((current) => current.filter((item) => item.id !== id));
     setReminderToast((current) => current?.id === id ? null : current);
   }
@@ -697,14 +698,14 @@ export default function CalendarPage() {
   }
 
   async function findCalendarSlot(eventId: string) {
-    return calendarApi.slotSuggestion(USER_ID, eventId) as Promise<CalendarSlotSuggestion>;
+    return calendarApi.slotSuggestion(getUserId(), eventId) as Promise<CalendarSlotSuggestion>;
   }
 
   async function applyCalendarSlot(suggestion: CalendarSlotSuggestion) {
     const event = events.find((item) => item.id === suggestion.eventId);
     if (!event) throw new Error("Calendar event is no longer available");
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       startAt: suggestion.startAt,
       endAt: suggestion.endAt,
       ...(suggestion.recurrenceScope ? { recurrenceScope: suggestion.recurrenceScope } : {}),
@@ -720,7 +721,7 @@ export default function CalendarPage() {
     const originalEnd = new Date(event.endAt);
     const durationMinutes = Math.max(15, Math.round((originalEnd.getTime() - originalStart.getTime()) / 60_000));
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       startAt: floatingCalendarDateTime(day, startMinute),
       endAt: floatingCalendarDateTime(day, startMinute + durationMinutes),
     });
@@ -730,7 +731,7 @@ export default function CalendarPage() {
 
   async function resizeCalendarEvent(event: TimeGridEvent, endDay: Date, endMinute: number) {
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       endAt: floatingCalendarDateTime(endDay, endMinute),
     });
     await loadMonth();
@@ -770,7 +771,7 @@ export default function CalendarPage() {
     e.preventDefault();
     try {
       const payload = {
-        userId: USER_ID,
+        userId: getUserId(),
         title: form.title,
         startAt: form.startAt,
         endAt: form.endAt,
@@ -830,7 +831,7 @@ export default function CalendarPage() {
   }
 
   async function reviewSession(id: string, action: "confirm" | "reject" | "missed") {
-    await calendarApi.reviewSession(id, USER_ID, action);
+    await calendarApi.reviewSession(id, getUserId(), action);
     setReviewSessions((current) => current.filter((session) => session.id !== id));
     await loadMonth();
   }
@@ -838,7 +839,7 @@ export default function CalendarPage() {
   async function approveAllReviewSessions() {
     const ids = reviewSessions.map((session) => session.id);
     if (!ids.length) return;
-    await calendarApi.reviewSessions(ids, USER_ID, "confirm");
+    await calendarApi.reviewSessions(ids, getUserId(), "confirm");
     setReviewSessions([]);
     await loadMonth();
   }
@@ -866,7 +867,7 @@ export default function CalendarPage() {
     setSessionEditError("");
     try {
       await calendarApi.updateSession(editingSession.id, {
-        userId: USER_ID,
+        userId: getUserId(),
         title: sessionEditForm.title,
         type: sessionEditForm.type,
         status: sessionEditForm.status,
@@ -898,7 +899,7 @@ export default function CalendarPage() {
   async function submitManualSession(event: React.FormEvent) {
     event.preventDefault();
     const base = {
-      userId: USER_ID,
+      userId: getUserId(),
       type: sessionForm.type,
       title: sessionForm.title || undefined,
       projectId: sessionForm.projectId || undefined,
@@ -911,7 +912,7 @@ export default function CalendarPage() {
 
   async function stopActiveSession() {
     if (!sessionSummary.activeSession) return;
-    await calendarApi.endManualSession(sessionSummary.activeSession.id, USER_ID);
+    await calendarApi.endManualSession(sessionSummary.activeSession.id, getUserId());
     await loadMonth();
   }
 
@@ -920,7 +921,7 @@ export default function CalendarPage() {
     if (!trackingSettings) return;
     setTrackingSettingsError("");
     try {
-      const updated = await calendarApi.updateTrackingSettings(USER_ID, trackingSettings);
+      const updated = await calendarApi.updateTrackingSettings(getUserId(), trackingSettings);
       setTrackingSettings(updated);
       setShowSettings(false);
       await loadMonth();
@@ -1654,7 +1655,7 @@ export default function CalendarPage() {
                 ))}
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Attendee threshold</label>
-                  <input type="number" min={1} max={50} value={trackingSettings.attendeeThreshold} onChange={(event) => setTrackingSettings({ ...trackingSettings, attendeeThreshold: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm" />
+                  <NumberInput integer min={1} max={50} value={trackingSettings.attendeeThreshold} onValueChange={(attendeeThreshold) => setTrackingSettings((current) => current && { ...current, attendeeThreshold })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Calendar timezone</label>
@@ -1720,14 +1721,14 @@ export default function CalendarPage() {
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Detect after</label>
                   <div className="relative">
-                    <input type="number" min={1} max={120} value={trackingSettings.offlineMeetingMinutes} onChange={(event) => setTrackingSettings({ ...trackingSettings, offlineMeetingMinutes: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
+                    <NumberInput integer min={1} max={120} value={trackingSettings.offlineMeetingMinutes} onValueChange={(offlineMeetingMinutes) => setTrackingSettings((current) => current && { ...current, offlineMeetingMinutes })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
                     <span className="absolute right-3 top-2.5 text-xs text-zinc-600">minutes</span>
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Confirm after</label>
                   <div className="relative">
-                    <input type="number" min={10} max={600} value={trackingSettings.confirmationThresholdSeconds} onChange={(event) => setTrackingSettings({ ...trackingSettings, confirmationThresholdSeconds: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
+                    <NumberInput integer min={10} max={600} value={trackingSettings.confirmationThresholdSeconds} onValueChange={(confirmationThresholdSeconds) => setTrackingSettings((current) => current && { ...current, confirmationThresholdSeconds })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
                     <span className="absolute right-3 top-2.5 text-xs text-zinc-600">seconds</span>
                   </div>
                 </div>
@@ -1802,7 +1803,7 @@ export default function CalendarPage() {
                     <label className="mb-1 block text-sm text-zinc-400">Attendees</label>
                     <div className="relative">
                       <Users className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                      <input type="number" min={0} value={form.attendeeCount} onChange={(e) => setForm({ ...form, attendeeCount: Math.max(0, Number(e.target.value)) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
+                      <NumberInput integer min={0} value={form.attendeeCount} onValueChange={(attendeeCount) => setForm((current) => ({ ...current, attendeeCount }))} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                     </div>
                   </div>
                 </div>
@@ -1904,7 +1905,7 @@ export default function CalendarPage() {
                     <label className="mb-1 block text-sm text-zinc-400">Reminder</label>
                     <div className="relative">
                       <Bell className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                      <input type="number" value={form.reminderMinutes} onChange={(e) => setForm({ ...form, reminderMinutes: Number(e.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
+                      <NumberInput integer min={0} max={10080} value={form.reminderMinutes} onValueChange={(reminderMinutes) => setForm((current) => ({ ...current, reminderMinutes }))} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                     </div>
                   </div>
                   <div>
