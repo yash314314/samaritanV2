@@ -2,7 +2,7 @@
 
 Samaritan is a local-first desktop activity tracker and focus dashboard inspired by Rize. It observes the foreground Windows application, groups observations into sessions, classifies work by category and intent, calculates focus and productivity metrics, and streams changes to the dashboard in real time.
 
-The project is intended for local development. It currently uses one fixed development user and has no authentication or production deployment configuration.
+It runs locally for one owner by default and can serve many users from a shared (global) database. Every API route and WebSocket requires a JWT access token; see "Authentication and Security" and "Production Deployment" below.
 
 ## What It Includes
 
@@ -44,19 +44,19 @@ Next.js dashboard (dashboard/)
 | PostgreSQL 15 | Persistent users, sessions, activities, patterns, deep work, projects, calendar, and goals | `localhost:5432` |
 | Express API | REST endpoints, analytics, classification, metrics, and background jobs | `http://localhost:4000` |
 | WebSocket server | Desktop ingestion and live dashboard events | `ws://localhost:4000/ws` |
-| Next.js dashboard | Main interface | `http://localhost:3000` |
-| Electron tracker | Windows foreground observer and deep-work enforcement | Local desktop process |
+| Next.js dashboard | Main interface | `http://localhost:4001` |
+| Electron tracker | Foreground observer (Windows, Linux X11, Hyprland) and deep-work enforcement | Local desktop process |
 
 ## Prerequisites
 
-- Windows 10 or Windows 11
+- Windows 10 or Windows 11, or Linux (X11 or Hyprland)
 - Node.js 20 or newer
 - npm
 - Docker Desktop with Docker Compose
 - Permission to inspect foreground windows
 - Permission to terminate applications if using deep-work `block` enforcement
 
-The dashboard and API can run on other operating systems, but the tracker is Windows-oriented. It uses `active-win`, Electron power events, Windows process paths, and `taskkill` behavior.
+On Linux the tracker uses `active-win` under X11. Under Hyprland (Wayland), where `active-win` and Chromium's idle timer cannot see native windows, it reads the focused window from Hyprland's IPC socket and runs a private `hypridle` instance for idle detection, so `hypridle` must be installed. Other Wayland compositors are not supported yet.
 
 ## First-Time Setup
 
@@ -77,6 +77,21 @@ From the repository root, the PowerShell launcher starts PostgreSQL when needed,
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-samaritan.ps1
 ```
+
+For **Linux**:
+
+```bash
+./start-samaritan.sh               # production: compiled API + static dashboard build
+./start-samaritan.sh --dev         # hot-reload dev servers instead
+./start-samaritan.sh --seed        # also seed categorization patterns and demo data
+./start-samaritan.sh --rebuild     # force a rebuild of the API and dashboard
+./start-samaritan.sh --no-desktop  # backend and dashboard only
+./stop-samaritan.sh                # stop everything (add --db to stop PostgreSQL too)
+```
+
+The Linux launcher installs missing dependencies, creates `api/.env` from `api/.env.example`, starts PostgreSQL through Docker Compose and waits for its health check, applies migrations, bootstraps the local user, rebuilds the API and dashboard only when their sources changed, and then starts the API, dashboard, and tracker. Every setup step aborts with the tail of its log on failure. Logs are written to `.runtime/logs/` and pruned after 14 days. If another program holds a Samaritan port, the launcher names it and exits rather than mistaking it for Samaritan; set `SAMARITAN_DASHBOARD_PORT` to move the dashboard.
+
+All services bind to `127.0.0.1` only. The API trusts the `userId` it is given, so it must not be exposed to a network; browser access is limited to `localhost` origins (override with `CORS_ORIGIN` in `api/.env`).
 
 Use `-InstallDependencies` on the first run if any `node_modules` directory is missing. Add `-OpenDashboard` to open the browser automatically, `-SkipDatabase` when PostgreSQL is managed separately, `-SkipSetup` to bypass migration and bootstrap checks, or `-SkipTracker` when only the web stack is needed.
 
@@ -99,20 +114,15 @@ These credentials are for local development only.
 
 ### 3. Configure Environment Variables
 
-Create `api/.env`:
+Copy `api/.env.example` to `api/.env` (`start-samaritan.sh` does this and generates a `JWT_SECRET`). The essentials:
 
 ```dotenv
+DATABASE_TARGET=local
 DATABASE_URL="postgresql://postgres:password@localhost:5432/acpe?schema=public"
+JWT_SECRET="<48 random characters>"
 ```
 
-Create `dashboard/.env.local`:
-
-```dotenv
-NEXT_PUBLIC_API_URL=http://localhost:4000
-NEXT_PUBLIC_WS_URL=ws://localhost:4000/ws
-```
-
-`NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` have localhost fallbacks, but declaring both makes the runtime configuration explicit.
+The dashboard needs no environment file for local use: it calls the API on port 4000 of whichever host served it, so `localhost:4001` and `127.0.0.1:4001` both keep the sign-in cookie same-site. Set `NEXT_PUBLIC_API_URL` only when the API lives elsewhere (it is baked in at build time).
 
 Do not commit environment files.
 
@@ -169,7 +179,7 @@ cd dashboard
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:4001`.
 
 Terminal 3, Electron tracker:
 
@@ -255,13 +265,13 @@ The API and dashboard reject stale or out-of-order observations.
 
 ### Session Persistence
 
-`sessionEngine.js` holds the active observation in memory. When application, title, process, or activity type changes, it closes the previous observation and streams it to the API. Sessions shorter than two seconds are currently discarded.
+`sessionEngine.js` holds the active observation in memory. When application, title, process, or activity type changes, it closes the previous observation and streams it to the API. While a context stays unchanged, the open observation is re-sent every 10 seconds (the API upserts by id), so long sessions appear live and survive a crash. On quit, the open observation is flushed before exit. Sessions shorter than two seconds are discarded. Leading status glyphs in window titles (terminal spinners, unsaved-file dots) are stripped, so an animated title does not split one session into discarded fragments.
 
 WebSocket ingestion is primary. HTTP `POST /activity/session` is the fallback when the desktop WebSocket is unavailable.
 
 ### Idle Tracking
 
-The desktop tracker considers the system idle after 120 seconds. Lock, suspend, unlock, and resume events also close or create idle observations. Idle activities remain visible in analytics but do not count as deep-work violations.
+The desktop tracker considers the system idle after 120 seconds. On Hyprland, idle comes from a private `hypridle` instance that honours Wayland idle inhibitors (such as visible video playback) but ignores D-Bus and systemd inhibitors, so background audio does not hide time away from the keyboard. Lock, suspend, unlock, and resume events also close or create idle observations. Idle activities remain visible in analytics but do not count as deep-work violations.
 
 ## Classification and Review
 
@@ -330,11 +340,12 @@ Use `block` carefully. Broad process names can terminate every matching process,
 
 ## REST API Overview
 
-All endpoints are served from `http://localhost:4000`.
+All endpoints are served from `http://localhost:4000`. Everything except `/health` and `/api/auth/*` requires `Authorization: Bearer <access token>`.
 
 | Area | Main endpoints |
 | --- | --- |
 | Health | `GET /health` |
+| Auth | `POST /api/auth/login`, `/register`, `/refresh`, `/logout`, `/logout-all`, `/password`, `/device`, `/device/local`; `GET /api/auth/me`, `/config`, `/sessions`; `DELETE /api/auth/sessions/:id` |
 | Activity | `POST /activity`, `POST /activity/session`, `POST /activity/reviews` |
 | Analytics | `GET /analytics/daily`, `/timeline`, `/heatmap`, `/daily-focus-trend`, `/readiness` |
 | Deep work | `GET /focus/active`, `GET /focus/active/status`, `GET /focus/history`, `GET /focus/:id/result`, `POST /focus/start`, `POST /focus/:id/pause`, `POST /focus/:id/resume`, `POST /focus/:id/skip-break`, `POST /focus/:id/end` |
@@ -343,8 +354,35 @@ All endpoints are served from `http://localhost:4000`.
 | Calendar | CRUD, import, and overlay under `/api/calendar` |
 | Goals | CRUD, `/dashboard`, and `/:id/history` under `/api/goals` |
 | Ratings | Create and list under `/api/ratings` |
+| System (admin) | `GET /api/system/database` |
 
-Most endpoints require `userId` in the query string or request body. There is currently no authentication layer.
+Routes still accept `userId` in the query or body, but the token decides: a missing `userId` is filled in from it and any other value is refused with 403.
+
+## Authentication and Security
+
+- **Tokens.** Sign-in returns a 15-minute JWT access token (HS256, issuer/audience checked) and an opaque refresh token. Only the refresh token's SHA-256 is stored. Every refresh rotates it, and replaying a rotated token revokes that whole login. A password change or "sign out everywhere" also invalidates outstanding access tokens and closes WebSockets.
+- **Browser.** The access token lives in memory only. The refresh token is an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/auth`, usable only from the dashboard origin (`AUTH_ORIGINS`). Signed-out visitors are redirected to `/login`.
+- **Desktop tracker.** It holds a 90-day device credential, encrypted with the OS keychain when Electron offers one. On the local database it enrolls itself with `.runtime/device-enrollment.key`, a mode-600 file the API writes. Otherwise the signed-in dashboard window links it. Activity recorded while it is offline or signed out waits in an on-disk outbox.
+- **WebSocket.** The access token is required at the handshake: a subprotocol (`samaritan`, `bearer.<jwt>`) for browsers, an `Authorization` header for native clients.
+- **Accounts.** Self-registration is off for the local database and on for the global one (`ALLOW_REGISTRATION`). Reset a password from the terminal with `npm run user:password -- --email you@example.com`. Settings → Security changes passwords and ends sessions.
+- **Abuse limits.** Sign-in, refresh and registration are rate limited. Calendar feed imports cannot reach private networks when serving the global database or in production.
+
+Tests: `npm run test:integration` in `api/` runs the auth and cross-user isolation suite against a database whose name must end in `_test` (`TEST_DATABASE_URL`, default `acpe_test`).
+
+## Database Target (local or global)
+
+One environment switch, read at startup by the API, the Prisma CLI and the container entrypoint:
+
+| `DATABASE_TARGET` | Connection | Defaults |
+| --- | --- | --- |
+| `local` (default) | `LOCAL_DATABASE_URL`, else `DATABASE_URL` | registration closed, key-file device enrollment |
+| `global` | `GLOBAL_DATABASE_URL` | registration open, `JWT_SECRET` mandatory, warning when a remote host is reached without `sslmode=require` |
+
+To switch: set the variables, run `npm run db:migrate` (it migrates whichever database the target selects), then restart the API. Admins can confirm the result at `GET /api/system/database`. That endpoint never returns credentials. Switching is deliberately not an HTTP action, since sessions and in-flight writes belong to the database they were made on.
+
+## Production Deployment
+
+`docker-compose.prod.yml` runs Postgres, the API, the static dashboard and nginx; only nginx publishes a port. Copy `.env.production.example` to `.env` and fill in `POSTGRES_PASSWORD`, `JWT_SECRET` and `PUBLIC_ORIGIN`; compose refuses to start without them. nginx serves the API under `/svc/` (the dashboard is built with `NEXT_PUBLIC_API_URL=/svc`), sets CSP and related headers, and rate-limits `/svc/api/auth/`. The API container migrates and seeds the classifier on start, runs as an unprivileged user with all capabilities dropped, and serves the global database (the bundled Postgres, or a managed one via `GLOBAL_DATABASE_URL`). Terminate TLS in front of nginx (secure cookies require HTTPS; `AUTH_COOKIE_SECURE=false` is only for a plain-HTTP trial on localhost), then enable the commented `Strict-Transport-Security` header.
 
 ## Realtime Events
 
@@ -457,13 +495,15 @@ Run `npm run seed:patterns` from `api/`, then optionally run `npm run reclassify
 - Check desktop logs for the `taskkill` result.
 - Some protected or elevated processes cannot be terminated by a non-elevated tracker.
 
-### Port 3000 or 4000 is already in use
+### Port 4000 or 4001 is already in use
 
 Find the owning process:
 
 ```powershell
-netstat -ano | Select-String ':3000\s|:4000\s'
+netstat -ano | Select-String ':4001\s|:4000\s'
 ```
+
+On Linux, `ss -ltnp | grep -E ':(4000|4001) '`. The Linux launcher reports the owner itself.
 
 Stop the duplicate development process or configure a different port consistently across API, dashboard, Electron, and CORS.
 
@@ -487,13 +527,7 @@ Afterward, repeat the database, migration, local-user, and pattern-seed steps.
 
 ## Current Development Constraints
 
-- One hardcoded local user ID is shared across the dashboard and desktop tracker.
-- API CORS currently allows only `http://localhost:3000`.
-- API and desktop URLs are primarily hardcoded for localhost development.
-- Authentication and authorization are not implemented.
-- The Docker credentials are not suitable for production.
+- Prisma 6 carries high-severity advisories that only its 7.x major fixes; Electron 40 needs a major upgrade for its advisories (see `npm audit --omit=dev`).
 - Electron packaging is not wired to the dashboard export path as a complete release workflow.
-- Automated test coverage is not yet established; use type checks, builds, health checks, and manual end-to-end verification.
 - Time-oriented analytics and scheduled aggregation are designed around IST (`Asia/Kolkata`).
-
-These constraints should be addressed before exposing the application beyond a trusted local machine.
+- Rate limits are kept in process memory, so they hold per API instance.

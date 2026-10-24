@@ -26,6 +26,9 @@ import {
   Layers3,
 } from "lucide-react";
 import { focusApi } from "../../lib/api";
+import { Decode } from "../sam/Decode";
+import SamLoading from "../sam/SamLoading";
+import { playSamaritanDialogSequence, playSamaritanDismiss } from "../../lib/samaritanAudio";
 import {
   AreaChart,
   Area,
@@ -139,11 +142,25 @@ function clampScore(v: number | undefined): number {
   return Math.max(0, Math.min(100, v));
 }
 
+function formatDuration(minutes: number): string {
+  if (minutes <= 0) return "0s";
+  if (minutes < 1) {
+    const sec = Math.round(minutes * 60);
+    return `${sec}s`;
+  }
+  return `${minutes % 1 === 0 ? minutes : minutes.toFixed(1)}m`;
+}
+
 // ─── Component ───
 export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother }: Props) {
   const [result, setResult] = useState<ResultApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedViolation, setExpandedViolation] = useState<number | null>(null);
+  const [selectedMinute, setSelectedMinute] = useState<number | "all">("all");
+  const [curvePreset, setCurvePreset] = useState<"divergent" | "smooth" | "stepped" | "linear">("divergent");
+  const [showFocus, setShowFocus] = useState(true);
+  const [showProductivity, setShowProductivity] = useState(true);
+  const [showDistraction, setShowDistraction] = useState(true);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -164,13 +181,16 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
     return () => { isMountedRef.current = false; };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (!loading && result) {
+      playSamaritanDialogSequence(1.0);
+    }
+  }, [loading, result]);
+
   if (loading) {
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-        <div className="text-zinc-500 flex items-center gap-2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-600 border-t-purple-500" />
-          Loading session results...
-        </div>
+        <SamLoading compact label="Computing session results" />
       </div>
     );
   }
@@ -196,14 +216,23 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   const completionRate = session.completionRate ?? (plannedMin > 0 ? Math.round((actualMin / plannedMin) * 100) : 0);
 
   // Time allocation (from backend — accurate session accumulators)
-  const productiveMin = metrics.productiveMinutes ?? 0;
-  const distractionMin = metrics.distractionMinutes ?? 0;
+  let productiveMin = metrics.productiveMinutes ?? 0;
+  let distractionMin = metrics.distractionMinutes ?? 0;
   const idleMin = metrics.idleMinutes ?? 0;
-  const totalTrackedMin = metrics.totalTrackedMinutes ?? (productiveMin + distractionMin + idleMin);
+  let totalTrackedMin = metrics.totalTrackedMinutes ?? (productiveMin + distractionMin + idleMin);
+
+  // Fallback: if backend accumulator was 0, calculate from session focus duration and interruptions
+  if (totalTrackedMin === 0 && (actualMin > 0 || (metrics.focusedMinutes ?? 0) > 0)) {
+    const sessionTime = actualMin > 0 ? actualMin : (metrics.focusedMinutes ?? 0);
+    const interruptionMinutes = metrics.interruptionMs ? metrics.interruptionMs / 60000 : 0;
+    distractionMin = Math.min(sessionTime, Number(interruptionMinutes.toFixed(1)));
+    productiveMin = Math.max(0, Number((sessionTime - distractionMin).toFixed(1)));
+    totalTrackedMin = Number((productiveMin + distractionMin).toFixed(1));
+  }
 
   // Efficiency & ratios (from backend)
-  const focusEfficiency = metrics.focusEfficiency ?? 0;
-  const distractionRatio = metrics.distractionRatio ?? 0;
+  const focusEfficiency = metrics.focusEfficiency ?? (totalTrackedMin > 0 ? Math.round((productiveMin / totalTrackedMin) * 100) : 0);
+  const distractionRatio = metrics.distractionRatio ?? (totalTrackedMin > 0 ? Math.round((distractionMin / totalTrackedMin) * 100) : 0);
 
   // Final scores (from backend — proportional model)
   const finalFocusScore = metrics.finalFocusScore ?? 0;
@@ -217,8 +246,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   const blockedCount = metrics.blockedCount ?? 0;
   const blockFailureCount = metrics.blockFailureCount ?? 0;
 
-  // ─── Chart data: per-second interpolation from backend ───
-  // Downsample to ~300 points max for chart performance while keeping the curve smooth
+  // ─── Chart data: per-second atomic timeline ───
   const rawChartData = timeSeries.map((m) => ({
     second: m.second,
     focus: clampScore(m.focusScore),
@@ -226,16 +254,52 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
     appName: m.appName || "—",
     category: m.category || "—",
     distraction: m.distraction,
+    distractionPulse: m.distraction ? 100 : 0,
     idle: m.idle,
   }));
 
-  // Downsample: if more than 300 points, take every Nth point
+  // Different curve types per metric:
+  // - Focus: Monotone cubic spline (continuous cognitive flow)
+  // - Productivity: Crisp linear vector (tactical tool output)
+  // - Distraction: Step-after pulse (digital protocol disruption square-wave)
+  const focusCurve: "monotone" | "natural" | "stepAfter" | "linear" =
+    curvePreset === "divergent" ? "monotone" : curvePreset === "smooth" ? "natural" : curvePreset === "stepped" ? "stepAfter" : "linear";
+  const prodCurve: "monotone" | "natural" | "stepAfter" | "linear" =
+    curvePreset === "divergent" ? "linear" : curvePreset === "smooth" ? "natural" : curvePreset === "stepped" ? "stepAfter" : "linear";
+  const distractCurve: "monotone" | "natural" | "stepAfter" | "linear" =
+    curvePreset === "divergent" ? "stepAfter" : curvePreset === "smooth" ? "natural" : curvePreset === "stepped" ? "stepAfter" : "linear";
+
+  // Minute indices for time-based filtering
+  const maxSecond = rawChartData.length > 0 ? rawChartData[rawChartData.length - 1].second : 0;
+  const totalMinutes = Math.max(1, Math.ceil((maxSecond + 1) / 60));
+  const minuteIndices = Array.from({ length: totalMinutes }, (_, i) => i);
+
+  // Filter per-second data by selected minute
+  const filteredData = selectedMinute === "all"
+    ? rawChartData
+    : rawChartData.filter((d) => Math.floor(d.second / 60) === selectedMinute);
+
+  // Downsample only when viewing all points across very long sessions
   const MAX_CHART_POINTS = 300;
-  let chartData = rawChartData;
-  if (rawChartData.length > MAX_CHART_POINTS) {
-    const step = Math.ceil(rawChartData.length / MAX_CHART_POINTS);
-    chartData = rawChartData.filter((_, i) => i % step === 0 || i === rawChartData.length - 1);
+  let chartData = filteredData;
+  if (selectedMinute === "all" && filteredData.length > MAX_CHART_POINTS) {
+    const step = Math.ceil(filteredData.length / MAX_CHART_POINTS);
+    chartData = filteredData.filter((_, i) => i % step === 0 || i === filteredData.length - 1);
   }
+
+  // Summary statistics for the active filtered window
+  const activeWindowSeconds = filteredData.length;
+  const avgFocusInWindow = activeWindowSeconds > 0
+    ? Math.round(filteredData.reduce((acc, d) => acc + d.focus, 0) / activeWindowSeconds)
+    : 0;
+  const avgProdInWindow = activeWindowSeconds > 0
+    ? Math.round(filteredData.reduce((acc, d) => acc + d.productivity, 0) / activeWindowSeconds)
+    : 0;
+  const distractionSecondsInWindow = filteredData.filter((d) => d.distraction).length;
+  const distractionPercentInWindow = activeWindowSeconds > 0
+    ? Math.round((distractionSecondsInWindow / activeWindowSeconds) * 100)
+    : 0;
+  const activeAppsInWindow = Array.from(new Set(filteredData.map((d) => d.appName).filter((a) => a && a !== "—")));
 
   // Format seconds as MM:SS for display
   const formatTime = (sec: number) => {
@@ -247,61 +311,81 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
   // Show chart if we have data
   const hasChartData = chartData.length > 0;
 
-  // ─── Status ───
+  // ─── Status (Samaritan Red & White) ───
   const statusColor = session.status === "completed"
-    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-    : "text-rose-400 bg-rose-500/10 border-rose-500/20";
+    ? "text-white bg-white/10 border-white/20"
+    : "text-red-400 bg-red-500/10 border-red-500/20";
   const statusIcon = session.status === "completed" ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="samaritan-card relative my-8 w-full max-w-4xl">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="samaritan-card sam-dialog-aperture relative my-8 w-full max-w-4xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl">
+        {/* Single Phosphor Laser Scanline Sweep */}
+        <div className="sam-scanline-beam" aria-hidden="true" />
+
+        {/* Surveillance Directive Banner */}
+        <div className="flex items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-4 py-2 font-mono text-[10px] tracking-wider select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-red-500 text-xs animate-pulse leading-none" aria-hidden="true">
+              ▼
+            </span>
+            <span className="text-zinc-500 uppercase">{"/// SYS.DIRECTIVE //"}</span>
+            <span className="font-bold uppercase text-white">DEEP_WORK.METRICS_EVAL</span>
+          </div>
+          <div className="flex items-center gap-2 text-zinc-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" aria-hidden="true" />
+            <span className="font-mono">[{session.status === "completed" ? "SESSION_COMPLETED" : "SESSION_TERMINATED"}]</span>
+          </div>
+        </div>
+
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur px-6 py-4">
           <div className="flex items-center gap-3">
             <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${statusColor}`}>{statusIcon}</div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100">Session Results</h2>
-              <p className="text-xs text-zinc-500">{session.goal || "Deep work session"}</p>
+              <h2 className="text-lg font-bold text-white tracking-wide">
+                <Decode value="Session Results" trigger="mount" />
+              </h2>
+              <p className="text-xs text-zinc-400 font-mono mt-0.5">{session.goal || "Deep work session"}</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"><X className="h-5 w-5" /></button>
+          <button onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors" aria-label="Close dialog"><X className="h-5 w-5" /></button>
         </div>
 
         <div className="space-y-6 p-6">
-          {/* Summary Cards — using accurate backend metrics */}
+          {/* Summary Cards — strictly Red and White palette */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <ResultCard icon={<Clock className="h-4 w-4" />} label="Duration" value={`${actualMin}m`} sub={`of ${plannedMin}m planned`} color="text-blue-400" bg="bg-blue-500/10" border="border-blue-500/20" />
-            <ResultCard icon={<Brain className="h-4 w-4" />} label="Focus Score" value={finalFocusScore.toFixed(1)} sub="/ 100" color="text-purple-400" bg="bg-purple-500/10" border="border-purple-500/20" />
-            <ResultCard icon={<Gauge className="h-4 w-4" />} label="Productivity" value={finalProductivityScore.toFixed(1)} sub="/ 100" color="text-emerald-400" bg="bg-emerald-500/10" border="border-emerald-500/20" />
-            <ResultCard icon={<Target className="h-4 w-4" />} label="Efficiency" value={`${focusEfficiency}%`} sub="productive / total" color="text-amber-400" bg="bg-amber-500/10" border="border-amber-500/20" />
+            <ResultCard icon={<Clock className="h-4 w-4 text-zinc-400" />} label="Duration" value={formatDuration(actualMin)} sub={`of ${formatDuration(plannedMin)} planned`} color="text-white" bg="bg-zinc-950" border="border-zinc-800" />
+            <ResultCard icon={<Brain className="h-4 w-4 text-red-500" />} label="Focus Score" value={finalFocusScore.toFixed(1)} sub="/ 100" color="text-red-500" bg="bg-red-500/5" border="border-red-500/20" />
+            <ResultCard icon={<Gauge className="h-4 w-4 text-zinc-300" />} label="Productivity" value={finalProductivityScore.toFixed(1)} sub="/ 100" color="text-zinc-100" bg="bg-zinc-950" border="border-zinc-800" />
+            <ResultCard icon={<Target className="h-4 w-4 text-red-400" />} label="Efficiency" value={`${focusEfficiency}%`} sub="productive / total" color="text-red-400" bg="bg-red-950/20" border="border-red-900/30" />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
             <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-500"><Layers3 className="h-4 w-4 text-purple-400" />Session structure</h3>
-                <span className="text-[10px] text-zinc-600">{session.timerMode === "pomodoro" ? `${session.completedRounds ?? 0}/${session.totalRounds ?? 0} rounds` : "Countdown"}</span>
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-400"><Layers3 className="h-4 w-4 text-white" />Session structure</h3>
+                <span className="text-[10px] text-zinc-500">{session.timerMode === "pomodoro" ? `${session.completedRounds ?? 0}/${session.totalRounds ?? 0} rounds` : "Countdown"}</span>
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="block text-[10px] uppercase text-zinc-600">Focused</span><strong className="tabular-nums text-purple-300">{focusedMinutes.toFixed(1)}m</strong></div>
-                <div><span className="block text-[10px] uppercase text-zinc-600">Recovery breaks</span><strong className="tabular-nums text-cyan-300">{breakMinutes.toFixed(1)}m</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-500">Focused</span><strong className="tabular-nums text-white">{focusedMinutes.toFixed(1)}m</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-500">Recovery breaks</span><strong className="tabular-nums text-zinc-400">{breakMinutes.toFixed(1)}m</strong></div>
               </div>
-              {phases.length > 0 && <div className="mt-4 flex h-2 gap-1 overflow-hidden rounded-full bg-zinc-900" aria-label="Session phase timeline">{phases.map((phase) => <span key={phase.id} title={`${phase.type.replace("_", " ")} - round ${phase.round}`} className={`min-w-1 flex-1 rounded-full ${phase.type === "focus" ? "bg-purple-500" : "bg-cyan-400"} ${phase.status === "completed" ? "opacity-100" : "opacity-40"}`} />)}</div>}
-              <div className="mt-2 flex items-center gap-3 text-[10px] text-zinc-600"><span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-purple-500" />Focus</span><span className="flex items-center gap-1"><Coffee className="h-3 w-3 text-cyan-400" />Break</span>{session.project && <span className="ml-auto truncate">{session.project.name}</span>}</div>
+              {phases.length > 0 && <div className="mt-4 flex h-2 gap-1 overflow-hidden rounded-full bg-zinc-900" aria-label="Session phase timeline">{phases.map((phase) => <span key={phase.id} title={`${phase.type.replace("_", " ")} - round ${phase.round}`} className={`min-w-1 flex-1 rounded-full ${phase.type === "focus" ? "bg-white" : "bg-zinc-700"} ${phase.status === "completed" ? "opacity-100" : "opacity-40"}`} />)}</div>}
+              <div className="mt-2 flex items-center gap-3 text-[10px] text-zinc-500"><span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-white" />Focus</span><span className="flex items-center gap-1"><Coffee className="h-3 w-3 text-zinc-400" />Break</span>{session.project && <span className="ml-auto truncate text-zinc-400">{session.project.name}</span>}</div>
             </section>
 
             <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-500"><Shield className="h-4 w-4 text-emerald-400" />Enforcement outcome</h3>
-                <span className="text-[10px] uppercase text-zinc-600">{session.enforcement?.replace("_", " ") || "observe"}</span>
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase text-zinc-400"><Shield className="h-4 w-4 text-zinc-300" />Enforcement outcome</h3>
+                <span className="text-[10px] uppercase text-zinc-500">{session.enforcement?.replace("_", " ") || "observe"}</span>
               </div>
               <div className="grid grid-cols-3 gap-3 text-sm">
-                <div><span className="block text-[10px] uppercase text-zinc-600">Stopped</span><strong className="tabular-nums text-emerald-300">{blockedCount}</strong></div>
-                <div><span className="block text-[10px] uppercase text-zinc-600">Failed</span><strong className={`tabular-nums ${blockFailureCount ? "text-rose-300" : "text-zinc-400"}`}>{blockFailureCount}</strong></div>
-                <div><span className="block text-[10px] uppercase text-zinc-600">Overrides</span><strong className="tabular-nums text-amber-300">{metrics.overrideCount ?? 0}</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-500">Stopped</span><strong className="tabular-nums text-white">{blockedCount}</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-500">Failed</span><strong className={`tabular-nums ${blockFailureCount ? "text-red-400" : "text-zinc-500"}`}>{blockFailureCount}</strong></div>
+                <div><span className="block text-[10px] uppercase text-zinc-500">Overrides</span><strong className="tabular-nums text-red-300">{metrics.overrideCount ?? 0}</strong></div>
               </div>
-              <p className="mt-4 truncate text-[10px] text-zinc-600">{enforcementEvents.length ? `${enforcementEvents.length} desktop enforcement attempt${enforcementEvents.length === 1 ? "" : "s"} recorded` : interventions.length ? `${interventions.length} intervention${interventions.length === 1 ? "" : "s"} recorded` : "No protocol violations detected"}</p>
+              <p className="mt-4 truncate text-[10px] text-zinc-500">{enforcementEvents.length ? `${enforcementEvents.length} desktop enforcement attempt${enforcementEvents.length === 1 ? "" : "s"} recorded` : interventions.length ? `${interventions.length} intervention${interventions.length === 1 ? "" : "s"} recorded` : "No protocol violations detected"}</p>
             </section>
           </div>
 
@@ -310,47 +394,47 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Adherence</span>
-                <span className={`text-sm font-bold ${completionRate >= 80 ? "text-emerald-400" : completionRate >= 50 ? "text-amber-400" : "text-rose-400"}`}>{completionRate}%</span>
+                <span className={`text-sm font-bold ${completionRate >= 80 ? "text-white" : completionRate >= 50 ? "text-zinc-300" : "text-red-400"}`}>{completionRate}%</span>
               </div>
               <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-800">
-                <div className={`h-full rounded-full ${completionRate >= 80 ? "bg-emerald-500" : completionRate >= 50 ? "bg-amber-500" : "bg-rose-500"}`} style={{ width: `${Math.min(100, completionRate)}%` }} />
+                <div className={`h-full rounded-full transition-all ${completionRate >= 80 ? "bg-white" : completionRate >= 50 ? "bg-zinc-400" : "bg-red-500"}`} style={{ width: `${Math.min(100, completionRate)}%` }} />
               </div>
               <div className="mt-2 flex justify-between text-[10px] text-zinc-600">
                 <span>Started: {new Date(session.startedAt).toLocaleTimeString()}</span>
                 <span>{session.endedAt ? new Date(session.endedAt).toLocaleTimeString() : "—"}</span>
               </div>
-              <div className="mt-2 flex gap-3 text-[10px] text-zinc-600">
-                <span className="flex items-center gap-1"><Activity className="h-3 w-3 text-blue-400" /> {productiveMin}m productive</span>
-                <span className="flex items-center gap-1"><Flame className="h-3 w-3 text-rose-400" /> {distractionRatio}% distracted</span>
-                {avgRecoveryMinutes > 0 && <span className="flex items-center gap-1"><Zap className="h-3 w-3 text-amber-400" /> {avgRecoveryMinutes.toFixed(1)}m avg recovery</span>}
+              <div className="mt-2 flex gap-3 text-[10px] text-zinc-500">
+                <span className="flex items-center gap-1 text-zinc-300"><Activity className="h-3 w-3 text-zinc-400" /> {formatDuration(productiveMin)} productive</span>
+                <span className="flex items-center gap-1 text-red-400"><Flame className="h-3 w-3 text-red-500" /> {distractionRatio}% distracted</span>
+                {avgRecoveryMinutes > 0 && <span className="flex items-center gap-1 text-zinc-400"><Zap className="h-3 w-3 text-zinc-500" /> {avgRecoveryMinutes.toFixed(1)}m avg recovery</span>}
               </div>
             </div>
 
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Violations</span>
-                <span className={`text-sm font-bold ${violationCount > 0 ? "text-rose-400" : "text-emerald-400"}`}>{violationCount}</span>
+                <span className={`text-sm font-bold ${violationCount > 0 ? "text-red-500" : "text-white"}`}>{violationCount}</span>
               </div>
               {interventions.length > 0 ? (
                 <div className="max-h-40 overflow-y-auto space-y-1">
                   {interventions.map((inv, i) => {
                     const isOpen = expandedViolation === i;
                     return (
-                      <div key={inv.id ?? i} className="rounded bg-zinc-900 overflow-hidden">
-                        <button onClick={() => setExpandedViolation(isOpen ? null : i)} className="flex w-full items-center gap-2 px-2 py-1.5 text-[10px] text-zinc-400 hover:bg-zinc-800/50 transition-colors">
-                          <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
-                          <span className="truncate text-left flex-1">{inv.appName}</span>
-                          <span className="text-zinc-600 shrink-0">{new Date(inv.detectedAt).toLocaleTimeString()}</span>
-                          {isOpen ? <ChevronUp className="h-3 w-3 text-zinc-600 shrink-0" /> : <ChevronDown className="h-3 w-3 text-zinc-600 shrink-0" />}
+                      <div key={inv.id ?? i} className="rounded bg-zinc-900 overflow-hidden border border-zinc-800/50">
+                        <button onClick={() => setExpandedViolation(isOpen ? null : i)} className="flex w-full items-center gap-2 px-2 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-800/50 transition-colors">
+                          <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+                          <span className="truncate text-left flex-1 font-mono">{inv.appName}</span>
+                          <span className="text-zinc-500 shrink-0">{new Date(inv.detectedAt).toLocaleTimeString()}</span>
+                          {isOpen ? <ChevronUp className="h-3 w-3 text-zinc-500 shrink-0" /> : <ChevronDown className="h-3 w-3 text-zinc-500 shrink-0" />}
                         </button>
                         {isOpen && (
-                          <div className="px-2 pb-2 pt-1 space-y-1 border-t border-zinc-800/50">
-                            <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><Info className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Action:</span> {inv.action}</span></div>
-                            {inv.windowTitle && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span className="truncate"><span className="text-zinc-400 font-medium">Window:</span> {inv.windowTitle}</span></div>}
-                            {inv.domain && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Domain:</span> {inv.domain}</span></div>}
-                            {inv.reason && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><MessageSquare className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Reason:</span> {inv.reason}</span></div>}
-                            {inv.resolution && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><CheckCircle2 className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Resolution:</span> {inv.resolution.replace("_", " ")}</span></div>}
-                            {inv.durationMs !== undefined && <div className="flex items-start gap-1.5 text-[10px] text-zinc-500"><Timer className="h-3 w-3 text-zinc-600 shrink-0 mt-0.5" /><span><span className="text-zinc-400 font-medium">Duration:</span> {Math.round(inv.durationMs / 1000)}s</span></div>}
+                          <div className="px-2 pb-2 pt-1 space-y-1 border-t border-zinc-800/50 text-[10px]">
+                            <div className="flex items-start gap-1.5 text-zinc-400"><Info className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span><span className="text-zinc-300 font-medium">Action:</span> {inv.action}</span></div>
+                            {inv.windowTitle && <div className="flex items-start gap-1.5 text-zinc-400"><MessageSquare className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span className="truncate"><span className="text-zinc-300 font-medium">Window:</span> {inv.windowTitle}</span></div>}
+                            {inv.domain && <div className="flex items-start gap-1.5 text-zinc-400"><MessageSquare className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span><span className="text-zinc-300 font-medium">Domain:</span> {inv.domain}</span></div>}
+                            {inv.reason && <div className="flex items-start gap-1.5 text-zinc-400"><MessageSquare className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span><span className="text-zinc-300 font-medium">Reason:</span> {inv.reason}</span></div>}
+                            {inv.resolution && <div className="flex items-start gap-1.5 text-zinc-400"><CheckCircle2 className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span><span className="text-zinc-300 font-medium">Resolution:</span> {inv.resolution.replace("_", " ")}</span></div>}
+                            {inv.durationMs !== undefined && <div className="flex items-start gap-1.5 text-zinc-400"><Timer className="h-3 w-3 text-zinc-500 shrink-0 mt-0.5" /><span><span className="text-zinc-300 font-medium">Duration:</span> {Math.round(inv.durationMs / 1000)}s</span></div>}
                           </div>
                         )}
                       </div>
@@ -358,89 +442,272 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
                   })}
                 </div>
               ) : (
-                <p className="text-xs text-zinc-600">No violations recorded. Clean session.</p>
+                <p className="text-xs text-zinc-500">No violations recorded. Clean session.</p>
               )}
             </div>
           </div>
 
-          {/* Time Allocation — accurate bar from backend minutes */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                <Activity className="h-4 w-4 text-blue-500" />
-                Time Allocation <span className="text-[10px] font-normal text-zinc-600">({totalTrackedMin}m tracked)</span>
-              </h3>
-            </div>
-            <div className="flex h-5 overflow-hidden rounded-full bg-zinc-800">
-              {totalTrackedMin > 0 ? (
-                <>
-                  <div className="bg-gradient-to-r from-blue-500 to-blue-400 transition-all" style={{ width: `${(productiveMin / totalTrackedMin) * 100}%`, minWidth: productiveMin > 0 ? "4px" : "0px" }} title={`Productive: ${productiveMin}m`} />
-                  <div className="bg-gradient-to-r from-rose-500 to-rose-400 transition-all" style={{ width: `${(distractionMin / totalTrackedMin) * 100}%`, minWidth: distractionMin > 0 ? "4px" : "0px" }} title={`Distraction: ${distractionMin}m`} />
-                  <div className="bg-gradient-to-r from-zinc-500 to-zinc-400 transition-all" style={{ width: `${(idleMin / totalTrackedMin) * 100}%`, minWidth: idleMin > 0 ? "4px" : "0px" }} title={`Idle: ${idleMin}m`} />
-                </>
-              ) : (
-                <div className="w-full h-full bg-zinc-800" />
-              )}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-4 text-xs">
-              <span className="flex items-center gap-1.5 text-zinc-400"><span className="h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-blue-500/20" /><span className="font-medium">Productive</span><span className="text-zinc-600">{productiveMin}m · {totalTrackedMin > 0 ? Math.round((productiveMin / totalTrackedMin) * 100) : 0}%</span></span>
-              <span className="flex items-center gap-1.5 text-zinc-400"><span className="h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-rose-500/20" /><span className="font-medium">Distraction</span><span className="text-zinc-600">{distractionMin}m · {totalTrackedMin > 0 ? Math.round((distractionMin / totalTrackedMin) * 100) : 0}%</span></span>
-              <span className="flex items-center gap-1.5 text-zinc-400"><span className="h-2.5 w-2.5 rounded-full bg-zinc-500 ring-2 ring-zinc-500/20" /><span className="font-medium">Idle</span><span className="text-zinc-600">{idleMin}m · {totalTrackedMin > 0 ? Math.round((idleMin / totalTrackedMin) * 100) : 0}%</span></span>
-            </div>
-          </div>
-
-          {/* Minute-by-Minute Chart — proportional scores from backend */}
+          {/* Atomic Per-Second Performance Chart with Time-Based Filtering & Multi-Curve Engine */}
           {hasChartData ? (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4 text-purple-500" />
-                  Minute-by-Minute Performance
-                </h3>
-                <div className="flex items-center gap-3 text-[10px]">
-                  <span className="flex items-center gap-1 text-zinc-500"><span className="h-1.5 w-3 rounded-full bg-purple-500" /> Focus</span>
-                  <span className="flex items-center gap-1 text-zinc-500"><span className="h-1.5 w-3 rounded-full bg-emerald-500" /> Productivity</span>
-                  {chartData.some(d => d.distraction) && <span className="flex items-center gap-1 text-rose-500"><span className="h-1.5 w-3 rounded-full bg-rose-500" /> Distraction</span>}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-red-500" />
+                  <h3 className="text-sm font-semibold text-white">
+                    Atomic Timeline Performance
+                  </h3>
+                  <span className="text-[10px] font-mono text-zinc-500">
+                    ({rawChartData.length}s atomic)
+                  </span>
+                </div>
+
+                {/* Curve Engine Preset Selector */}
+                <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-[11px] font-mono">
+                  <span className="px-1.5 text-[10px] uppercase text-zinc-500">Curve Engine:</span>
+                  <button
+                    type="button"
+                    onClick={() => setCurvePreset("divergent")}
+                    title="Focus: Smooth Spline, Productivity: Crisp Linear, Distraction: Digital Step"
+                    className={`rounded px-2 py-0.5 transition-colors ${
+                      curvePreset === "divergent"
+                        ? "bg-white text-black font-bold shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Divergent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurvePreset("smooth")}
+                    title="All metrics plotted as smooth natural splines"
+                    className={`rounded px-2 py-0.5 transition-colors ${
+                      curvePreset === "smooth"
+                        ? "bg-white text-black font-bold shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Smooth
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurvePreset("stepped")}
+                    title="All metrics plotted as discrete digital step functions"
+                    className={`rounded px-2 py-0.5 transition-colors ${
+                      curvePreset === "stepped"
+                        ? "bg-white text-black font-bold shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Stepped
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurvePreset("linear")}
+                    title="All metrics plotted as linear angular vectors"
+                    className={`rounded px-2 py-0.5 transition-colors ${
+                      curvePreset === "linear"
+                        ? "bg-white text-black font-bold shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Linear
+                  </button>
                 </div>
               </div>
-              <div className="h-56 w-full">
+
+              {/* Metric Visibility Toggles with Curve Indicators */}
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] uppercase text-zinc-500">Curves:</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowFocus((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs transition-colors ${
+                      showFocus
+                        ? "border-white/40 bg-white/10 text-white font-medium shadow-sm"
+                        : "border-zinc-800 bg-zinc-900/60 text-zinc-600 line-through"
+                    }`}
+                  >
+                    <span className="h-1.5 w-3 rounded-full bg-white shadow-sm" />
+                    <span>Focus <span className="text-[9px] text-zinc-400 font-normal">({focusCurve})</span></span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowProductivity((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs transition-colors ${
+                      showProductivity
+                        ? "border-zinc-500/40 bg-zinc-500/10 text-zinc-200 font-medium shadow-sm"
+                        : "border-zinc-800 bg-zinc-900/60 text-zinc-600 line-through"
+                    }`}
+                  >
+                    <span className="h-1.5 w-3 rounded-full bg-zinc-400" />
+                    <span>Productivity <span className="text-[9px] text-zinc-400 font-normal">({prodCurve})</span></span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowDistraction((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs transition-colors ${
+                      showDistraction
+                        ? "border-red-500/40 bg-red-500/10 text-red-400 font-medium shadow-sm"
+                        : "border-zinc-800 bg-zinc-900/60 text-zinc-600 line-through"
+                    }`}
+                  >
+                    <span className="h-1.5 w-3 rounded-full bg-red-500" />
+                    <span>Distraction Pulse <span className="text-[9px] text-red-400/80 font-normal">({distractCurve})</span></span>
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-zinc-500">
+                  Toggle tags to show/hide curves
+                </div>
+              </div>
+
+              {/* Time-Based Minute Filtering Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-zinc-800/80 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Window:</span>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMinute("all")}
+                      className={`rounded px-2.5 py-1 text-xs font-mono transition-colors ${
+                        selectedMinute === "all"
+                          ? "bg-white text-black font-bold shadow-sm"
+                          : "border border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700 hover:text-white"
+                      }`}
+                    >
+                      All ({totalMinutes}m)
+                    </button>
+                    {minuteIndices.map((minIdx) => {
+                      const isSelected = selectedMinute === minIdx;
+                      const startSec = minIdx * 60;
+                      const endSec = Math.min(rawChartData.length, (minIdx + 1) * 60);
+                      return (
+                        <button
+                          key={minIdx}
+                          type="button"
+                          onClick={() => setSelectedMinute(minIdx)}
+                          className={`rounded px-2.5 py-1 text-xs font-mono transition-colors ${
+                            isSelected
+                              ? "bg-red-500 text-white font-bold shadow-sm"
+                              : "border border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700 hover:text-white"
+                          }`}
+                        >
+                          Min {minIdx + 1} ({formatTime(startSec)}-{formatTime(endSec)})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Window Atomic Metrics HUD */}
+                <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+                  <span className="text-zinc-500">
+                    Avg Focus: <span className="font-semibold text-white">{avgFocusInWindow}</span>
+                  </span>
+                  <span className="text-zinc-500">
+                    Avg Prod: <span className="font-semibold text-zinc-300">{avgProdInWindow}</span>
+                  </span>
+                  <span className="text-zinc-500">
+                    Distracted:{" "}
+                    <span className={distractionSecondsInWindow > 0 ? "font-semibold text-red-500" : "text-zinc-400"}>
+                      {distractionSecondsInWindow}s ({distractionPercentInWindow}%)
+                    </span>
+                  </span>
+                  {activeAppsInWindow.length > 0 && (
+                    <span className="hidden sm:inline text-zinc-500">
+                      Apps: <span className="text-zinc-300">{activeAppsInWindow.join(", ")}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="h-60 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>
                     <defs>
-                      <linearGradient id="focusGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} /><stop offset="95%" stopColor="#a855f7" stopOpacity={0} /></linearGradient>
-                      <linearGradient id="prodGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
+                      <linearGradient id="focusGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ffffff" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#ffffff" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="prodGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#a1a1aa" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="#a1a1aa" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="distractGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
+                      </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                     <XAxis
                       dataKey="second"
-                      stroke="#52525b"
+                      stroke="#71717a"
                       fontSize={10}
                       tickLine={false}
                       tickFormatter={(v: number) => formatTime(v)}
-                      label={{ value: "Time (MM:SS)", position: "insideBottom", offset: -2, fontSize: 10, fill: "#52525b" }}
+                      label={{ value: "Time (MM:SS)", position: "insideBottom", offset: -2, fontSize: 10, fill: "#71717a" }}
                     />
-                    <YAxis domain={[0, 100]} stroke="#52525b" fontSize={10} tickLine={false} label={{ value: "Score", angle: -90, position: "insideLeft", fontSize: 10, fill: "#52525b" }} />
+                    <YAxis domain={[0, 100]} stroke="#71717a" fontSize={10} tickLine={false} label={{ value: "Score", angle: -90, position: "insideLeft", fontSize: 10, fill: "#71717a" }} />
                     <Tooltip content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
                       const data = payload[0]?.payload as typeof chartData[0];
                       return (
-                        <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 shadow-xl">
-                          <p className="text-[10px] font-semibold text-zinc-400 mb-1">Time {formatTime(Number(label))}</p>
-                          <p className="text-[10px] text-zinc-500 mb-2">App: <span className="text-zinc-300">{data.appName}</span>{data.category !== "—" && <span className="text-zinc-600"> · {data.category}</span>}</p>
+                        <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs shadow-2xl">
+                          <p className="text-[10px] font-mono font-semibold text-zinc-400 mb-1">Time {formatTime(Number(label))} (sec {label})</p>
+                          <p className="text-[10px] text-zinc-400 mb-2">App: <span className="font-semibold text-white">{data.appName}</span>{data.category !== "—" && <span className="text-zinc-500"> · {data.category}</span>}</p>
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-purple-500" /><span className="text-zinc-400">Focus:</span><span className="font-bold text-purple-400">{data.focus}</span></div>
-                            <div className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /><span className="text-zinc-400">Productivity:</span><span className="font-bold text-emerald-400">{data.productivity}</span></div>
-                            <div className="flex items-center gap-2 text-[10px]">
-                              {data.distraction && <span className="text-rose-400">⚠ Distraction</span>}
-                              {data.idle && !data.distraction && <span className="text-zinc-500">○ Idle</span>}
-                              {!data.distraction && !data.idle && <span className="text-emerald-500">✓ Focused</span>}
+                            <div className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-white" /><span className="text-zinc-400">Focus ({focusCurve}):</span><span className="font-bold text-white">{data.focus}</span></div>
+                            <div className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-zinc-400" /><span className="text-zinc-400">Productivity ({prodCurve}):</span><span className="font-bold text-zinc-300">{data.productivity}</span></div>
+                            <div className="flex items-center gap-2 text-[10px] pt-0.5">
+                              {data.distraction && <span className="font-semibold text-red-500">⚠ Distraction Event ({distractCurve} pulse active)</span>}
+                              {data.idle && !data.distraction && <span className="text-zinc-400">○ Idle State</span>}
+                              {!data.distraction && !data.idle && <span className="font-semibold text-white">✓ Deep Focus</span>}
                             </div>
                           </div>
                         </div>
                       );
                     }} />
-                    <Area type="monotone" dataKey="focus" stroke="#a855f7" fill="url(#focusGrad)" strokeWidth={2} dot={{ r: 2, fill: "#a855f7" }} activeDot={{ r: 5 }} name="Focus" />
-                    <Area type="monotone" dataKey="productivity" stroke="#10b981" fill="url(#prodGrad)" strokeWidth={2} dot={{ r: 2, fill: "#10b981" }} activeDot={{ r: 5 }} name="Productivity" />
+                    {showDistraction && (
+                      <Area
+                        type={distractCurve}
+                        dataKey="distractionPulse"
+                        stroke="#ef4444"
+                        fill="url(#distractGrad)"
+                        strokeWidth={1.5}
+                        strokeDasharray={distractCurve === "stepAfter" ? undefined : "3 3"}
+                        dot={false}
+                        activeDot={{ r: 4, fill: "#ef4444", stroke: "#000000", strokeWidth: 1 }}
+                        name="Distraction Pulse"
+                      />
+                    )}
+                    {showProductivity && (
+                      <Area
+                        type={prodCurve}
+                        dataKey="productivity"
+                        stroke="#d4d4d8"
+                        fill="url(#prodGrad)"
+                        strokeWidth={1.5}
+                        strokeDasharray={prodCurve === "linear" ? "4 2" : undefined}
+                        dot={false}
+                        activeDot={{ r: 4, fill: "#d4d4d8", stroke: "#000000", strokeWidth: 1 }}
+                        name="Productivity"
+                      />
+                    )}
+                    {showFocus && (
+                      <Area
+                        type={focusCurve}
+                        dataKey="focus"
+                        stroke="#ffffff"
+                        fill="url(#focusGrad)"
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{ r: 5, fill: "#ffffff", stroke: "#000000", strokeWidth: 1 }}
+                        name="Focus"
+                      />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -448,7 +715,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
           ) : (
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-center">
               <BarChart3 className="h-6 w-6 text-zinc-600 mx-auto mb-2" />
-              <p className="text-sm text-zinc-500">No minute-level data available for this session.</p>
+              <p className="text-sm text-zinc-500">No atomic time data available for this session.</p>
             </div>
           )}
         </div>
@@ -462,7 +729,7 @@ export default function DeepWorkResultPanel({ sessionId, onClose, onStartAnother
             </div>
             <div className="flex gap-3">
               <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700">Close</button>
-              <button onClick={onStartAnother} className="flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-bold text-white hover:bg-purple-400"><RotateCcw className="h-4 w-4" />Start Another</button>
+              <button onClick={onStartAnother} className="sam-button" data-variant="primary"><RotateCcw className="h-4 w-4" />Start Another</button>
             </div>
           </div>
         </div>
@@ -476,7 +743,9 @@ function ResultCard({ icon, label, value, sub, color, bg, border }: { icon: Reac
   return (
     <div className={`flex flex-col rounded-xl border ${border} ${bg} p-3`}>
       <div className={`mb-2 ${color}`}>{icon}</div>
-      <div className={`text-2xl font-bold ${color} tabular-nums`}>{value}</div>
+      <div className={`text-2xl font-bold ${color} tabular-nums`}>
+        <Decode value={value} trigger="mount" />
+      </div>
       <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
       <div className="mt-1 text-[10px] text-zinc-600">{sub}</div>
     </div>

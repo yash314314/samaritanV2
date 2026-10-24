@@ -1,11 +1,11 @@
 ﻿import { Router } from "express";
-import type { Session } from "@prisma/client";
 import { prisma } from "../prisma";
-import { 
-  getDailyAnalytics, 
+import {
+  HEATMAP_COLOR_MODES,
+  getDailyAnalytics,
   getDeepWorkStreak,
+  getHeatmapV2,
 } from "../services/analyticsService";
-
 import {
   getBurnoutRisk,
   getDailyFocusTrend,
@@ -13,160 +13,167 @@ import {
   getDashboard,
   getDailySummary
 } from "../services/intelligenceService";
-
 import { getTimeline } from "../services/timelineservice";
 import { getFocusBlocks } from "../services/activityService";
+import { loadResolvedActivities } from "../services/rangeActivityQuery";
+import { focusScoreOf, summarizeActivities } from "../services/rangeMetrics";
+import {
+  DAY_MS,
+  InvalidRequestError,
+  getISTHour,
+  getISTHourFraction,
+  parseDateKey,
+  resolveISTDateRange,
+  toISTDateKey,
+} from "../utils/time";
+import { parseEnumParam, parseIntegerParam, parseUserId, sendRouteError } from "../utils/requestParams";
 
 const router = Router();
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ EXISTING ROUTES Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─── RANGE ROUTES ───
+// Dates are IST calendar days (YYYY-MM-DD); `from`/`to` are inclusive.
 
 router.get("/daily", async (req, res) => {
-  const { userId, date, from, to } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
   try {
-    const daily = await getDailyAnalytics(
-      userId,
-      typeof from === "string" ? from : typeof date === "string" ? date : undefined,
-      typeof to === "string" ? to : undefined,
-    );
-    const streak = await getDeepWorkStreak(userId);
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange(req.query);
+    const [daily, streak] = await Promise.all([
+      getDailyAnalytics(userId, range),
+      getDeepWorkStreak(userId, range.to),
+    ]);
     res.json({ ...daily, ...streak });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    sendRouteError(res, error, "Server error", "Daily analytics error:");
   }
 });
 
 router.get("/daily-focus-trend", async (req, res) => {
   try {
-    const { userId, date, bucketMinutes } = req.query;
-    if (!userId || typeof userId !== "string") {
-      return res.status(400).json({ error: "Missing userId" });
-    }
-    const data = await getDailyFocusTrend(
-      userId,
-      typeof date === "string" ? date : undefined,
-      bucketMinutes ? Number(bucketMinutes) : 60
-    );
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Daily focus trend failed" });
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange({ date: req.query.date }, { maxDays: 1 });
+    const bucketMinutes = parseIntegerParam(req.query.bucketMinutes, {
+      name: "bucketMinutes",
+      min: 1,
+      max: 60,
+      fallback: 60,
+    });
+    res.json(await getDailyFocusTrend(userId, range.from, bucketMinutes));
+  } catch (error) {
+    sendRouteError(res, error, "Daily focus trend failed", "Daily focus trend error:");
   }
 });
 
-import { getHeatmapV2, type HeatmapColorMode } from "../services/analyticsService";
-
 router.get("/heatmap", async (req, res) => {
-  const { userId, from, to, colorMode, category } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
   try {
-    const heatmap = await getHeatmapV2({
-      userId,
-      from: typeof from === "string" ? from : undefined,
-      to: typeof to === "string" ? to : undefined,
-      colorMode: (colorMode as HeatmapColorMode) ?? "score",
-      categoryFilter: typeof category === "string" ? category : null,
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange(req.query);
+    const colorMode = parseEnumParam(req.query.colorMode, {
+      name: "colorMode",
+      allowed: HEATMAP_COLOR_MODES,
+      fallback: "score",
     });
-    res.json(heatmap);
+    const category = req.query.category;
+    if (category !== undefined && typeof category !== "string") {
+      throw new InvalidRequestError("Invalid category");
+    }
+    res.json(await getHeatmapV2({
+      userId,
+      range,
+      colorMode,
+      categoryFilter: category || null,
+    }));
   } catch (error) {
-    console.error("Heatmap V2 error:", error);
-    res.status(500).json({ error: "Server error" });
+    sendRouteError(res, error, "Server error", "Heatmap V2 error:");
   }
 });
 
 router.get("/dashboard", async (req, res) => {
-  const { userId, days } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
   try {
-    const parsedDays = days === undefined ? undefined : Math.min(30, Math.max(1, Math.floor(Number(days))));
-    if (days !== undefined && !Number.isFinite(parsedDays)) return res.status(400).json({ error: "Invalid days scope" });
-    const data = await getDashboard(userId, parsedDays);
-    res.json(data);
+    const userId = parseUserId(req.query.userId);
+    const days = req.query.days === undefined
+      ? undefined
+      : parseIntegerParam(req.query.days, { name: "days scope", min: 1, max: 30, fallback: 7 });
+    const today = toISTDateKey(new Date());
+    const to = req.query.to === undefined || req.query.to === "" ? today : parseDateKey(req.query.to, "to");
+    if (to > today) throw new InvalidRequestError("Invalid to: date is in the future");
+    res.json(await getDashboard(userId, days, to));
   } catch (error) {
-    console.error("Dashboard analytics error:", error);
-    res.status(500).json({ error: "Server error" });
+    sendRouteError(res, error, "Server error", "Dashboard analytics error:");
   }
 });
 
 router.get("/timeline", async (req, res) => {
-  const { userId, date, from, to } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
   try {
-    const data = await getTimeline(
-      userId,
-      typeof date === "string" ? date : undefined,
-      typeof from === "string" ? from : undefined,
-      typeof to === "string" ? to : undefined,
-    );
-    res.json(data);
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange(req.query);
+    res.json(await getTimeline(userId, range));
   } catch (error) {
-    console.error("Timeline error:", error);
-    res.status(500).json({ error: "Server error" });
+    sendRouteError(res, error, "Server error", "Timeline error:");
   }
 });
 
 router.get("/focus-blocks", async (req, res) => {
-  const { userId, date } = req.query;
-  if (!userId || !date) {
-    return res.status(400).json({ error: "Missing parameters" });
+  try {
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange({ date: req.query.date }, { required: true, maxDays: 1 });
+    res.json(await getFocusBlocks(userId, range));
+  } catch (error) {
+    sendRouteError(res, error, "Server error", "Focus blocks error:");
   }
-  const blocks = await getFocusBlocks(userId as string, date as string);
-  res.json(blocks);
 });
 
 router.get("/daily-summary", async (req, res) => {
-  const { userId, date } = req.query;
-  if (!userId || !date) {
-    return res.status(400).json({ error: "Missing parameters" });
+  try {
+    const userId = parseUserId(req.query.userId);
+    const range = resolveISTDateRange({ date: req.query.date }, { required: true, maxDays: 1 });
+    res.json(await getDailySummary(userId, range));
+  } catch (error) {
+    sendRouteError(res, error, "Server error", "Daily summary error:");
   }
-  const summary = await getDailySummary(userId as string, date as string);
-  res.json(summary);
 });
 
-// â”€â”€â”€ READINESS ROUTE â”€â”€â”€
+// ─── READINESS ROUTE ───
+// All hours are IST, independent of the API host timezone.
 
 router.get("/readiness", async (req, res) => {
-  const { userId } = req.query;
-  if (!userId || typeof userId !== "string") {
-    return res.status(400).json({ error: "Missing userId" });
-  }
-
   try {
-    // Get recent sessions (last 24h)
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentSessions = await prisma.session.findMany({
-      where: { 
-        userId,
-        startTime: { gte: yesterday }
-      },
-      orderBy: { startTime: "desc" },
-      take: 10,
-    });
-
-    const burnout = await getBurnoutRisk(userId).catch(() => null);
-    const intel = await getAssistantInsights(userId).catch(() => null);
-
+    const userId = parseUserId(req.query.userId);
     const now = new Date();
-    const currentHour = now.getHours() + now.getMinutes() / 60;
+    const windowStart = new Date(now.getTime() - DAY_MS);
+
+    const [recentSessions, items, burnout, intel] = await Promise.all([
+      prisma.session.findMany({
+        where: {
+          userId,
+          startTime: { gte: windowStart }
+        },
+        orderBy: { startTime: "desc" },
+        take: 10,
+      }),
+      loadResolvedActivities(userId, windowStart, now),
+      getBurnoutRisk(userId).catch(() => null),
+      getAssistantInsights(userId).catch(() => null),
+    ]);
+
+    const currentHour = getISTHourFraction(now);
 
     // Time of day factor (peak hours: 9-11, 14-16)
     const timeFactor = (currentHour >= 9 && currentHour <= 11) || (currentHour >= 14 && currentHour <= 16) ? 85 :
                        (currentHour >= 7 && currentHour <= 18) ? 60 : 30;
 
+    // Focus of each recent session from its active (non-idle) time in the last 24h.
+    const sessionFocus = new Map<string, number>();
+    for (const session of recentSessions) {
+      const totals = summarizeActivities(items.filter((item) => item.activity.sessionId === session.id));
+      if (totals.activeMs > 0) sessionFocus.set(session.id, focusScoreOf(totals));
+    }
+    const activeSessions = recentSessions.filter((session) => sessionFocus.has(session.id));
+
     // Recent pattern (last session quality)
-    const lastSession = recentSessions[0];
-    const recentPattern = lastSession 
-      ? (lastSession.focusScore > 70 ? 80 : lastSession.focusScore > 50 ? 60 : 35)
-      : 50;
+    const lastFocus = activeSessions.length ? sessionFocus.get(activeSessions[0].id)! : null;
+    const recentPattern = lastFocus === null
+      ? 50
+      : lastFocus > 70 ? 80 : lastFocus > 50 ? 60 : 35;
 
     // Burnout buffer (inverted risk)
     const burnoutScore = burnout?.burnoutScore ?? 0;
@@ -182,7 +189,7 @@ router.get("/readiness", async (req, res) => {
     // Risk factors
     const riskFactors: string[] = [];
     if (burnoutScore > 60) riskFactors.push("Elevated burnout risk detected");
-    if (recentSessions.length > 0 && recentSessions.filter(s => s.focusScore < 50).length >= 3) {
+    if (activeSessions.filter((session) => sessionFocus.get(session.id)! < 50).length >= 3) {
       riskFactors.push("Recent low-focus sessions");
     }
     if (currentHour < 7 || currentHour > 22) {
@@ -192,17 +199,17 @@ router.get("/readiness", async (req, res) => {
     // Recommended duration based on score
     const recommendedDuration = score >= 75 ? 90 : score >= 50 ? 60 : score >= 25 ? 30 : 0;
 
-    // Best window (peak hour from recent sessions, or default)
+    // Best window (IST start hour of the best recent sessions, or default)
     let peakHour = 9;
-    if (recentSessions.length > 0) {
+    if (activeSessions.length > 0) {
       const hourScores: Record<number, { total: number; count: number }> = {};
-      recentSessions.forEach((s) => {
-        const hour = new Date(s.startTime).getHours();
+      activeSessions.forEach((session) => {
+        const hour = getISTHour(session.startTime);
         if (!hourScores[hour]) hourScores[hour] = { total: 0, count: 0 };
-        hourScores[hour].total += s.focusScore;
+        hourScores[hour].total += sessionFocus.get(session.id)!;
         hourScores[hour].count += 1;
       });
-      let bestScore = 0;
+      let bestScore = -1;
       Object.entries(hourScores).forEach(([hour, data]) => {
         const avg = data.total / data.count;
         if (avg > bestScore) {
@@ -211,9 +218,9 @@ router.get("/readiness", async (req, res) => {
         }
       });
     }
-    const bestWindow = score >= 50 ? { 
-      start: peakHour, 
-      end: peakHour + 3 
+    const bestWindow = score >= 50 ? {
+      start: peakHour,
+      end: peakHour + 3
     } : null;
 
     res.json({
@@ -228,15 +235,15 @@ router.get("/readiness", async (req, res) => {
       bestWindow,
       riskFactors,
       metadata: {
-        computedAt: new Date().toISOString(),
+        computedAt: now.toISOString(),
         sessionCount: recentSessions.length,
         currentHour: Math.floor(currentHour),
+        timezone: "Asia/Kolkata",
       }
     });
 
   } catch (error) {
-    console.error("Readiness route error:", error);
-    res.status(500).json({ error: "Failed to compute readiness score" });
+    sendRouteError(res, error, "Failed to compute readiness score", "Readiness route error:");
   }
 });
 

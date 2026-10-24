@@ -3,12 +3,13 @@ import { prisma } from "../prisma";
 export async function classifyActivity(
   appName: string,
   title: string,
-  domainOrUrl?: string | null
+  domainOrUrl?: string | null,
+  userId?: string | null
 ) {
 
-  /* LAYER 1: STATIC RULES */
+  /* LAYER 1: STATIC RULES (the user's own learned patterns first, then the shared set) */
 
-  const pattern = await findAppPattern(appName, title);
+  const pattern = await findAppPattern(appName, title, userId);
 
   if (pattern) return pattern;
 
@@ -118,17 +119,25 @@ function classifyDomain(domain:string){
 
 export async function findAppPattern(
   appName: string,
-  windowTitle: string
+  windowTitle: string,
+  userId?: string | null
 ) {
 
-  const patterns = await prisma.appPattern.findMany();
+  // Shared patterns plus the caller's own; another user's reviews never apply.
+  const patterns = await prisma.appPattern.findMany({
+    where: userId ? { OR: [{ userId: null }, { userId }] } : { userId: null },
+  });
 
   if (!patterns.length) return null;
 
   const appAliases = getAppAliases(appName);
   const sortedPatterns = patterns
     .filter((pattern) => appAliases.has(normalizeAppName(pattern.appName)))
-    .sort((a, b) => specificityScore(b.titleRegex) - specificityScore(a.titleRegex));
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.userId)) - Number(Boolean(a.userId)) ||
+        specificityScore(b.titleRegex) - specificityScore(a.titleRegex)
+    );
 
   for (const pattern of sortedPatterns) {
 
@@ -169,7 +178,14 @@ function normalizeAppName(value: string) {
     .trim();
 }
 
-function getAppAliases(appName: string) {
+// True when needle occurs in haystack as a whole word ("brave" in
+// "brave-browser", "code" in "code-oss"), never as a fragment of a longer word.
+function containsWord(haystack: string, needle: string) {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`).test(haystack);
+}
+
+export function getAppAliases(appName: string) {
   const normalized = normalizeAppName(appName);
   const aliases = new Set([normalized]);
 
@@ -190,7 +206,10 @@ function getAppAliases(appName: string) {
 
   for (const group of aliasGroups) {
     const normalizedGroup = group.map(normalizeAppName);
-    if (normalizedGroup.some((alias) => alias === normalized || normalized.includes(alias) || alias.includes(normalized))) {
+    // Only the app name may contain an alias. The reverse test made any short
+    // name a member of every group whose alias contains it ("desktop" joined
+    // "whatsapp desktop" and was classified as chat).
+    if (normalizedGroup.some((alias) => alias === normalized || containsWord(normalized, alias))) {
       normalizedGroup.forEach((alias) => aliases.add(alias));
     }
   }

@@ -142,10 +142,10 @@ export default function StrictFocusPanel({
         </div>
 
         {displayedActive && (
-          <span className="text-xs px-2 py-1 rounded-md border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 flex items-center gap-1.5">
+          <span className="text-xs px-2 py-1 rounded-md border border-red-500/30 bg-red-500/10 text-red-400 flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
             </span>
             Active
           </span>
@@ -160,7 +160,7 @@ export default function StrictFocusPanel({
               <span className="text-zinc-400">
                 {displayedActive.goal || "Deep work session"}
               </span>
-              <span className={`font-mono ${isOverdue ? "text-rose-400" : "text-zinc-500"}`}>
+              <span className={`font-mono ${isOverdue ? "text-red-400" : "text-zinc-500"}`}>
                 {formatDuration(elapsedMs)} / {formatDuration(plannedMs)}
               </span>
             </div>
@@ -168,7 +168,7 @@ export default function StrictFocusPanel({
             <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-700 ${
-                  isOverdue ? "bg-rose-500" : progress > 85 ? "bg-emerald-500" : "bg-purple-500"
+                  isOverdue ? "bg-red-600" : "bg-red-500"
                 }`}
                 style={{ width: `${Math.min(100, progress)}%` }}
               />
@@ -177,15 +177,15 @@ export default function StrictFocusPanel({
 
           {/* Live Metrics */}
           <div className="grid grid-cols-3 gap-2">
-            <Stat icon={<Brain className="h-3.5 w-3.5" />} label="Focus" value={displayedActive.focusScore?.toFixed(0)} color="text-purple-400" />
-            <Stat icon={<Gauge className="h-3.5 w-3.5" />} label="Productivity" value={displayedActive.productivityScore?.toFixed(0)} color="text-emerald-400" />
-            <Stat icon={<Flame className="h-3.5 w-3.5" />} label="Violations" value={displayedActive.violationCount ?? 0} color={(displayedActive.violationCount ?? 0) > 0 ? "text-rose-400" : "text-zinc-400"} />
+            <Stat icon={<Brain className="h-3.5 w-3.5" />} label="Focus" value={displayedActive.focusScore?.toFixed(0)} color="text-zinc-100" />
+            <Stat icon={<Gauge className="h-3.5 w-3.5" />} label="Productivity" value={displayedActive.productivityScore?.toFixed(0)} color="text-zinc-200" />
+            <Stat icon={<Flame className="h-3.5 w-3.5" />} label="Violations" value={displayedActive.violationCount ?? 0} color={(displayedActive.violationCount ?? 0) > 0 ? "text-red-400" : "text-zinc-400"} />
           </div>
 
           {/* Time Breakdown */}
           <div className="grid grid-cols-3 gap-2">
-            <Stat icon={<Activity className="h-3.5 w-3.5" />} label="Productive" value={formatDuration(displayedActive.productiveMs ?? 0)} color="text-blue-400" />
-            <Stat icon={<AlertTriangle className="h-3.5 w-3.5" />} label="Distraction" value={formatDuration(displayedActive.distractionMs ?? 0)} color="text-rose-400" />
+            <Stat icon={<Activity className="h-3.5 w-3.5" />} label="Productive" value={formatDuration(displayedActive.productiveMs ?? 0)} color="text-zinc-200" />
+            <Stat icon={<AlertTriangle className="h-3.5 w-3.5" />} label="Distraction" value={formatDuration(displayedActive.distractionMs ?? 0)} color="text-red-400" />
             <Stat icon={<Clock className="h-3.5 w-3.5" />} label="Idle" value={formatDuration(displayedActive.idleMs ?? 0)} color="text-zinc-400" />
           </div>
 
@@ -193,14 +193,14 @@ export default function StrictFocusPanel({
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] uppercase text-zinc-500">Focus Efficiency</span>
-              <span className={`text-sm font-bold ${focusEfficiency > 70 ? "text-emerald-400" : focusEfficiency > 40 ? "text-amber-400" : "text-rose-400"}`}>
+              <span className={`text-sm font-bold ${focusEfficiency > 70 ? "text-zinc-100" : focusEfficiency > 40 ? "text-zinc-300" : "text-red-400"}`}>
                 {focusEfficiency}%
               </span>
             </div>
             <div className="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-700 ${
-                  focusEfficiency > 70 ? "bg-emerald-500" : focusEfficiency > 40 ? "bg-amber-500" : "bg-rose-500"
+                  focusEfficiency > 70 ? "bg-zinc-200" : focusEfficiency > 40 ? "bg-zinc-400" : "bg-red-500"
                 }`}
                 style={{ width: `${focusEfficiency}%` }}
               />
@@ -223,7 +223,7 @@ export default function StrictFocusPanel({
                       <span className="text-zinc-300 truncate">
                         {item.appName}
                       </span>
-                      <span className="text-amber-400 shrink-0">
+                      <span className="text-red-400 shrink-0">
                         {item.action}
                       </span>
                     </div>
@@ -242,7 +242,7 @@ export default function StrictFocusPanel({
               type="button"
               disabled={saving}
               onClick={() => endSession("completed")}
-              className="flex-1 rounded-md bg-emerald-500/15 border border-emerald-500/20 text-emerald-300 text-sm py-2 hover:bg-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm py-2 hover:bg-zinc-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
               Complete
@@ -251,7 +251,7 @@ export default function StrictFocusPanel({
               type="button"
               disabled={saving}
               onClick={() => endSession("abandoned")}
-              className="flex-1 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm py-2 hover:bg-zinc-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 text-sm py-2 hover:bg-zinc-800 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               <StopCircle className="h-3.5 w-3.5" />
               End

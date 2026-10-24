@@ -3,7 +3,8 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { prisma } from "../prisma";
 import { getCalendarTrackingSettings } from "./calendarTrackingService";
-import { isIdleActivity } from "./metricEngine";
+import { findActivitiesOverlapping } from "./rangeActivityQuery";
+import { resolveActivityTime, type RangeActivity } from "./rangeMetrics";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -70,18 +71,35 @@ export function calculateProjectTime(intervals: ProjectTimeInterval[]) {
   );
 }
 
+/**
+ * Activity intervals of each project in [fromMs, toMs): the instants its
+ * activities own after overlap resolution (idle wins, see rangeMetrics), so the
+ * idle the tracker backdates over the last foreground row is not project time.
+ * Pass every activity of the range, project or not, so ownership is complete.
+ */
+export function projectActivityIntervals(
+  activities: Array<RangeActivity & { projectId?: string | null }>,
+  fromMs: number,
+  toMs: number,
+  projectId?: string
+): ProjectTimeInterval[] {
+  return resolveActivityTime(activities, fromMs, toMs)
+    .filter((item) => {
+      const owner = item.activity.projectId;
+      return !item.idle && Boolean(owner) && (!projectId || owner === projectId) && item.activity.category !== "distracting";
+    })
+    .flatMap((item) => item.segments.map((segment) => ({
+      projectId: item.activity.projectId!,
+      start: new Date(segment.startMs),
+      end: new Date(segment.endMs),
+      source: "activity" as const,
+    })));
+}
+
 export async function getProjectTimeIntervals(userId: string, from: Date, to: Date, now = new Date(), projectId?: string) {
+  const activityEnd = new Date(Math.min(to.getTime(), now.getTime()));
   const [activities, calendarSessions] = await Promise.all([
-    prisma.activity.findMany({
-      where: {
-        session: { userId },
-        projectId: projectId ?? { not: null },
-        OR: [{ category: { not: "distracting" } }, { category: null }],
-        startTime: { lt: to },
-        endTime: { gt: from },
-      },
-      orderBy: { startTime: "asc" },
-    }),
+    activityEnd > from ? findActivitiesOverlapping(userId, from, activityEnd) : Promise.resolve([]),
     prisma.calendarSession.findMany({
       where: {
         userId,
@@ -95,18 +113,7 @@ export async function getProjectTimeIntervals(userId: string, from: Date, to: Da
     }),
   ]);
 
-  const activityIntervals: ProjectTimeInterval[] = activities
-    .filter((activity) => activity.projectId && !isIdleActivity(activity))
-    .map((activity) => {
-      const durationEnd = new Date(activity.startTime.getTime() + Math.max(0, activity.duration));
-      const rawEnd = activity.endTime > activity.startTime ? activity.endTime : durationEnd;
-      return {
-        projectId: activity.projectId!,
-        start: new Date(Math.max(from.getTime(), activity.startTime.getTime())),
-        end: new Date(Math.min(to.getTime(), now.getTime(), rawEnd.getTime(), durationEnd.getTime())),
-        source: "activity" as const,
-      };
-    });
+  const activityIntervals = projectActivityIntervals(activities, from.getTime(), activityEnd.getTime(), projectId);
   const sessionIntervals: ProjectTimeInterval[] = calendarSessions
     .filter((session) => session.projectId && session.actualStart)
     .map((session) => ({

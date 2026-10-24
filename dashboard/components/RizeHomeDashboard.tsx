@@ -1,34 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  Activity,
-  ArrowRight,
-  BarChart3,
-  CalendarDays,
-  Check,
-  CheckCheck,
-  Coffee,
-  Clock3,
-  Flame,
-  Gauge,
-  Layers3,
-  ListChecks,
-  Loader2,
-  Pin,
-  PinOff,
-  Shield,
-  Sparkles,
-  Target,
-  TrendingUp,
-} from "lucide-react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 
 import FocusTrendChart from "@/components/FocusTrendChart";
 import HeatmapGrid from "@/components/HeatmapGrid";
-import MetricsPanel from "@/components/MetricsPanel";
+import LiveClock from "@/components/LiveClock";
+import RecentActivity from "@/components/RecentActivity";
+import SamaritanPrompt from "@/components/SamaritanPrompt";
+import { Decode } from "@/components/sam/Decode";
 import Timeline from "@/components/Timeline";
 import { reviewActivityEntries, type ActivityReview } from "@/lib/api";
+import { categoryTone } from "@/lib/samaritanTheme";
+import { useCurrentActivity } from "@/lib/useWs";
 
 const REVIEW_CATEGORIES = [
   { value: "deep_work", label: "Deep work", intent: "coding", focus: 90 },
@@ -48,6 +33,9 @@ const REVIEW_INTENTS = [
   "remote_work", "social_media", "video", "streaming_video", "music",
   "gaming", "file_management", "utility", "idle",
 ];
+
+// A live signal older than this means the tracker has gone quiet.
+const LIVE_SIGNAL_MS = 3000;
 
 type ReviewDraft = {
   category: string;
@@ -89,6 +77,10 @@ function score(value: any) {
   return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
 }
 
+function pad2(value: number) {
+  return Math.round(value).toString().padStart(2, "0");
+}
+
 function entryKey(entry: any) {
   return `${entry.start ?? ""}:${entry.appName ?? ""}:${entry.duration ?? 0}`;
 }
@@ -114,15 +106,14 @@ function getEntryProductivity(entry: any) {
   return score(entry?.productivity ?? entry?.productivityScore ?? entry?.averageProductivityScore ?? entry?.score);
 }
 
+const clockFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+
 function formatTimeRange(entry: any) {
   const start = entry?.start ? new Date(entry.start) : null;
   const end = entry?.end ? new Date(entry.end) : null;
-  if (!start || Number.isNaN(start.getTime())) return "Unknown time";
-
-  const startText = start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (!end || Number.isNaN(end.getTime())) return startText;
-
-  return `${startText} - ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  if (!start || Number.isNaN(start.getTime())) return "--:--";
+  if (!end || Number.isNaN(end.getTime())) return clockFormat.format(start);
+  return `${clockFormat.format(start)}–${clockFormat.format(end)}`;
 }
 
 function summarizeEntryGroup(entries: any[]) {
@@ -135,13 +126,6 @@ function summarizeEntryGroup(entries: any[]) {
     focus: duration > 0 ? weightedFocus / duration : 0,
     productivity: duration > 0 ? weightedProductivity / duration : 0,
   };
-}
-
-function focusTone(value: number) {
-  if (value >= 75) return "#22c55e";
-  if (value >= 50) return "#a855f7";
-  if (value >= 25) return "#f59e0b";
-  return "#52525b";
 }
 
 function getDailyRecovery(daily: any) {
@@ -192,11 +176,19 @@ function getDailyRecovery(daily: any) {
   };
 }
 
-function recoveryTone(value: number) {
-  if (value >= 75) return { text: "text-emerald-400", bar: "bg-emerald-400", badge: "bg-emerald-500/10 text-emerald-400" };
-  if (value >= 55) return { text: "text-purple-300", bar: "bg-purple-500", badge: "bg-purple-500/10 text-purple-300" };
-  if (value >= 35) return { text: "text-amber-400", bar: "bg-amber-400", badge: "bg-amber-500/10 text-amber-400" };
-  return { text: "text-red-400", bar: "bg-red-400", badge: "bg-red-500/10 text-red-400" };
+// What Samaritan says about the day, in its own terse voice.
+function assessDay(daily: any) {
+  const focus = score(daily?.averageFocusScore);
+  const burnout = score(daily?.averageBurnoutScore);
+  const entropy = score(daily?.averageEntropyScore);
+  const tracked = Number(daily?.totalActiveSeconds ?? 0) + Number(daily?.totalIdleSeconds ?? 0);
+
+  if (tracked < 900) return ["BUILDING BASELINE"];
+  if (burnout >= 70) return ["STRAIN DETECTED", "PROTECT RECOVERY"];
+  if (entropy >= 70) return ["FRAGMENTED PATTERN", "BATCH SIMILAR WORK"];
+  if (focus >= 75 && burnout < 45) return ["SUSTAINED FOCUS", "PRESERVE RHYTHM"];
+  if (focus < 40) return ["LOW FOCUS", "START ONE BLOCK"];
+  return ["PATTERN STABLE"];
 }
 
 function summarizeCategories(timeline: any[]) {
@@ -293,45 +285,58 @@ function getActivityIds(entry: any) {
   return [...new Set(ids.filter(Boolean))] as string[];
 }
 
-function SmallMetric({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-}) {
+function categoryLabel(name: string) {
+  return name.replaceAll("_", " ");
+}
+
+/* ---------------- READOUT PRIMITIVES ---------------- */
+
+// `live` rows update continuously and skip the decode animation.
+type ReadoutRow = { key: string; value: ReactNode; alert?: boolean; live?: boolean };
+
+// Key/value table in the lock screen's SYSTEM PROFILE layout.
+function Readout({ rows }: { rows: ReadoutRow[] }) {
   return (
-    <div className="min-w-0 rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
-      <div className="text-[10px] uppercase text-zinc-600">{label}</div>
-      <div className="mt-1 truncate text-xl font-semibold text-zinc-100">{value}</div>
-      {sub && <div className="mt-1 truncate text-[11px] text-zinc-500">{sub}</div>}
+    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-8 gap-y-1.5">
+      {rows.map((row) => (
+        <Fragment key={row.key}>
+          <dt className="sam-key leading-[18px]">{row.key}</dt>
+          <dd className={`sam-value truncate leading-[18px] ${row.alert ? "text-alert" : ""}`}>
+            {!row.live && (typeof row.value === "string" || typeof row.value === "number") ? <Decode value={row.value} /> : row.value}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
+function SectionHead({ title, meta, action }: { title: string; meta?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+      <h2 className="sam-head">{title}</h2>
+      {(meta || action) && (
+        <div className="flex items-center gap-4">
+          {meta && <span className="sam-key">{meta}</span>}
+          {action}
+        </div>
+      )}
     </div>
   );
 }
 
-function SectionTitle({
-  icon: Icon,
-  title,
-  sub,
-  action,
-}: {
-  icon: any;
-  title: string;
-  sub?: string;
-  action?: ReactNode;
-}) {
+function Bar({ value, tone, alert }: { value: number; tone?: string; alert?: boolean }) {
   return (
-    <div className="mb-4 flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-purple-400" />
-          <h2 className="truncate text-sm font-semibold text-zinc-200">{title}</h2>
-        </div>
-        {sub && <div className="mt-1 text-[11px] text-zinc-500">{sub}</div>}
-      </div>
-      {action}
+    <div className="sam-bar" data-alert={alert ? "true" : undefined}>
+      <span style={{ width: `${Math.max(0, Math.min(100, value))}%`, ...(tone && !alert ? { background: tone } : {}) }} />
+    </div>
+  );
+}
+
+// Collapsible region that animates its height without measuring.
+function Reveal({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div className="min-h-0 overflow-hidden">{children}</div>
     </div>
   );
 }
@@ -356,8 +361,10 @@ export default function RizeHomeDashboard({
   const [selectedInterrupter, setSelectedInterrupter] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
+  const liveActivity = useCurrentActivity();
+
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -427,7 +434,7 @@ export default function RizeHomeDashboard({
   const approveEntries = async (entries: any[], operationKey: string) => {
     const reviews = entries.map(buildReview);
     if (reviews.some((review) => !review)) {
-      setReviewError("Choose a category and intent for every entry before approval.");
+      setReviewError("Choose a category and an intent for every entry before approving.");
       return;
     }
 
@@ -441,13 +448,12 @@ export default function RizeHomeDashboard({
       const keys = entries.map(entryKey);
       setReviewed((previous) => [...new Set([...previous, ...keys])]);
     } catch (error) {
-      setReviewError(error instanceof Error ? error.message : "Unable to save reviews.");
+      setReviewError(error instanceof Error ? error.message : "Reviews could not be saved. Check that the API is running.");
     } finally {
       setReviewing(null);
     }
   };
 
-  const topCategory = categories[0];
   const distractionCategories = new Set(["media", "entertainment", "communication", "system", "unknown"]);
   const interrupters = apps
     .filter((app) =>
@@ -455,15 +461,16 @@ export default function RizeHomeDashboard({
         (entry) => entry?.appName === app.name && distractionCategories.has(String(entry?.category ?? "unknown"))
       )
     )
-    .slice(0, 4);
+    .slice(0, 5);
+  const interrupterMax = Math.max(1, ...interrupters.map((item) => item.duration));
 
   const activeSeconds = Number(daily?.totalActiveSeconds ?? 0);
   const focusScore = score(daily?.averageFocusScore);
-  const deepWorkSessions = Number(daily?.deepWorkSessions ?? 0);
-  const switchCount = Number(daily?.totalSwitches ?? 0);
+  const burnoutScore = score(daily?.averageBurnoutScore);
+  const entropyScore = score(daily?.averageEntropyScore);
   const recovery = useMemo(() => getDailyRecovery(daily), [daily]);
   const recoveryScore = score(recovery?.score);
-  const recoveryColors = recoveryTone(recoveryScore);
+  const recoveryAlert = recoveryScore < 35 && activeSeconds > 0;
   const recoveryFactors = [
     { label: "Recovery gaps", value: score(recovery?.factors?.breakBalance) },
     { label: "Strain reserve", value: score(recovery?.factors?.strainReserve) },
@@ -476,558 +483,371 @@ export default function RizeHomeDashboard({
     0,
     Math.min(100, ((now.getHours() * 60 + now.getMinutes()) / (24 * 60)) * 100)
   );
-  const pulseBuckets = useMemo(() => {
-    const buckets = Array.isArray(focusTrend) ? focusTrend : [];
-    const active = buckets.filter((bucket: any) => Number(bucket?.duration ?? 0) > 0);
-    const source = active.length > 0 ? active : buckets;
-    return source.slice(-28).map((bucket: any) => ({
-      label: bucket?.label ?? "--",
-      focus: score(bucket?.focus ?? bucket?.averageFocus ?? bucket?.focusScore),
-      duration: Number(bucket?.duration ?? 0),
-    }));
-  }, [focusTrend]);
+
+  const observedAt = liveActivity?.observedAt ? new Date(liveActivity.observedAt).getTime() : 0;
+  const isLive = Boolean(liveActivity && Number.isFinite(observedAt) && now.getTime() - observedAt <= LIVE_SIGNAL_MS);
+  const liveApp = isLive ? liveActivity?.appName : null;
+  const liveTitle = isLive ? liveActivity?.windowTitle || "Active window" : null;
+
+  const assessment = useMemo(() => assessDay(daily), [daily]);
+  const pendingCount = pendingEntries.length;
+  const promptStatements = useMemo(
+    () => [
+      liveApp ? `OBSERVING [${liveApp}]` : "STANDBY",
+      `FOCUS ${pad2(focusScore)}`,
+      ...assessment,
+      ...(pendingCount > 0 ? [`${pendingCount} UNCLASSIFIED`] : []),
+    ],
+    [liveApp, focusScore, assessment, pendingCount]
+  );
 
   return (
-    <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
-      <div className="samaritan-card overflow-hidden p-4">
-        <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(280px,0.9fr)_minmax(320px,0.85fr)]">
-          <div className="min-w-0 rounded-lg bg-zinc-950/60 p-3 ring-1 ring-white/5">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-purple-300">
-                <Sparkles className="h-4 w-4" />
-                Home Mission Control
-              </div>
-              <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] text-purple-300">
-                <Clock3 className="h-3 w-3" />
-                Last captured
-              </span>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 ring-1 ring-purple-500/20">
-                <Activity className="h-5 w-5 text-purple-300" />
-              </div>
-              <div className="min-w-0">
-                <div className="mb-1 text-[10px] uppercase text-zinc-600">
-                  Last active app
-                </div>
-                <div className="truncate text-sm font-semibold text-zinc-100">
-                  {latestEntry?.appName ?? "Waiting for activity"}
-                </div>
-                <div className="mt-1 truncate text-xs text-zinc-500">
-                  {latestEntry ? getLatestTitle(latestEntry) : "Automatic tracking is standing by."}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-500">
-                  <span>{latestEntry ? formatTimeRange(latestEntry) : "No session yet"}</span>
-                  <span>{pendingEntries.length} pending reviews</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-600">
-                <span className="flex items-center gap-1">
-                  <Clock3 className="h-3 w-3" />
-                  Day progress
-                </span>
-                <span>{dayProgress.toFixed(0)}%</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-900">
-                <div
-                  className="h-full rounded-full bg-purple-500 transition-all duration-700"
-                  style={{ width: `${dayProgress}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-lg bg-zinc-950/60 p-3 ring-1 ring-white/5">
-            <div className="mb-3 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-semibold text-zinc-200">Focus Pulse</div>
-                <div className="mt-0.5 text-[11px] text-zinc-600">
-                  {focusTrendLoading ? "Syncing buckets" : `${pulseBuckets.length} recent buckets`}
-                </div>
-              </div>
-              <div className="text-right text-[11px] text-zinc-500">
-                <div>{topCategory?.name ?? "No category"}</div>
-                <div className="mt-0.5 text-zinc-600">top allocation</div>
-              </div>
-            </div>
-            <div className="flex h-20 items-end gap-1 overflow-hidden rounded-lg bg-black/40 p-2">
-              {pulseBuckets.length > 0 ? (
-                pulseBuckets.map((bucket: any, index: number) => (
-                  <div
-                    key={`${bucket.label}-${index}`}
-                    title={`${bucket.label} focus ${bucket.focus.toFixed(0)}`}
-                    className="min-w-[2px] flex-1 rounded-sm transition-all duration-500"
-                    style={{
-                      height: `${Math.max(10, bucket.focus)}%`,
-                      backgroundColor: focusTone(bucket.focus),
-                      opacity: bucket.duration > 0 ? 0.9 : 0.25,
-                      animationDelay: `${index * 35}ms`,
-                    }}
-                  />
-                ))
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-xs text-zinc-600">
-                  Focus data will appear here.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <SmallMetric label="Tracked" value={formatDuration(activeSeconds)} sub="automatic capture" />
-            <SmallMetric label="Focus" value={focusScore.toFixed(0)} sub="quality score" />
-            <SmallMetric label="Deep Work" value={deepWorkSessions} sub="sessions today" />
-            <SmallMetric label="Switches" value={switchCount} sub="context changes" />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid min-h-0 min-w-0 grid-cols-12 gap-4">
-        <div className="col-span-12 min-h-0 xl:col-span-3">
-          <MetricsPanel daily={daily} timeline={timeline} />
-        </div>
-
-        <div className="dashboard-scroll-panel col-span-12 grid min-h-0 min-w-0 auto-rows-min grid-cols-12 gap-4 pr-1 xl:col-span-9">
-          <div className="col-span-12 grid min-h-0 min-w-0 gap-4 lg:grid-cols-3">
-            <div className="samaritan-card dashboard-grid-card p-4">
-              <SectionTitle
-                icon={ListChecks}
-                title="Pending Time Entries"
-                sub={`${pendingEntries.length} classification${pendingEntries.length === 1 ? "" : "s"} to confirm`}
-                action={pendingEntries.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => approveEntries(pendingEntries, "all")}
-                    disabled={Boolean(reviewing)}
-                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-purple-500/20 bg-purple-500/10 px-2.5 py-1.5 text-[11px] font-medium text-purple-300 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {reviewing === "all" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <CheckCheck className="h-3.5 w-3.5" />
-                    )}
-                    Approve all
-                  </button>
-                ) : null}
-              />
-
-              {pendingEntries.length === 0 ? (
-                <div className="flex h-52 flex-col items-center justify-center rounded-lg bg-zinc-950/60 text-center">
-                  <Check className="mb-2 h-5 w-5 text-emerald-400" />
-                  <div className="text-sm font-medium text-zinc-200">All reviewed</div>
-                  <div className="mt-1 text-xs text-zinc-500">New ambiguous entries will appear here.</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {reviewError && (
-                    <div className="rounded-md border border-red-500/20 bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">
-                      {reviewError}
-                    </div>
-                  )}
-                  <div className="dashboard-scroll-panel max-h-72 space-y-2 pr-1">
-                  {pendingEntries.map((entry) => {
-                    const key = entryKey(entry);
-                    const draft = reviewDrafts[key] ?? createReviewDraft(entry);
-                    return (
-                      <div key={key} className="rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-zinc-200">
-                              {entry.appName ?? "Unknown"}
-                            </div>
-                            <div className="mt-1 truncate text-xs text-zinc-500">{getLatestTitle(entry)}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => approveEntries([entry], key)}
-                            disabled={Boolean(reviewing) || !draft.category || !draft.intent}
-                            className="flex shrink-0 items-center gap-1 rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-[11px] text-purple-300 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {reviewing === key ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Check className="h-3 w-3" />
-                            )}
-                            Approve
-                          </button>
-                        </div>
-
-                        <div className="mt-3 grid gap-2">
-                          <select
-                            aria-label={`Category for ${entry.appName ?? "activity"}`}
-                            value={draft.category}
-                            onChange={(event) => changeReviewCategory(key, event.target.value)}
-                            className="min-w-0 rounded-md border border-zinc-800 bg-black px-2 py-1.5 text-xs text-zinc-300 outline-none transition focus:border-purple-500/50"
-                          >
-                            <option value="">Choose category</option>
-                            {REVIEW_CATEGORIES.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-
-                          <select
-                            aria-label={`Intent for ${entry.appName ?? "activity"}`}
-                            value={draft.intent}
-                            onChange={(event) => updateReviewDraft(key, { intent: event.target.value })}
-                            className="min-w-0 rounded-md border border-zinc-800 bg-black px-2 py-1.5 text-xs text-zinc-300 outline-none transition focus:border-purple-500/50"
-                          >
-                            <option value="">Choose intent</option>
-                            {REVIEW_INTENTS.map((intent) => (
-                              <option key={intent} value={intent}>{intent.replaceAll("_", " ")}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="mb-1.5 flex items-center justify-between text-[10px] text-zinc-500">
-                            <span>Focus weight</span>
-                            <span className="tabular-nums text-purple-300">{draft.focusImpact}%</span>
-                          </div>
-                          <input
-                            aria-label={`Focus weight for ${entry.appName ?? "activity"}`}
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value={draft.focusImpact}
-                            onChange={(event) => updateReviewDraft(key, { focusImpact: Number(event.target.value) })}
-                            className="h-1.5 w-full accent-purple-500"
-                          />
-                        </div>
-
-                        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-zinc-600">
-                          <label className="flex min-w-0 cursor-pointer items-center gap-1.5">
-                            <input
-                              type="checkbox"
-                              checked={draft.remember}
-                              onChange={(event) => updateReviewDraft(key, { remember: event.target.checked })}
-                              className="h-3.5 w-3.5 accent-purple-500"
-                            />
-                            <span className="truncate">Remember this context</span>
-                          </label>
-                          <span>{formatMs(Number(entry.duration ?? 0))}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="samaritan-card dashboard-grid-card p-4">
-              <SectionTitle
-                icon={Gauge}
-                title="Daily Balance"
-                sub={isToday ? "Continuously updated" : "Final balance for this day"}
-                action={(
-                  <span className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-medium ${recoveryColors.badge}`}>
-                    {recovery?.status ?? "Building baseline"}
-                  </span>
-                )}
-              />
-
-              <div
-                className="border-y border-zinc-900 py-3"
-                title="Weighted from strain reserve, stability, focus, recovery gaps, and switch control"
-              >
-                <div className="flex items-end justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase text-zinc-600">Recovery balance</div>
-                    <div className={`mt-1 text-3xl font-semibold tabular-nums ${recoveryColors.text}`}>
-                      {recoveryScore.toFixed(0)}
-                      <span className="ml-1 text-sm font-normal text-zinc-600">/100</span>
-                    </div>
-                  </div>
-                  <div className="text-right text-[10px] text-zinc-600">
-                    <div>{Number(recovery?.switchesPerHour ?? 0).toFixed(1)} switches/hr</div>
-                    <div className="mt-1">{Number(recovery?.idleRatio ?? 0).toFixed(0)}% recovery gaps</div>
-                  </div>
-                </div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-900">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ${recoveryColors.bar}`}
-                    style={{ width: `${recoveryScore}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
-                {recoveryFactors.map((factor) => (
-                  <div key={factor.label} className="min-w-0">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-                      <span className="truncate text-zinc-500">{factor.label}</span>
-                      <span className="tabular-nums text-zinc-400">{factor.value.toFixed(0)}</span>
-                    </div>
-                    <div className="h-1 overflow-hidden rounded-full bg-zinc-900">
-                      <div
-                        className="h-full rounded-full bg-purple-500 transition-all duration-700"
-                        style={{ width: `${factor.value}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-3 flex items-start gap-2 border-t border-zinc-900 pt-3">
-                <Coffee className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-400" />
-                <p className="text-[11px] leading-relaxed text-zinc-400">
-                  {recovery?.action ?? "Keep tracking to establish today's baseline."}
-                </p>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-3 text-[10px] text-zinc-600">
-                <span className="truncate">Top: {topCategory?.name ?? "None"}</span>
-                <Link href="/analytics" className="flex shrink-0 items-center gap-1 text-purple-300 hover:text-purple-200">
-                  Details
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-            </div>
-
-            <div className="samaritan-card dashboard-grid-card p-4">
-              <SectionTitle icon={BarChart3} title="Dashboards" sub="Fast paths into analysis" />
-              <div className="grid grid-cols-1 gap-2">
-                {[
-                  { href: "/analytics", label: "Productivity", icon: TrendingUp },
-                  { href: "/heatmap", label: "Calendar Heatmap", icon: CalendarDays },
-                  { href: "/focus", label: "Focus Sessions", icon: Shield },
-                  { href: "/projects", label: "Projects", icon: Target },
-                ].map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className="flex items-center justify-between rounded-lg bg-zinc-950/70 px-3 py-2 text-sm text-zinc-300 ring-1 ring-white/5 transition hover:bg-zinc-900 hover:text-zinc-100"
-                  >
-                    <span className="flex items-center gap-2">
-                      <item.icon className="h-4 w-4 text-purple-400" />
-                      {item.label}
-                    </span>
-                    <ArrowRight className="h-4 w-4 text-zinc-600" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="col-span-12 min-w-0">
-            <Timeline userId={userId} date={date} />
-          </div>
-
-          <div className="col-span-12 min-h-[340px] min-w-0">
-            <FocusTrendChart
-              data={focusTrend || []}
-              bucketMinutes={focusBucketMinutes}
-              onBucketMinutesChange={onFocusBucketMinutesChange}
-              isLoading={focusTrendLoading}
+    <div className="sam-ui dashboard-surface space-y-8">
+      {/* ---------------- READOUT ---------------- */}
+      <section className="grid items-start gap-x-8 gap-y-8 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          <h2 className="sam-head">System time</h2>
+          <LiveClock className="mt-3 text-[44px] leading-none" />
+          <div className="mt-8">
+            <Readout
+              rows={[
+                { key: "Status", value: isLive ? "Observing" : "Standby" },
+                { key: "Day", value: isToday ? `${pad2(dayProgress)}% elapsed` : "Archive" },
+                { key: "Last capture", value: latestEntry ? formatTimeRange(latestEntry) : "None yet", live: true },
+              ]}
             />
           </div>
+        </div>
 
-          <div className="samaritan-card dashboard-scroll-panel col-span-12 p-4 xl:col-span-6">
-            <SectionTitle icon={Layers3} title="Category Allocation" sub="Hover for activities; pin a category to scroll" />
-            <div className="space-y-2">
+        <div className="order-first min-w-0 py-4 sm:col-span-2 xl:order-none xl:col-span-1 xl:pt-10">
+          <SamaritanPrompt
+            statements={promptStatements}
+            caption={liveTitle ?? (latestEntry ? `Last seen in ${latestEntry.appName}: ${getLatestTitle(latestEntry)}` : "Waiting for foreground activity")}
+          />
+        </div>
+
+        <div className="min-w-0 xl:justify-self-end">
+          <h2 className="sam-head">{isToday ? "Today" : date}</h2>
+          <div className="mt-4">
+            <Readout
+              rows={[
+                { key: "Tracked", value: formatDuration(activeSeconds) },
+                { key: "Idle", value: formatDuration(daily?.totalIdleSeconds) },
+                { key: "Focus", value: pad2(focusScore), alert: activeSeconds > 0 && focusScore < 25 },
+                { key: "Burnout", value: pad2(burnoutScore), alert: burnoutScore >= 65 },
+                { key: "Entropy", value: pad2(entropyScore), alert: entropyScore >= 65 },
+                { key: "Switches", value: Number(daily?.totalSwitches ?? 0) },
+                { key: "Deep work", value: Number(daily?.deepWorkSessions ?? 0) },
+                { key: "Unclassified", value: pendingCount },
+              ]}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------- TIMELINE ---------------- */}
+      <div className="sam-rule pt-8">
+        <Timeline userId={userId} date={date} />
+      </div>
+
+      {/* ---------------- FOCUS TREND ---------------- */}
+      <div className="sam-rule pt-8">
+        <FocusTrendChart
+          data={focusTrend || []}
+          bucketMinutes={focusBucketMinutes}
+          onBucketMinutesChange={onFocusBucketMinutesChange}
+          isLoading={focusTrendLoading}
+        />
+      </div>
+
+      {/* ---------------- ALLOCATION / INTERRUPTERS / BALANCE ---------------- */}
+      <section className="sam-rule grid gap-x-8 gap-y-8 pt-6 lg:grid-cols-3">
+        <div className="min-w-0">
+          <SectionHead title="Allocation" meta="Hover to preview, click to pin" />
+          {categories.length === 0 ? (
+            <p className="text-[12px] text-key">No categorised time for this day.</p>
+          ) : (
+            <ul className="space-y-5">
               {categories.slice(0, 6).map((category) => {
                 const locked = lockedCategory === category.name;
                 const open = locked || hoveredCategory === category.name;
 
                 return (
-                  <div
+                  <li
                     key={category.name}
                     onMouseEnter={() => setHoveredCategory(category.name)}
                     onMouseLeave={() => setHoveredCategory((current) => current === category.name ? null : current)}
-                    className={`rounded-lg p-3 ring-1 transition-colors ${
-                      locked
-                        ? "bg-purple-500/10 ring-purple-500/40"
-                        : "bg-zinc-950/70 ring-white/5"
-                    }`}
                   >
-                    <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-                      <span className="min-w-0 truncate text-zinc-300">{category.name}</span>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="text-zinc-500">{formatMs(category.duration)}</span>
-                        <button
-                          type="button"
-                          onClick={() => setLockedCategory(locked ? null : category.name)}
-                          title={locked ? "Unlock activity list" : "Lock activity list open"}
-                          aria-label={locked ? `Unlock ${category.name} activities` : `Lock ${category.name} activities open`}
-                          className={`flex h-6 w-6 items-center justify-center rounded-md transition ${
-                            locked
-                              ? "bg-purple-500/20 text-purple-300"
-                              : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-                          }`}
-                        >
-                          {locked ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
-                      <div
-                        className="h-full rounded-full bg-purple-500 transition-all duration-700"
-                        style={{ width: `${Math.max(2, category.percent)}%` }}
-                      />
-                    </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
-                      <span>{category.percent.toFixed(0)}% time</span>
-                      <span>Focus {category.focus.toFixed(0)}</span>
-                      <span>Prod {category.productivity.toFixed(0)}</span>
-                    </div>
-
-                    <div
-                      className={`grid transition-all duration-200 ease-out ${
-                        open ? "mt-3 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => setLockedCategory(locked ? null : category.name)}
+                      aria-expanded={open}
+                      className="block w-full text-left"
                     >
-                      <div className="min-h-0 overflow-hidden">
-                        <div className="border-t border-zinc-800 pt-2">
-                          <div className="mb-2 flex items-center justify-between text-[10px] text-zinc-600">
-                            <span>{category.activities.length} activities</span>
-                            <span>{locked ? "Pinned" : "Hover preview"}</span>
-                          </div>
-                          <div
-                            className="max-h-52 space-y-1.5 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]"
-                            onWheel={(event) => event.stopPropagation()}
-                          >
-                            {category.activities.map((activity: any, index: number) => (
-                              <div
-                                key={activity.id ?? `${activity.start}-${index}`}
-                                className="rounded-md bg-black/50 p-2 text-[11px] ring-1 ring-white/5"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className="min-w-0 truncate font-medium text-zinc-300">
-                                    {activity.appName ?? "Unknown"}
-                                  </span>
-                                  <span className="shrink-0 tabular-nums text-zinc-500">
-                                    {formatMs(Number(activity.duration ?? 0))}
-                                  </span>
-                                </div>
-                                <div className="mt-1 truncate text-zinc-500">
-                                  {activity.title ?? "Untitled activity"}
-                                </div>
-                                <div className="mt-1.5 flex items-center justify-between gap-3 text-[10px] text-zinc-600">
-                                  <span className="truncate">{formatTimeRange(activity)}</span>
-                                  <span className="shrink-0 tabular-nums">
-                                    Focus {getEntryFocus(activity).toFixed(0)} / Prod {getEntryProductivity(activity).toFixed(0)}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="sam-key truncate text-trace">{categoryLabel(category.name)}</span>
+                        <span className="shrink-0 tabular-nums text-signal">
+                          {formatMs(category.duration)}
+                          <span className="ml-3 text-key">{pad2(category.percent)}%</span>
+                        </span>
                       </div>
-                    </div>
-                  </div>
+                      <div className="mt-2">
+                        <Bar value={Math.max(1, category.percent)} tone={categoryTone(category.name)} />
+                      </div>
+                      <div className="mt-1.5 flex gap-5 text-[11px] text-key">
+                        <span>Focus {pad2(category.focus)}</span>
+                        <span>Prod {pad2(category.productivity)}</span>
+                        {locked && <span className="text-signal">Pinned</span>}
+                      </div>
+                    </button>
+
+                    <Reveal open={open}>
+                      <ol
+                        className="sam-scroll mt-3 max-h-52 space-y-2 overflow-y-auto border-l border-grid pl-3 pr-1"
+                        onWheel={(event) => event.stopPropagation()}
+                      >
+                        {category.activities.map((activity: any, index: number) => (
+                          <li key={activity.id ?? `${activity.start}-${index}`} className="text-[11px]">
+                            <div className="flex justify-between gap-3">
+                              <span className="truncate text-signal">[{activity.appName ?? "unknown"}]</span>
+                              <span className="shrink-0 tabular-nums text-trace">{formatMs(Number(activity.duration ?? 0))}</span>
+                            </div>
+                            <div className="truncate text-key">
+                              {formatTimeRange(activity)} {activity.title ?? "Untitled activity"}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </Reveal>
+                  </li>
                 );
               })}
-              {categories.length === 0 && (
-                <div className="rounded-lg bg-zinc-950/60 p-6 text-center text-sm text-zinc-500">
-                  No category data yet.
-                </div>
-              )}
-            </div>
-          </div>
+            </ul>
+          )}
+        </div>
 
-          <div className="samaritan-card dashboard-scroll-panel col-span-12 p-4 xl:col-span-6">
-            <SectionTitle icon={Flame} title="Top Interrupters" sub="Click an app to inspect impact" />
-            <div className="space-y-2">
+        <div className="min-w-0">
+          <SectionHead title="Interrupters" meta="Time in distracting categories" />
+          {interrupters.length === 0 ? (
+            <p className="text-[12px] text-key">No interruptions recorded for this day.</p>
+          ) : (
+            <ol className="space-y-5">
               {interrupters.map((item, index) => {
                 const appEntries = [...(entriesByApp.get(item.name) ?? [])].sort(
                   (a, b) => new Date(b.end ?? b.start).getTime() - new Date(a.end ?? a.start).getTime()
                 );
                 const appSummary = summarizeEntryGroup(appEntries);
                 const active = selectedInterrupter === item.name;
+
                 return (
-                  <div
-                    key={item.name}
-                    className={`overflow-hidden rounded-lg ring-1 transition ${
-                      active
-                        ? "bg-purple-500/10 ring-purple-500/40"
-                        : "bg-zinc-950/70 ring-white/5"
-                    }`}
-                  >
+                  <li key={item.name}>
                     <button
                       type="button"
                       onClick={() => setSelectedInterrupter(active ? null : item.name)}
-                      className="w-full p-3 text-left transition hover:bg-zinc-900/70"
+                      aria-expanded={active}
+                      className="block w-full text-left"
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-zinc-200">
-                            {index + 1}. {item.name}
-                          </div>
-                          <div className="mt-1 text-[11px] text-zinc-600">
-                            {item.switches} appearances - Focus {appSummary.focus.toFixed(0)} - Prod {appSummary.productivity.toFixed(0)}
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <div className="text-xs text-zinc-400">{formatMs(item.duration)}</div>
-                          <div className="mt-1 text-[10px] text-zinc-600">{active ? "Hide" : "Details"}</div>
+                      <div className="grid grid-cols-[1.75rem_minmax(0,1fr)_auto] items-baseline gap-3">
+                        <span className="tabular-nums text-alert">{pad2(index + 1)}</span>
+                        <span className="truncate text-signal">[{item.name}]</span>
+                        <span className="tabular-nums text-trace">{formatMs(item.duration)}</span>
+                      </div>
+                      <div className="mt-2 pl-[2.5rem]">
+                        <Bar value={(item.duration / interrupterMax) * 100} alert />
+                        <div className="mt-1.5 text-[11px] text-key">
+                          {item.switches} appearances, focus {pad2(appSummary.focus)}, prod {pad2(appSummary.productivity)}
                         </div>
                       </div>
                     </button>
 
-                    <div
-                      className={`grid transition-all duration-200 ease-out ${
-                        active ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                      }`}
-                    >
-                      <div className="min-h-0 overflow-hidden">
-                        <div className="border-t border-purple-500/20 p-3">
-                          <div className="mb-3 grid grid-cols-3 gap-2 text-[11px]">
-                            <div className="rounded-md bg-black/40 p-2">
-                              <div className="text-zinc-600">Sessions</div>
-                              <div className="mt-1 font-semibold text-zinc-200">{appEntries.length}</div>
+                    <Reveal open={active}>
+                      <ol className="sam-scroll ml-[2.5rem] mt-3 max-h-56 space-y-2 overflow-y-auto border-l border-grid pl-3 pr-1">
+                        {appEntries.slice(0, 8).map((entry) => (
+                          <li key={entryKey(entry)} className="text-[11px]">
+                            <div className="flex justify-between gap-3">
+                              <span className="tabular-nums text-trace">{formatTimeRange(entry)}</span>
+                              <span className="shrink-0 tabular-nums text-trace">{formatMs(Number(entry.duration ?? 0))}</span>
                             </div>
-                            <div className="rounded-md bg-black/40 p-2">
-                              <div className="text-zinc-600">Focus</div>
-                              <div className="mt-1 font-semibold text-zinc-200">{appSummary.focus.toFixed(0)}</div>
+                            <div className="truncate text-key">{getLatestTitle(entry)}</div>
+                            <div className="text-dim">
+                              {categoryLabel(entry.category ?? "unknown")}, {String(entry.intent ?? "unknown").replaceAll("_", " ")}
                             </div>
-                            <div className="rounded-md bg-black/40 p-2">
-                              <div className="text-zinc-600">Productivity</div>
-                              <div className="mt-1 font-semibold text-zinc-200">{appSummary.productivity.toFixed(0)}</div>
-                            </div>
-                          </div>
-
-                          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                            {appEntries.slice(0, 8).map((entry) => (
-                              <div key={entryKey(entry)} className="rounded-md bg-black/50 p-2 text-[11px] ring-1 ring-white/5">
-                                <div className="flex justify-between gap-3">
-                                  <span className="truncate text-zinc-300">{formatTimeRange(entry)}</span>
-                                  <span className="shrink-0 text-zinc-500">{formatMs(Number(entry.duration ?? 0))}</span>
-                                </div>
-                                <div className="mt-1 truncate text-zinc-600">{getLatestTitle(entry)}</div>
-                                <div className="mt-1 flex justify-between gap-3 text-zinc-600">
-                                  <span className="truncate">{entry.category ?? "unknown"} - {entry.intent ?? "unknown"}</span>
-                                  <span className="shrink-0">F {getEntryFocus(entry).toFixed(0)} / P {getEntryProductivity(entry).toFixed(0)}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </Reveal>
+                  </li>
                 );
               })}
-              {interrupters.length === 0 && (
-                <div className="rounded-lg bg-zinc-950/60 p-6 text-center text-sm text-zinc-500">
-                  No interrupters detected today.
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 text-xs leading-relaxed text-zinc-500">
-              Interrupter impact is calculated from the app's session duration, focus score, and productivity score.
-            </div>
-          </div>
-
-          <div className="col-span-12 min-w-0">
-            <HeatmapGrid data={heatmap} />
-          </div>
+            </ol>
+          )}
         </div>
+
+        <div className="min-w-0">
+          <SectionHead title="Daily balance" meta={isToday ? "Live" : "Final"} />
+          <div className="flex items-baseline gap-3">
+            <span className={`sam-numeral text-[56px] leading-none ${recoveryAlert ? "text-alert" : ""}`}>
+              <Decode value={pad2(recoveryScore)} />
+            </span>
+            <span className="sam-key">/ 100</span>
+          </div>
+          <div
+            className={`mt-3 font-display text-[13px] uppercase tracking-[0.08em] ${recoveryAlert ? "text-alert" : "text-signal"}`}
+            title="Weighted from strain reserve, stability, focus, recovery gaps and switch control"
+          >
+            {recovery?.status ?? "Building baseline"}
+          </div>
+          <div className="mt-4">
+            <Bar value={recoveryScore} alert={recoveryAlert} />
+          </div>
+
+          <dl className="mt-6 space-y-3">
+            {recoveryFactors.map((factor) => (
+              <div key={factor.label}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="sam-key">{factor.label}</dt>
+                  <dd className="sam-value">
+                    <Decode value={pad2(factor.value)} />
+                  </dd>
+                </div>
+                <div className="mt-1.5">
+                  <Bar value={factor.value} />
+                </div>
+              </div>
+            ))}
+          </dl>
+
+          <p className="mt-6 max-w-[48ch] text-trace">{recovery?.action ?? "Keep tracking to establish today's baseline."}</p>
+          <p className="mt-2 text-[11px] text-key">
+            {Number(recovery?.switchesPerHour ?? 0).toFixed(1)} switches per hour, {Number(recovery?.idleRatio ?? 0).toFixed(0)}% recovery gaps
+          </p>
+          <Link
+            href="/analytics"
+            className="mt-5 inline-block text-[11px] uppercase tracking-[0.08em] text-key underline-offset-4 hover:text-signal hover:underline"
+          >
+            Open analytics
+          </Link>
+        </div>
+      </section>
+
+      {/* ---------------- REVIEW QUEUE / RECENT ACTIVITY ---------------- */}
+      <section className="sam-rule grid gap-x-12 gap-y-14 pt-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          <SectionHead
+            title="Review queue"
+            meta={`${pendingCount} to classify`}
+            action={pendingCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => approveEntries(pendingEntries, "all")}
+                disabled={Boolean(reviewing)}
+                className="sam-button"
+                data-variant="primary"
+              >
+                {reviewing === "all" && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+                Approve all
+              </button>
+            ) : null}
+          />
+
+          {reviewError && <p className="mb-4 text-[12px] text-alert" role="alert">{reviewError}</p>}
+
+          {pendingCount === 0 ? (
+            <p className="text-[12px] text-key">Every entry is classified. Ambiguous activity will be queued here.</p>
+          ) : (
+            <ul className="sam-scroll max-h-[440px] divide-y divide-grid overflow-y-auto pr-2">
+              {pendingEntries.map((entry) => {
+                const key = entryKey(entry);
+                const draft = reviewDrafts[key] ?? createReviewDraft(entry);
+                const appName = entry.appName ?? "activity";
+
+                return (
+                  <li key={key} className="py-4 first:pt-0">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="truncate">
+                          <span className="text-signal">[{entry.appName ?? "unknown"}]</span>
+                          <span className="ml-3 tabular-nums text-key">{formatMs(Number(entry.duration ?? 0))}</span>
+                        </div>
+                        <div className="mt-1 truncate text-key">{getLatestTitle(entry)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => approveEntries([entry], key)}
+                        disabled={Boolean(reviewing) || !draft.category || !draft.intent}
+                        className="sam-button shrink-0"
+                      >
+                        {reviewing === key && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+                        Approve
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <select
+                        aria-label={`Category for ${appName}`}
+                        value={draft.category}
+                        onChange={(event) => changeReviewCategory(key, event.target.value)}
+                        className="sam-select"
+                      >
+                        <option value="">Category</option>
+                        {REVIEW_CATEGORIES.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        aria-label={`Intent for ${appName}`}
+                        value={draft.intent}
+                        onChange={(event) => updateReviewDraft(key, { intent: event.target.value })}
+                        className="sam-select"
+                      >
+                        <option value="">Intent</option>
+                        {REVIEW_INTENTS.map((intent) => (
+                          <option key={intent} value={intent}>{intent.replaceAll("_", " ")}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)_2.5rem] items-center gap-3">
+                      <span className="sam-key">Focus weight</span>
+                      <input
+                        aria-label={`Focus weight for ${appName}`}
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={draft.focusImpact}
+                        onChange={(event) => updateReviewDraft(key, { focusImpact: Number(event.target.value) })}
+                        className="h-1 w-full accent-signal"
+                      />
+                      <span className="sam-value text-right">{draft.focusImpact}%</span>
+                    </div>
+
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-key">
+                      <input
+                        type="checkbox"
+                        checked={draft.remember}
+                        onChange={(event) => updateReviewDraft(key, { remember: event.target.checked })}
+                        className="h-3 w-3 accent-signal"
+                      />
+                      Apply to future activity in this context
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <SectionHead title="Recent activity" meta="Latest first" />
+          <RecentActivity data={timeline} limit={10} />
+        </div>
+      </section>
+
+      {/* ---------------- HEATMAP ---------------- */}
+      <div className="sam-rule pt-8">
+        <HeatmapGrid data={heatmap} />
       </div>
     </div>
   );

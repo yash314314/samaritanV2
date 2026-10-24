@@ -19,7 +19,6 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Square,
   Trash2,
   Users,
@@ -42,6 +41,7 @@ import {
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import { useWsMessage } from "@/lib/ws";
 import { useAppContext } from "@/context/AppContext";
+import { DecodeText } from "@/components/sam/Decode";
 import {
   calendarDateKey,
   calendarInputDateTime,
@@ -50,8 +50,9 @@ import {
   calendarTimeLabel,
   floatingCalendarDateTime,
 } from "@/lib/calendarTime";
+import { getUserId } from "@/lib/auth";
+import NumberInput from "@/components/sam/NumberInput";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 const COMMON_TIMEZONES = [
   "Asia/Kolkata",
   "UTC",
@@ -253,19 +254,19 @@ function summarizeDay(dayHeatmap: Record<string, any> | undefined): DaySummary {
 }
 
 function focusColor(summary: DaySummary) {
-  if (summary.trackedMs <= 0) return "#18181b";
-  if (summary.focus >= 75) return "#a855f7";
-  if (summary.focus >= 55) return "#7c3aed";
-  if (summary.focus >= 35) return "#4c1d95";
-  return "#27272a";
+  if (summary.trackedMs <= 0) return "var(--sam-void)";
+  if (summary.focus >= 75) return "var(--sam-series-1)";
+  if (summary.focus >= 55) return "color-mix(in srgb, var(--sam-signal) 70%, var(--sam-void))";
+  if (summary.focus >= 35) return "color-mix(in srgb, var(--sam-signal) 40%, var(--sam-void))";
+  return "var(--sam-grid)";
 }
 
 function sessionStatusClass(status: CalendarSession["status"]) {
   if (status === "active") return "border-fuchsia-400/30 bg-fuchsia-500/15 text-fuchsia-200";
-  if (status === "confirmed") return "border-emerald-500/20 bg-emerald-500/10 text-emerald-300";
-  if (status === "detecting") return "border-purple-500/20 bg-purple-500/10 text-purple-300";
-  if (status === "tentative") return "border-amber-500/20 bg-amber-500/10 text-amber-300";
-  if (status === "missed" || status === "rejected") return "border-rose-500/20 bg-rose-500/10 text-rose-300";
+  if (status === "confirmed") return "border-zinc-700 bg-zinc-800 text-white";
+  if (status === "detecting") return "border-red-500/30 bg-red-500/10 text-red-400";
+  if (status === "tentative") return "border-zinc-700 bg-zinc-900 text-zinc-300";
+  if (status === "missed" || status === "rejected") return "border-red-500/20 bg-red-500/10 text-red-300";
   return "border-zinc-700 bg-zinc-900 text-zinc-400";
 }
 
@@ -384,7 +385,7 @@ export default function CalendarPage() {
     startAt: inputDate(new Date(), 9),
     endAt: inputDate(new Date(), 10),
     allDay: false,
-    color: "#8b5cf6",
+    color: "#fb0915",
     description: "",
     location: "",
     status: "confirmed",
@@ -455,7 +456,7 @@ export default function CalendarPage() {
       startAt: inputDate(day, 9),
       endAt: inputDate(day, 10),
       allDay: false,
-      color: "#8b5cf6",
+      color: "#fb0915",
       description: "",
       location: "",
       status: "confirmed",
@@ -481,13 +482,13 @@ export default function CalendarPage() {
     setCalendarError("");
     try {
       const [eventData, heatmapData, sessionData, summaryData, insightsData, intelligenceData, utilizationData] = await Promise.all([
-        calendarApi.list(USER_ID, calendarFrom, calendarTo),
-        fetchHeatmap(USER_ID, calendarFrom, calendarTo, "focus"),
-        calendarApi.sessions(USER_ID, calendarFrom, calendarTo),
-        calendarApi.sessionSummary(USER_ID, insightFrom, insightTo),
-        calendarApi.meetingInsights(USER_ID, insightFrom, insightTo),
-        calendarApi.intelligence(USER_ID, insightFrom, insightTo),
-        calendarApi.workHoursUtilization(USER_ID, insightFrom, insightTo),
+        calendarApi.list(getUserId(), calendarFrom, calendarTo),
+        fetchHeatmap(getUserId(), calendarFrom, calendarTo, "focus"),
+        calendarApi.sessions(getUserId(), calendarFrom, calendarTo),
+        calendarApi.sessionSummary(getUserId(), insightFrom, insightTo),
+        calendarApi.meetingInsights(getUserId(), insightFrom, insightTo),
+        calendarApi.intelligence(getUserId(), insightFrom, insightTo),
+        calendarApi.workHoursUtilization(getUserId(), insightFrom, insightTo),
       ]);
       setEvents(Array.isArray(eventData) ? eventData : []);
       setMonthHeatmap(heatmapData ?? {});
@@ -505,17 +506,17 @@ export default function CalendarPage() {
   }, [calendarFrom, calendarTo, insightFrom, insightTo]);
 
   const loadSelectedDay = useCallback(async () => {
-    const data = await fetchTimeline(USER_ID, undefined, undefined, selectedKey);
+    const data = await fetchTimeline(getUserId(), undefined, undefined, selectedKey);
     setSelectedTimeline(Array.isArray(data) ? data : []);
   }, [selectedKey]);
 
   const loadReminders = useCallback(async () => {
-    const data = await calendarApi.reminders(USER_ID);
+    const data = await calendarApi.reminders(getUserId());
     setReminders(Array.isArray(data) ? data : []);
   }, []);
 
   const loadReviews = useCallback(async () => {
-    const data = await calendarApi.sessions(USER_ID, undefined, undefined, "tentative");
+    const data = await calendarApi.sessions(getUserId(), undefined, undefined, "tentative");
     setReviewSessions(Array.isArray(data) ? data : []);
   }, []);
 
@@ -528,8 +529,8 @@ export default function CalendarPage() {
 
   useEffect(() => {
     loadMonth().catch(console.error);
-    projectsApi.list(USER_ID).then((data) => setProjects(data)).catch(console.error);
-    calendarApi.trackingSettings(USER_ID).then(setTrackingSettings).catch(console.error);
+    projectsApi.list(getUserId()).then((data) => setProjects(data)).catch(console.error);
+    calendarApi.trackingSettings(getUserId()).then(setTrackingSettings).catch(console.error);
     loadReminders().catch(console.error);
     loadReviews().catch(console.error);
   }, [loadMonth, loadReminders, loadReviews]);
@@ -632,13 +633,13 @@ export default function CalendarPage() {
   }
 
   async function snoozeReminder(id: string, minutes: number) {
-    const updated = await calendarApi.snoozeReminder(id, USER_ID, minutes);
+    const updated = await calendarApi.snoozeReminder(id, getUserId(), minutes);
     upsertReminder(updated);
     setReminderToast((current) => current?.id === id ? null : current);
   }
 
   async function dismissReminder(id: string) {
-    await calendarApi.dismissReminder(id, USER_ID);
+    await calendarApi.dismissReminder(id, getUserId());
     setReminders((current) => current.filter((item) => item.id !== id));
     setReminderToast((current) => current?.id === id ? null : current);
   }
@@ -690,21 +691,21 @@ export default function CalendarPage() {
       ...current,
       title: "Protected focus block",
       eventType: "focus",
-      color: "#a855f7",
+      color: "#fb0915",
       busy: true,
       focusAutoStart: true,
     }));
   }
 
   async function findCalendarSlot(eventId: string) {
-    return calendarApi.slotSuggestion(USER_ID, eventId) as Promise<CalendarSlotSuggestion>;
+    return calendarApi.slotSuggestion(getUserId(), eventId) as Promise<CalendarSlotSuggestion>;
   }
 
   async function applyCalendarSlot(suggestion: CalendarSlotSuggestion) {
     const event = events.find((item) => item.id === suggestion.eventId);
     if (!event) throw new Error("Calendar event is no longer available");
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       startAt: suggestion.startAt,
       endAt: suggestion.endAt,
       ...(suggestion.recurrenceScope ? { recurrenceScope: suggestion.recurrenceScope } : {}),
@@ -720,7 +721,7 @@ export default function CalendarPage() {
     const originalEnd = new Date(event.endAt);
     const durationMinutes = Math.max(15, Math.round((originalEnd.getTime() - originalStart.getTime()) / 60_000));
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       startAt: floatingCalendarDateTime(day, startMinute),
       endAt: floatingCalendarDateTime(day, startMinute + durationMinutes),
     });
@@ -730,7 +731,7 @@ export default function CalendarPage() {
 
   async function resizeCalendarEvent(event: TimeGridEvent, endDay: Date, endMinute: number) {
     await calendarApi.update(event.id, {
-      userId: USER_ID,
+      userId: getUserId(),
       endAt: floatingCalendarDateTime(endDay, endMinute),
     });
     await loadMonth();
@@ -744,7 +745,7 @@ export default function CalendarPage() {
       startAt: calendarInputDateTime(evt.startAt, calendarTimeZone),
       endAt: calendarInputDateTime(evt.endAt, calendarTimeZone),
       allDay: evt.allDay,
-      color: evt.color || evt.project?.color || "#8b5cf6",
+      color: evt.color || evt.project?.color || "#fb0915",
       description: evt.description || "",
       location: evt.location || "",
       status: evt.status || "confirmed",
@@ -770,7 +771,7 @@ export default function CalendarPage() {
     e.preventDefault();
     try {
       const payload = {
-        userId: USER_ID,
+        userId: getUserId(),
         title: form.title,
         startAt: form.startAt,
         endAt: form.endAt,
@@ -830,7 +831,7 @@ export default function CalendarPage() {
   }
 
   async function reviewSession(id: string, action: "confirm" | "reject" | "missed") {
-    await calendarApi.reviewSession(id, USER_ID, action);
+    await calendarApi.reviewSession(id, getUserId(), action);
     setReviewSessions((current) => current.filter((session) => session.id !== id));
     await loadMonth();
   }
@@ -838,7 +839,7 @@ export default function CalendarPage() {
   async function approveAllReviewSessions() {
     const ids = reviewSessions.map((session) => session.id);
     if (!ids.length) return;
-    await calendarApi.reviewSessions(ids, USER_ID, "confirm");
+    await calendarApi.reviewSessions(ids, getUserId(), "confirm");
     setReviewSessions([]);
     await loadMonth();
   }
@@ -866,7 +867,7 @@ export default function CalendarPage() {
     setSessionEditError("");
     try {
       await calendarApi.updateSession(editingSession.id, {
-        userId: USER_ID,
+        userId: getUserId(),
         title: sessionEditForm.title,
         type: sessionEditForm.type,
         status: sessionEditForm.status,
@@ -898,7 +899,7 @@ export default function CalendarPage() {
   async function submitManualSession(event: React.FormEvent) {
     event.preventDefault();
     const base = {
-      userId: USER_ID,
+      userId: getUserId(),
       type: sessionForm.type,
       title: sessionForm.title || undefined,
       projectId: sessionForm.projectId || undefined,
@@ -911,7 +912,7 @@ export default function CalendarPage() {
 
   async function stopActiveSession() {
     if (!sessionSummary.activeSession) return;
-    await calendarApi.endManualSession(sessionSummary.activeSession.id, USER_ID);
+    await calendarApi.endManualSession(sessionSummary.activeSession.id, getUserId());
     await loadMonth();
   }
 
@@ -920,7 +921,7 @@ export default function CalendarPage() {
     if (!trackingSettings) return;
     setTrackingSettingsError("");
     try {
-      const updated = await calendarApi.updateTrackingSettings(USER_ID, trackingSettings);
+      const updated = await calendarApi.updateTrackingSettings(getUserId(), trackingSettings);
       setTrackingSettings(updated);
       setShowSettings(false);
       await loadMonth();
@@ -962,30 +963,28 @@ export default function CalendarPage() {
 
   return (
     <div className="dashboard-page text-zinc-100">
-      <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
-        <div className="samaritan-card p-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-3">
+        <div className="relative z-30 border-b border-grid pb-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-xs text-purple-300">
-                <Sparkles className="h-4 w-4" />
-                Calendar Review
-              </div>
-              <h1 className="text-xl font-semibold text-zinc-100">
-                {displayTitle}
+              <h1>
+                <DecodeText text={displayTitle} />
               </h1>
-              <p className="mt-1 text-xs text-zinc-500">
-                Scheduled events, tracked time, focus quality, and daily drilldown in one place.
+              <p className="mt-2 text-[12px] text-key">
+                Scheduled events, tracked time and focus quality, with a drilldown for each day.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+              <div role="tablist" aria-label="Calendar view" className="flex gap-4">
                 {(["month", "week", "day", "agenda", "insights"] as const).map((view) => (
                   <button
                     key={view}
                     type="button"
+                    role="tab"
+                    aria-selected={calendarView === view}
                     onClick={() => setCalendarView(view)}
-                    className={`rounded-md px-2.5 py-1.5 text-xs capitalize transition ${calendarView === view ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}
+                    className={`text-[11px] uppercase tracking-[0.1em] underline-offset-[6px] transition-colors ${calendarView === view ? "text-signal underline" : "text-key hover:text-trace"}`}
                   >
                     {view}
                   </button>
@@ -1002,27 +1001,25 @@ export default function CalendarPage() {
                 type="button"
                 onClick={() => setShowReviewInbox(true)}
                 title="Open attendance review inbox"
-                className={`relative rounded-lg border p-2 transition ${reviewSessions.length ? "border-amber-500/25 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:text-zinc-200"}`}
+                className={`relative rounded-lg border p-2 transition ${reviewSessions.length ? "border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20" : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:text-zinc-200"}`}
               >
                 <ListChecks className="h-4 w-4" />
-                {reviewSessions.length > 0 && <span className="absolute -right-1.5 -top-1.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-black">{reviewSessions.length > 99 ? "99+" : reviewSessions.length}</span>}
+                {reviewSessions.length > 0 && <span className="absolute -right-1.5 -top-1.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">{reviewSessions.length > 99 ? "99+" : reviewSessions.length}</span>}
               </button>
               {sessionSummary.activeSession ? (
                 <button
                   onClick={stopActiveSession}
-                  className="flex items-center gap-2 rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2 text-sm text-fuchsia-200 transition hover:bg-fuchsia-500/20"
+                  className="sam-button"
+                  data-variant="danger"
                 >
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-400 opacity-60" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-400" />
-                  </span>
+                  <span className="sam-triangle sam-pulse h-2 w-2.5" aria-hidden />
                   {formatMs(Math.max(0, nowMs - new Date(sessionSummary.activeSession.actualStart!).getTime()))}
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </button>
               ) : (
                 <button
                   onClick={() => openSession("start")}
-                  className="flex items-center gap-2 rounded-lg border border-purple-500/20 bg-purple-500/10 px-3 py-2 text-sm text-purple-200 transition hover:bg-purple-500/20"
+                  className="sam-button"
                 >
                   <Play className="h-3.5 w-3.5 fill-current" />
                   Start session
@@ -1030,7 +1027,7 @@ export default function CalendarPage() {
               )}
               <button
                 onClick={() => openSession("log")}
-                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                className="sam-button p-2"
                 title="Log past session"
               >
                 <Clock3 className="h-4 w-4" />
@@ -1040,14 +1037,14 @@ export default function CalendarPage() {
                   setTrackingSettingsError("");
                   setShowSettings(true);
                 }}
-                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                className="sam-button p-2"
                 title="Calendar tracking settings"
               >
                 <Settings2 className="h-4 w-4" />
               </button>
               <button
                 onClick={() => goPeriod("prev")}
-                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                className="sam-button p-2"
                 title="Previous month"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1058,20 +1055,20 @@ export default function CalendarPage() {
                   setCurrentMonth(today);
                   selectDay(today);
                 }}
-                className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 transition hover:text-zinc-100"
+                className="sam-button"
               >
                 Today
               </button>
               <button
                 onClick={() => goPeriod("next")}
-                className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-400 transition hover:text-zinc-100"
+                className="sam-button p-2"
                 title="Next month"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
               <button
                 onClick={() => openCreate()}
-                className="ml-2 flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-600"
+                className="sam-button" data-variant="primary"
               >
                 <Plus className="h-4 w-4" />
                 New Event
@@ -1089,14 +1086,14 @@ export default function CalendarPage() {
                 onChange={(event) => setEventSearch(event.target.value)}
                 placeholder="Search events"
                 aria-label="Search calendar events"
-                className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3 text-xs text-zinc-200 outline-none transition placeholder:text-zinc-700 focus:border-purple-500/50"
+                className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3 text-xs text-zinc-200 outline-none transition placeholder:text-zinc-700 focus:border-red-500/50"
               />
             </div>
             <select
               value={eventTypeFilter}
               onChange={(event) => setEventTypeFilter(event.target.value)}
               aria-label="Filter by event type"
-              className="h-9 min-w-32 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-400 outline-none focus:border-purple-500/50"
+              className="h-9 min-w-32 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-400 outline-none focus:border-red-500/50"
             >
               <option value="all">All types</option>
               <option value="event">Events</option>
@@ -1108,14 +1105,14 @@ export default function CalendarPage() {
               value={projectFilter}
               onChange={(event) => setProjectFilter(event.target.value)}
               aria-label="Filter by project"
-              className="h-9 min-w-36 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-400 outline-none focus:border-purple-500/50"
+              className="h-9 min-w-36 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-400 outline-none focus:border-red-500/50"
             >
               <option value="all">All projects</option>
               <option value="unassigned">Unassigned</option>
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
             {calendarError ? (
-              <button type="button" onClick={() => loadMonth().catch(console.error)} className="ml-auto text-[10px] font-medium text-rose-300 hover:text-rose-200">
+              <button type="button" onClick={() => loadMonth().catch(console.error)} className="ml-auto text-[10px] font-medium text-red-300 hover:text-red-200">
                 Sync failed. Retry
               </button>
             ) : (
@@ -1130,7 +1127,7 @@ export default function CalendarPage() {
               }}
               disabled={!eventSearch && eventTypeFilter === "all" && projectFilter === "all"}
               title="Clear calendar filters"
-              className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-500 transition hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+              className="sam-button p-2"
             >
               <XCircle className="h-4 w-4" />
             </button>
@@ -1145,7 +1142,7 @@ export default function CalendarPage() {
         </div>
 
         {calendarView === "month" ? (
-        <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid min-h-0 min-w-0 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_310px] xl:grid-cols-[minmax(0,1fr)_350px]">
           <div className="samaritan-card min-h-0 p-4">
             <div className="mb-3 grid grid-cols-7 gap-1.5">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
@@ -1155,7 +1152,7 @@ export default function CalendarPage() {
               ))}
             </div>
 
-            <div className="grid h-[calc(100%-2rem)] grid-cols-7 grid-rows-6 gap-1.5">
+            <div className="grid auto-rows-[minmax(7rem,auto)] grid-cols-7 gap-1.5">
               {days.map((day) => {
                 const key = dateKey(day);
                 const summary = summarizeDay(monthHeatmap[key]);
@@ -1168,11 +1165,11 @@ export default function CalendarPage() {
                     key={key}
                     type="button"
                     onClick={() => selectDay(day)}
-                    className={`group min-h-0 rounded-lg border p-1.5 text-left transition ${
+                    className={`group flex min-h-0 flex-col justify-start rounded-lg border p-1.5 text-left transition ${
                       selected
-                        ? "border-purple-400 bg-purple-500/10"
+                        ? "border-red-500 bg-red-500/10"
                         : inMonth
-                        ? "border-zinc-800 bg-zinc-950/80 hover:border-purple-500/30"
+                        ? "border-zinc-800 bg-zinc-950/80 hover:border-red-500/30"
                         : "border-zinc-900 bg-zinc-950/30 opacity-55"
                     }`}
                   >
@@ -1209,7 +1206,7 @@ export default function CalendarPage() {
                           <div
                             key={event.id}
                             className="flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px] font-medium text-white"
-                            style={{ backgroundColor: event.color || event.project?.color || "#8b5cf6" }}
+                            style={{ backgroundColor: event.color || event.project?.color || "#fb0915" }}
                           >
                             {(event.recurrenceRule || event.recurrenceParentId) && <Repeat2 className="h-2.5 w-2.5 shrink-0" />}
                             <span className="truncate">{timeLabel} {event.title}</span>
@@ -1228,19 +1225,19 @@ export default function CalendarPage() {
             </div>
           </div>
 
-          <aside className="grid min-h-0 grid-rows-[auto_minmax(0,0.8fr)_minmax(0,1fr)] gap-4">
+          <aside className="grid min-h-0 content-start gap-4">
             <div className="samaritan-card p-4">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 text-purple-400" />
+                    <CalendarDays className="h-4 w-4 text-red-500" />
                     <h2 className="text-sm font-semibold text-zinc-200">
                       {format(selectedDay, "EEEE, MMM d")}
                     </h2>
                   </div>
                   <p className="mt-1 text-[11px] text-zinc-500">Review schedule against actual tracked work.</p>
                 </div>
-                {loadingReview && <span className="text-[10px] text-purple-300">Syncing</span>}
+                {loadingReview && <span className="text-[10px] text-red-400">Syncing</span>}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1252,7 +1249,7 @@ export default function CalendarPage() {
 
               <div className="mt-4 rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
                 <div className="mb-2 flex items-center gap-2 text-xs font-medium text-zinc-300">
-                  <Layers3 className="h-3.5 w-3.5 text-purple-400" />
+                  <Layers3 className="h-3.5 w-3.5 text-red-500" />
                   Dominant Work
                 </div>
                 <div className="text-sm text-zinc-100">
@@ -1270,13 +1267,13 @@ export default function CalendarPage() {
                 <button
                   type="button"
                   onClick={() => openCreate(selectedDay)}
-                  className="rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-[11px] text-purple-300 transition hover:bg-purple-500/20"
+                  className="sam-button"
                 >
                   Add
                 </button>
               </div>
 
-              <div className="dashboard-scroll-panel space-y-2 pr-1">
+              <div className="dashboard-scroll-panel sam-scroll max-h-[26rem] space-y-2 overflow-y-auto pr-1">
                 {selectedEvents.map((event) => {
                   const trackedSession = sessionForEvent(event.id);
                   return (
@@ -1284,7 +1281,7 @@ export default function CalendarPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 truncate text-sm font-medium text-zinc-200">
-                          {(event.recurrenceRule || event.recurrenceParentId) && <Repeat2 className="h-3 w-3 shrink-0 text-purple-400" />}
+                          {(event.recurrenceRule || event.recurrenceParentId) && <Repeat2 className="h-3 w-3 shrink-0 text-red-500" />}
                           <span className="truncate">{event.title}</span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
@@ -1299,7 +1296,7 @@ export default function CalendarPage() {
                             </span>
                           )}
                           {event.eventType === "focus" && event.focusAutoStart && (
-                            <span className="flex items-center gap-1 rounded border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-purple-300">
+                            <span className="flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-red-400">
                               <ShieldCheck className="h-2.5 w-2.5" />{event.focusEnforcement ?? "warn"}
                             </span>
                           )}
@@ -1309,7 +1306,7 @@ export default function CalendarPage() {
                         <button onClick={() => openEdit(event)} title="Edit event" className="text-zinc-500 hover:text-zinc-200">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => handleDelete(event.id)} title="Delete event" className="text-zinc-500 hover:text-rose-300">
+                        <button onClick={() => handleDelete(event.id)} title="Delete event" className="text-zinc-500 hover:text-red-400">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -1318,7 +1315,7 @@ export default function CalendarPage() {
                     {trackedSession && (
                       <div className="mt-2 flex items-center justify-between gap-3 border-t border-zinc-800 pt-2 text-[11px] text-zinc-500">
                         <div className="flex min-w-0 items-center gap-2">
-                          <Video className="h-3.5 w-3.5 shrink-0 text-purple-400" />
+                          <Video className="h-3.5 w-3.5 shrink-0 text-red-500" />
                           <span className="truncate capitalize">{trackedSession.type}</span>
                           <span>·</span>
                           <span>{formatMs(trackedSession.actualDurationMs)}</span>
@@ -1331,7 +1328,7 @@ export default function CalendarPage() {
                               type="button"
                               title="Confirm attended"
                               onClick={() => reviewSession(trackedSession.id, "confirm").catch(console.error)}
-                              className="rounded p-1 text-emerald-400 hover:bg-emerald-500/10"
+                              className="rounded p-1 text-white hover:bg-zinc-800"
                             >
                               <CheckCircle2 className="h-3.5 w-3.5" />
                             </button>
@@ -1339,7 +1336,7 @@ export default function CalendarPage() {
                               type="button"
                               title="Mark missed"
                               onClick={() => reviewSession(trackedSession.id, "missed").catch(console.error)}
-                              className="rounded p-1 text-amber-400 hover:bg-amber-500/10"
+                              className="rounded p-1 text-red-400 hover:bg-red-500/10"
                             >
                               <Clock3 className="h-3.5 w-3.5" />
                             </button>
@@ -1347,7 +1344,7 @@ export default function CalendarPage() {
                               type="button"
                               title="Reject session"
                               onClick={() => reviewSession(trackedSession.id, "reject").catch(console.error)}
-                              className="rounded p-1 text-rose-400 hover:bg-rose-500/10"
+                              className="rounded p-1 text-red-400 hover:bg-red-500/10"
                             >
                               <XCircle className="h-3.5 w-3.5" />
                             </button>
@@ -1358,7 +1355,7 @@ export default function CalendarPage() {
                              type="button"
                              title="Correct session details"
                              onClick={() => openSessionCorrection(trackedSession)}
-                             className="shrink-0 rounded p-1 text-zinc-500 transition hover:bg-purple-500/10 hover:text-purple-300"
+                             className="shrink-0 rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-red-400"
                            >
                              <Pencil className="h-3.5 w-3.5" />
                            </button>
@@ -1369,11 +1366,11 @@ export default function CalendarPage() {
                   );
                 })}
                 {selectedAdHocSessions.map((session) => (
-                  <div key={session.id} className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+                  <div key={session.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <Video className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                          <Video className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
                           <span className="truncate text-sm font-medium text-zinc-200">{session.title}</span>
                         </div>
                         <div className="mt-1 text-[11px] text-zinc-500">
@@ -1385,7 +1382,7 @@ export default function CalendarPage() {
                           {session.status}
                         </span>
                         {session.status !== "active" && (
-                          <button type="button" onClick={() => openSessionCorrection(session)} title="Correct session details" className="rounded p-1 text-zinc-500 transition hover:bg-purple-500/10 hover:text-purple-300">
+                          <button type="button" onClick={() => openSessionCorrection(session)} title="Correct session details" className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-red-400">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                         )}
@@ -1403,11 +1400,11 @@ export default function CalendarPage() {
 
             <div className="samaritan-card flex min-h-0 flex-col p-4">
               <div className="mb-3 flex items-center gap-2">
-                <Clock3 className="h-4 w-4 text-purple-400" />
+                <Clock3 className="h-4 w-4 text-red-500" />
                 <h2 className="text-sm font-semibold text-zinc-200">Actual Timeline</h2>
               </div>
 
-              <div className="dashboard-scroll-panel space-y-2 pr-1">
+              <div className="dashboard-scroll-panel sam-scroll max-h-[26rem] space-y-2 overflow-y-auto pr-1">
                 {selectedTimeline.slice().reverse().slice(0, 10).map((entry) => (
                   <div key={`${entry.start}-${entry.appName}`} className="rounded-lg bg-zinc-950/70 p-3 ring-1 ring-white/5">
                     <div className="flex items-center justify-between gap-3">
@@ -1433,7 +1430,7 @@ export default function CalendarPage() {
           </aside>
         </div>
         ) : calendarView === "agenda" ? (
-          <div className="samaritan-card min-h-0 overflow-hidden p-0">
+          <div className="samaritan-card min-h-0 p-0">
             <CalendarAgenda
               events={visibleEvents}
               sessions={calendarSessions}
@@ -1442,7 +1439,7 @@ export default function CalendarPage() {
             />
           </div>
         ) : calendarView === "insights" ? (
-          <div className="samaritan-card min-h-0 overflow-hidden p-0">
+          <div className="samaritan-card min-h-0 p-0">
             <CalendarInsights
               insights={meetingInsights}
               intelligence={calendarIntelligence}
@@ -1453,7 +1450,7 @@ export default function CalendarPage() {
             />
           </div>
         ) : (
-          <div className="samaritan-card min-h-0 overflow-hidden p-0">
+          <div className="samaritan-card min-h-0 p-0">
             <CalendarTimeGrid
               view={calendarView}
               selectedDay={selectedDay}
@@ -1494,7 +1491,7 @@ export default function CalendarPage() {
             <form onSubmit={saveSessionCorrection} className="samaritan-card max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase text-purple-400">Actual session</div>
+                  <div className="text-[10px] font-semibold uppercase text-red-500">Actual session</div>
                   <h2 className="mt-1 text-lg font-semibold text-zinc-100">Correct tracked time</h2>
                   <p className="mt-1 text-xs text-zinc-500">The original calendar schedule stays unchanged.</p>
                 </div>
@@ -1543,16 +1540,16 @@ export default function CalendarPage() {
               </div>
 
               {sessionEditForm.actualStart && sessionEditForm.actualEnd && !["missed", "rejected"].includes(sessionEditForm.status) && (
-                <div className="mt-4 flex items-center justify-between rounded-lg border border-purple-500/15 bg-purple-500/5 px-3 py-2 text-xs">
+                <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
                   <span className="text-zinc-500">Corrected duration</span>
-                  <span className="font-medium text-purple-200">{formatMs(Math.max(0, new Date(sessionEditForm.actualEnd).getTime() - new Date(sessionEditForm.actualStart).getTime()))}</span>
+                  <span className="font-medium text-zinc-200">{formatMs(Math.max(0, new Date(sessionEditForm.actualEnd).getTime() - new Date(sessionEditForm.actualStart).getTime()))}</span>
                 </div>
               )}
-              {sessionEditError && <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{sessionEditError}</div>}
+              {sessionEditError && <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">{sessionEditError}</div>}
 
               <div className="mt-6 flex gap-3">
-                <button type="button" onClick={() => setEditingSession(null)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">Cancel</button>
-                <button type="submit" className="flex-1 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600">Save correction</button>
+                <button type="button" onClick={() => setEditingSession(null)} className="sam-button flex-1">Cancel</button>
+                <button type="submit" className="sam-button flex-1" data-variant="primary">Save correction</button>
               </div>
             </form>
           </div>
@@ -1563,7 +1560,7 @@ export default function CalendarPage() {
             <form onSubmit={submitManualSession} className="samaritan-card w-full max-w-md p-6">
               <div className="mb-5 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase text-purple-400">Manual tracking</div>
+                  <div className="text-[10px] font-semibold uppercase text-red-500">Manual tracking</div>
                   <h2 className="mt-1 text-lg font-semibold text-zinc-100">
                     {sessionMode === "start" ? "Start a live session" : "Log a completed session"}
                   </h2>
@@ -1583,7 +1580,7 @@ export default function CalendarPage() {
                         onClick={() => setSessionForm({ ...sessionForm, type })}
                         className={`rounded-md border px-3 py-2 text-xs capitalize transition ${
                           sessionForm.type === type
-                            ? "border-purple-400 bg-purple-500/15 text-purple-200"
+                            ? "border-red-500 bg-red-500/15 text-white"
                             : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200"
                         }`}
                       >
@@ -1622,8 +1619,8 @@ export default function CalendarPage() {
                 </div>
               </div>
               <div className="mt-6 flex gap-3">
-                <button type="button" onClick={() => setShowSessionModal(false)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">Cancel</button>
-                <button type="submit" className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600">
+                <button type="button" onClick={() => setShowSessionModal(false)} className="sam-button flex-1">Cancel</button>
+                <button type="submit" className="sam-button flex-1" data-variant="primary">
                   {sessionMode === "start" ? <Play className="h-4 w-4 fill-current" /> : <CheckCircle2 className="h-4 w-4" />}
                   {sessionMode === "start" ? "Start" : "Log session"}
                 </button>
@@ -1637,7 +1634,7 @@ export default function CalendarPage() {
             <form onSubmit={saveTrackingSettings} className="samaritan-card max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase text-purple-400">Automation</div>
+                  <div className="text-[10px] font-semibold uppercase text-red-500">Automation</div>
                   <h2 className="mt-1 text-lg font-semibold text-zinc-100">Calendar tracking</h2>
                   <p className="mt-1 text-xs text-zinc-500">Tune how scheduled and activity-detected sessions are classified.</p>
                 </div>
@@ -1658,7 +1655,7 @@ export default function CalendarPage() {
                 ))}
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Attendee threshold</label>
-                  <input type="number" min={1} max={50} value={trackingSettings.attendeeThreshold} onChange={(event) => setTrackingSettings({ ...trackingSettings, attendeeThreshold: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm" />
+                  <NumberInput integer min={1} max={50} value={trackingSettings.attendeeThreshold} onValueChange={(attendeeThreshold) => setTrackingSettings((current) => current && { ...current, attendeeThreshold })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Calendar timezone</label>
@@ -1682,7 +1679,7 @@ export default function CalendarPage() {
                             workHours: (trackingSettings.workHours ?? DEFAULT_WORK_HOURS).map((item) => item.dayOfWeek === workday.dayOfWeek ? { ...item, enabled: event.target.checked } : item),
                           })}
                           aria-label={`Enable ${WEEKDAY_NAMES[workday.dayOfWeek]}`}
-                          className="accent-purple-500"
+                          className="accent-red-500"
                         />
                         <span className={`min-w-20 flex-1 truncate text-xs ${workday.enabled ? "text-zinc-300" : "text-zinc-600"}`}>{WEEKDAY_NAMES[workday.dayOfWeek]}</span>
                         <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 pl-6 sm:w-[230px] sm:pl-0">
@@ -1718,28 +1715,28 @@ export default function CalendarPage() {
                   <label className="mb-1 block text-xs text-zinc-400">Ad-hoc detection</label>
                   <div className="flex h-[38px] items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 px-3">
                     <span className="text-xs text-zinc-300">Meeting apps</span>
-                    <input type="checkbox" checked={trackingSettings.offlineMeetingCreation} onChange={(event) => setTrackingSettings({ ...trackingSettings, offlineMeetingCreation: event.target.checked })} className="accent-purple-500" />
+                    <input type="checkbox" checked={trackingSettings.offlineMeetingCreation} onChange={(event) => setTrackingSettings({ ...trackingSettings, offlineMeetingCreation: event.target.checked })} className="accent-red-500" />
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Detect after</label>
                   <div className="relative">
-                    <input type="number" min={1} max={120} value={trackingSettings.offlineMeetingMinutes} onChange={(event) => setTrackingSettings({ ...trackingSettings, offlineMeetingMinutes: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
+                    <NumberInput integer min={1} max={120} value={trackingSettings.offlineMeetingMinutes} onValueChange={(offlineMeetingMinutes) => setTrackingSettings((current) => current && { ...current, offlineMeetingMinutes })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
                     <span className="absolute right-3 top-2.5 text-xs text-zinc-600">minutes</span>
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-zinc-400">Confirm after</label>
                   <div className="relative">
-                    <input type="number" min={10} max={600} value={trackingSettings.confirmationThresholdSeconds} onChange={(event) => setTrackingSettings({ ...trackingSettings, confirmationThresholdSeconds: Number(event.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
+                    <NumberInput integer min={10} max={600} value={trackingSettings.confirmationThresholdSeconds} onValueChange={(confirmationThresholdSeconds) => setTrackingSettings((current) => current && { ...current, confirmationThresholdSeconds })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 pr-16 text-sm" />
                     <span className="absolute right-3 top-2.5 text-xs text-zinc-600">seconds</span>
                   </div>
                 </div>
               </div>
-              {trackingSettingsError && <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{trackingSettingsError}</div>}
+              {trackingSettingsError && <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">{trackingSettingsError}</div>}
               <div className="mt-6 flex gap-3">
-                <button type="button" onClick={() => setShowSettings(false)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">Cancel</button>
-                <button type="submit" className="flex-1 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600">Save settings</button>
+                <button type="button" onClick={() => setShowSettings(false)} className="sam-button flex-1">Cancel</button>
+                <button type="submit" className="sam-button flex-1" data-variant="primary">Save settings</button>
               </div>
             </form>
           </div>
@@ -1753,8 +1750,8 @@ export default function CalendarPage() {
                 <div className="mb-4">
                   <label className="mb-1.5 block text-xs text-zinc-500">Apply changes to</label>
                   <div className="grid grid-cols-2 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
-                    <button type="button" onClick={() => setEditRecurrenceScope("occurrence")} className={`rounded-md px-3 py-2 text-xs transition ${editRecurrenceScope === "occurrence" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>This occurrence</button>
-                    <button type="button" onClick={() => setEditRecurrenceScope("series")} className={`rounded-md px-3 py-2 text-xs transition ${editRecurrenceScope === "series" ? "bg-purple-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>Entire series</button>
+                    <button type="button" onClick={() => setEditRecurrenceScope("occurrence")} className={`rounded-md px-3 py-2 text-xs transition ${editRecurrenceScope === "occurrence" ? "bg-signal text-void" : "text-zinc-500 hover:text-zinc-200"}`}>This occurrence</button>
+                    <button type="button" onClick={() => setEditRecurrenceScope("series")} className={`rounded-md px-3 py-2 text-xs transition ${editRecurrenceScope === "series" ? "bg-signal text-void" : "text-zinc-500 hover:text-zinc-200"}`}>Entire series</button>
                   </div>
                 </div>
               )}
@@ -1806,18 +1803,18 @@ export default function CalendarPage() {
                     <label className="mb-1 block text-sm text-zinc-400">Attendees</label>
                     <div className="relative">
                       <Users className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                      <input type="number" min={0} value={form.attendeeCount} onChange={(e) => setForm({ ...form, attendeeCount: Math.max(0, Number(e.target.value)) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
+                      <NumberInput integer min={0} value={form.attendeeCount} onValueChange={(attendeeCount) => setForm((current) => ({ ...current, attendeeCount }))} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                     </div>
                   </div>
                 </div>
                 {form.eventType === "focus" && (
-                  <div className="overflow-hidden rounded-lg border border-purple-500/20 bg-purple-500/5">
-                    <div className="flex items-center justify-between gap-4 border-b border-purple-500/15 px-3 py-3">
+                  <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+                    <div className="flex items-center justify-between gap-4 border-b border-zinc-800 px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <ShieldCheck className="h-4 w-4 text-purple-400" />
+                        <ShieldCheck className="h-4 w-4 text-red-500" />
                         <div><div className="text-xs font-medium text-zinc-200">Deep Work enforcement</div><div className="text-[10px] text-zinc-600">Activate when this focus block begins</div></div>
                       </div>
-                      <input type="checkbox" checked={form.focusAutoStart} onChange={(event) => setForm({ ...form, focusAutoStart: event.target.checked })} className="h-4 w-4 accent-purple-500" />
+                      <input type="checkbox" checked={form.focusAutoStart} onChange={(event) => setForm({ ...form, focusAutoStart: event.target.checked })} className="h-4 w-4 accent-red-500" />
                     </div>
                     {form.focusAutoStart && (
                       <div className="grid gap-3 p-3 sm:grid-cols-2">
@@ -1908,7 +1905,7 @@ export default function CalendarPage() {
                     <label className="mb-1 block text-sm text-zinc-400">Reminder</label>
                     <div className="relative">
                       <Bell className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                      <input type="number" value={form.reminderMinutes} onChange={(e) => setForm({ ...form, reminderMinutes: Number(e.target.value) })} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
+                      <NumberInput integer min={0} max={10080} value={form.reminderMinutes} onValueChange={(reminderMinutes) => setForm((current) => ({ ...current, reminderMinutes }))} className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-3" />
                     </div>
                   </div>
                   <div>
@@ -1934,8 +1931,8 @@ export default function CalendarPage() {
                 </div>
               </div>
               <div className="mt-6 flex gap-3">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 rounded-lg border border-zinc-800 px-4 py-2 transition hover:bg-zinc-800">Cancel</button>
-                <button type="submit" className="flex-1 rounded-lg bg-purple-500 px-4 py-2 text-white transition hover:bg-purple-600">
+                <button type="button" onClick={() => setShowModal(false)} className="sam-button flex-1">Cancel</button>
+                <button type="submit" className="sam-button flex-1" data-variant="primary">
                   <CheckCircle2 className="mr-1 inline h-4 w-4" />
                   {editingId ? "Save" : "Create"}
                 </button>

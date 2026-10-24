@@ -75,29 +75,29 @@ export function CalendarReviewInbox({ open, sessions, timeZone, onClose, onRevie
 
   return (
     <div className="fixed inset-0 z-[70] flex justify-end bg-black/60 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section role="dialog" aria-modal="true" aria-label="Calendar review inbox" className="grid h-full w-full max-w-xl grid-rows-[auto_minmax(0,1fr)] border-l border-purple-500/25 bg-black shadow-2xl">
+      <section role="dialog" aria-modal="true" aria-label="Calendar review inbox" className="grid h-full w-full max-w-xl grid-rows-[auto_minmax(0,1fr)] border-l border-red-500/30 bg-black">
         <header className="border-b border-zinc-800 px-5 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-[10px] font-semibold uppercase text-purple-400">Attendance review</div>
+              <div className="text-[10px] font-semibold uppercase text-red-500">Attendance review</div>
               <h2 className="mt-1 text-lg font-semibold text-zinc-100">{sessions.length} session{sessions.length === 1 ? "" : "s"} need a decision</h2>
               <p className="mt-1 text-xs text-zinc-500">Calendar plans with insufficient meeting-app evidence stay out of confirmed totals until reviewed.</p>
             </div>
             <button type="button" onClick={onClose} title="Close review inbox" className="rounded p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"><X className="h-5 w-5" /></button>
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 text-[11px] text-zinc-600"><Radio className="h-3.5 w-3.5 text-purple-400" />Live review queue</div>
+            <div className="flex items-center gap-1.5 text-[11px] text-zinc-600"><Radio className="h-3.5 w-3.5 text-red-500" />Live review queue</div>
             <button
               type="button"
               onClick={approveAll}
               disabled={!sessions.length || approvingAll}
-              className="flex items-center gap-2 rounded-lg bg-purple-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-40"
+              className="sam-button" data-variant="primary"
             >
               <CheckCheck className="h-4 w-4" />
               {approvingAll ? "Approving" : "Approve all"}
             </button>
           </div>
-          {error && <div className="mt-3 rounded border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</div>}
+          {error && <div className="mt-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
         </header>
 
         <div className="min-h-0 overflow-y-auto">
@@ -112,7 +112,7 @@ export function CalendarReviewInbox({ open, sessions, timeZone, onClose, onRevie
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <Video className="h-4 w-4 shrink-0 text-purple-400" />
+                      <Video className="h-4 w-4 shrink-0 text-zinc-300" />
                       <h3 className="truncate text-sm font-semibold text-zinc-200">{session.title}</h3>
                     </div>
                     {session.scheduledStart && session.scheduledEnd && (
@@ -122,24 +122,24 @@ export function CalendarReviewInbox({ open, sessions, timeZone, onClose, onRevie
                       </div>
                     )}
                   </div>
-                  <span className="shrink-0 rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber-300">Review</span>
+                  <span className="shrink-0 rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-red-400">Review</span>
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 divide-x divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-950/70">
                   <div className="px-3 py-2"><div className="text-xs font-medium text-zinc-200">{duration(scheduledMs)}</div><div className="text-[9px] uppercase text-zinc-600">Scheduled</div></div>
-                  <div className="px-3 py-2"><div className="text-xs font-medium text-cyan-300">{duration(session.actualDurationMs)}</div><div className="text-[9px] uppercase text-zinc-600">Detected</div></div>
+                  <div className="px-3 py-2"><div className="text-xs font-medium text-zinc-200">{duration(session.actualDurationMs)}</div><div className="text-[9px] uppercase text-zinc-600">Detected</div></div>
                   <div className="px-3 py-2"><div className="text-xs font-medium text-zinc-200">{session._count?.evidence ?? 0}</div><div className="text-[9px] uppercase text-zinc-600">Signals</div></div>
                 </div>
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-900"><div className="h-full bg-purple-500 transition-all duration-500" style={{ width: `${detectedPercent}%` }} /></div>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-900"><div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${detectedPercent}%` }} /></div>
 
                 {session.reviewReason && <p className="mt-3 text-[11px] leading-5 text-zinc-500">{session.reviewReason}</p>}
                 {session.project && <div className="mt-2 flex items-center gap-1.5 text-[10px] text-zinc-500"><span className="h-2 w-2 rounded-sm" style={{ backgroundColor: session.project.color }} />{session.project.name}</div>}
 
                 <div className="mt-4 flex items-center gap-2">
-                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "confirm")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40"><CheckCircle2 className="h-3.5 w-3.5" />Attended</button>
-                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "missed")} className="flex items-center justify-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-40"><Clock3 className="h-3.5 w-3.5" />Missed</button>
-                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "reject")} title="Reject session" className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-2 text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
-                  <button type="button" disabled={busy} onClick={() => onCorrect(session)} title="Correct session details" className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-500 transition hover:text-purple-300 disabled:opacity-40"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "confirm")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-40"><CheckCircle2 className="h-3.5 w-3.5" />Attended</button>
+                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "missed")} className="flex items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40"><Clock3 className="h-3.5 w-3.5" />Missed</button>
+                  <button type="button" disabled={busy} onClick={() => runReview(session.id, "reject")} title="Reject session" className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
+                  <button type="button" disabled={busy} onClick={() => onCorrect(session)} title="Correct session details" className="sam-button p-2"><Pencil className="h-3.5 w-3.5" /></button>
                 </div>
               </article>
             );
@@ -147,7 +147,7 @@ export function CalendarReviewInbox({ open, sessions, timeZone, onClose, onRevie
 
           {sessions.length === 0 && (
             <div className="flex h-full min-h-72 flex-col items-center justify-center px-8 text-center">
-              <CheckCheck className="h-7 w-7 text-emerald-400" />
+              <CheckCheck className="h-7 w-7 text-zinc-400" />
               <div className="mt-3 text-sm font-medium text-zinc-200">Review queue cleared</div>
               <p className="mt-1 text-xs text-zinc-600">New uncertain sessions will appear here in real time.</p>
             </div>

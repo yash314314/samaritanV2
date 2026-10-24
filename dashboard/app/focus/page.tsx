@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Timer, Zap } from "lucide-react";
+import PageHeader from "@/components/sam/PageHeader";
+import SamLoading from "@/components/sam/SamLoading";
 
 import DeepWorkActiveOverlay from "@/components/focus/DeepWorkActiveOverlay";
 import DeepWorkConfigModal from "@/components/focus/DeepWorkConfigModal";
@@ -342,44 +343,30 @@ export default function FocusPage() {
   // background (via websocket + the 15s status poll) — no more blank flashes.
   if (loading && !hasAnything) {
     return (
-      <div className="flex h-64 items-center justify-center gap-3 text-zinc-500">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Loading focus protocol...
-      </div>
+      <SamLoading label="Loading focus protocol" />
     );
   }
 
   return (
-    <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)] gap-4">
-      <div className="samaritan-card flex items-center justify-between gap-4 p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10">
-            <Timer className="h-5 w-5 text-purple-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-zinc-100">Focus Protocol</h1>
-            <p className="text-xs text-zinc-500">
-              Configure, enforce, and review protected deep-work sessions
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => setConfigOpen(true)}
-          className="flex items-center gap-2 rounded-lg border border-purple-500/30 bg-purple-500/15 px-4 py-2 text-sm font-semibold text-purple-300 hover:bg-purple-500/25"
-        >
-          <Zap className="h-4 w-4" />
-          New Session
-        </button>
-      </div>
+    <div className="dashboard-surface grid grid-rows-[auto_minmax(0,1fr)]">
+      <PageHeader
+        title="Focus Protocol"
+        description="Configure, enforce and review protected deep-work sessions."
+        actions={
+          <button type="button" onClick={() => setConfigOpen(true)} className="sam-button" data-variant="primary">
+            New session
+          </button>
+        }
+      />
 
-      <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="min-h-0 xl:col-span-4">
+      <div className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="min-h-0">
           <DeepWorkReadinessCard data={readiness} onOpenConfig={() => setConfigOpen(true)} />
         </div>
-        <div className="min-h-0 xl:col-span-4">
+        <div className="min-h-0">
           <DistractionBlockerCard focusActive={Boolean(activeSession)} />
         </div>
-        <div className="min-h-0 xl:col-span-4">
+        <div className="min-h-0 md:col-span-2 lg:col-span-1">
           <DeepWorkHistoryCard sessions={history} onViewResult={setResultSessionId} />
         </div>
       </div>

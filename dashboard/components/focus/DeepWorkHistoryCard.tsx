@@ -28,9 +28,9 @@ function formatDate(iso: string) {
 }
 
 function statusColor(status: string) {
-  if (status === "completed") return "text-emerald-400";
-  if (status === "abandoned") return "text-rose-400";
-  if (status === "active") return "text-purple-400";
+  if (status === "completed") return "text-zinc-300";
+  if (status === "abandoned") return "text-red-400";
+  if (status === "active") return "text-red-500";
   return "text-zinc-500";
 }
 
@@ -42,7 +42,7 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-            <History className="w-4 h-4 text-purple-500" />
+            <History className="w-4 h-4 text-red-500" />
             Deep Work History
           </h2>
           <p className="text-xs text-zinc-500 mt-0.5">Recent sessions</p>
@@ -75,7 +75,7 @@ export default function DeepWorkHistoryCard({ sessions, onViewResult }: DeepWork
                 <div className="flex items-center gap-3 mt-1.5 text-[10px]">
                   <span className={`capitalize ${statusColor(session.status)}`}>{session.status}</span>
                   {session.timerMode === "pomodoro" && (
-                    <span className="flex items-center gap-1 text-purple-400"><TimerReset className="h-3 w-3" />{session.currentRound ?? 1}/{session.totalRounds ?? 1} rounds</span>
+                    <span className="flex items-center gap-1 text-zinc-400"><TimerReset className="h-3 w-3" />{session.currentRound ?? 1}/{session.totalRounds ?? 1} rounds</span>
                   )}
                   {(session.finalFocusScore != null || session.focusScore != null) && (
                     <span className="text-zinc-500 font-mono">

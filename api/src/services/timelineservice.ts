@@ -1,62 +1,26 @@
-import { prisma } from "../prisma";
 import { getBaseFocus, getActivityProductivityScore } from "./metricEngine";
+import { loadResolvedActivities } from "./rangeActivityQuery";
+import type { ISTDateRange } from "../utils/time";
 
-const IST_OFFSET = "+05:30";
+/**
+ * Activities overlapping the inclusive IST day range, grouped into contiguous
+ * same-app/category/intent sessions. Each item is clipped to the range and only
+ * carries the time it owns after overlap resolution, so the sum of session
+ * durations equals active + idle seconds from /analytics/daily for the range.
+ * `duration` of a session is the sum of its items; gaps of up to one minute
+ * between items keep them in one session but are not counted as tracked time.
+ */
+export async function getTimeline(userId: string, range: ISTDateRange) {
+  const items = await loadResolvedActivities(userId, range.start, range.end);
 
-function dateRange(from: string, to = from) {
-  const start = new Date(`${from}T00:00:00${IST_OFFSET}`);
-  const inclusiveEnd = new Date(`${to}T00:00:00${IST_OFFSET}`);
-  const end = new Date(inclusiveEnd.getTime() + 24 * 60 * 60 * 1000);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-  return { start, end };
-}
-
-export async function getTimeline(userId: string, date?: string, from?: string, to?: string) {
-  // Build where clause
-  const where: any = {
-    session: { userId },
-  };
-  let range: { start: Date; end: Date } | null = null;
-
-  if (from || to) {
-    range = dateRange(from ?? to!, to ?? from!);
-  } else if (date) {
-    range = dateRange(date);
-  }
-
-  if (range) {
-    where.startTime = {
-      lt: range.end,
-    };
-    where.endTime = {
-      gt: range.start,
-    };
-  }
-
-  const activities = await prisma.activity.findMany({
-    where,
-    orderBy: { startTime: "asc" },
-    include: {
-      session: {
-        select: { id: true, userId: true },
-      },
-    },
-  });
-
-  // Group into sessions by contiguous app usage
   const sessions: any[] = [];
   let currentSession: any = null;
 
-  for (const activity of activities) {
-    const activityStart = activity.startTime;
-    const activityEnd = activity.endTime ?? new Date(activity.startTime.getTime() + activity.duration);
-    const clippedStart = range
-      ? new Date(Math.max(activityStart.getTime(), range.start.getTime()))
-      : activityStart;
-    const clippedEnd = range
-      ? new Date(Math.min(activityEnd.getTime(), range.end.getTime()))
-      : activityEnd;
-    const clippedDuration = Math.max(0, clippedEnd.getTime() - clippedStart.getTime());
+  for (const item of items) {
+    const { activity } = item;
+    const clippedStart = new Date(item.startMs);
+    const clippedEnd = new Date(item.endMs);
+    const clippedDuration = item.ms;
     if (clippedDuration <= 0) continue;
 
     const activityFocusScore = getBaseFocus(activity) * 100;
@@ -89,8 +53,8 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
       };
     }
 
-    currentSession.end = clippedEnd;
-    currentSession.duration = new Date(currentSession.end).getTime() - new Date(currentSession.start).getTime();
+    if (clippedEnd > currentSession.end) currentSession.end = clippedEnd;
+    currentSession.duration += clippedDuration;
     currentSession.activityIds.push(activity.id);
     currentSession.items.push({
       id: activity.id,
@@ -114,24 +78,24 @@ export async function getTimeline(userId: string, date?: string, from?: string, 
       activity.confidence ?? 0
     );
     const weightedDuration = currentSession.items.reduce(
-      (sum: number, item: any) => sum + Number(item.duration ?? 0),
+      (sum: number, entry: any) => sum + Number(entry.duration ?? 0),
       0
     );
     currentSession.focusImpact = weightedDuration > 0
       ? currentSession.items.reduce(
-          (sum: number, item: any) => sum + Number(item.focusImpact ?? 0.25) * Number(item.duration ?? 0),
+          (sum: number, entry: any) => sum + Number(entry.focusImpact ?? 0.25) * Number(entry.duration ?? 0),
           0
         ) / weightedDuration
       : activity.focusImpact ?? 0.25;
     currentSession.focusScore = weightedDuration > 0
       ? currentSession.items.reduce(
-          (sum: number, item: any) => sum + Number(item.focusScore ?? 0) * Number(item.duration ?? 0),
+          (sum: number, entry: any) => sum + Number(entry.focusScore ?? 0) * Number(entry.duration ?? 0),
           0
         ) / weightedDuration
       : activityFocusScore;
     currentSession.productivityScore = weightedDuration > 0
       ? currentSession.items.reduce(
-          (sum: number, item: any) => sum + Number(item.productivityScore ?? 0) * Number(item.duration ?? 0),
+          (sum: number, entry: any) => sum + Number(entry.productivityScore ?? 0) * Number(entry.duration ?? 0),
           0
         ) / weightedDuration
       : activityProductivityScore;

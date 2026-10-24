@@ -23,7 +23,7 @@ import {
   
           <Tooltip />
   
-          <Bar dataKey="percentage" fill="#a855f7" />
+          <Bar dataKey="percentage" fill="var(--sam-series-1)" />
   
         </BarChart>
   

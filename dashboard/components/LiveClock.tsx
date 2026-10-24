@@ -1,24 +1,37 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 
-export default function LiveClock() {
+const formatter = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+})
 
-  const [time, setTime] = useState(new Date())
+function subscribe(onTick: () => void) {
+  const timer = setInterval(onTick, 1000)
+  return () => clearInterval(timer)
+}
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTime(new Date())
-    }, 1000)
+// Whole seconds, so consecutive reads within a second are equal.
+const getSnapshot = () => Math.floor(Date.now() / 1000)
 
-    return () => clearInterval(timer)
-  }, [])
+// No clock on the server: a static export would otherwise bake in the build
+// time and mismatch on hydration.
+const getServerSnapshot = () => null
 
-  const formatted = time.toLocaleTimeString()
+export default function LiveClock({ className = "" }: { className?: string }) {
+
+  const seconds = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  const time = seconds === null ? null : new Date(seconds * 1000)
 
   return (
-    <div className="text-3xl font-mono tracking-wide">
-      {formatted}
-    </div>
+    <time
+      className={`sam-numeral block ${className}`}
+      dateTime={time?.toISOString()}
+    >
+      {time ? formatter.format(time) : "--:--:--"}
+    </time>
   )
 }

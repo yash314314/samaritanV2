@@ -134,7 +134,8 @@ export async function getProjectDashboard(userId: string, projectId: string, day
 
 export async function getUnassignedProjectActivities(userId: string, days = 7, now = new Date()) {
   const settings = await getCalendarTrackingSettings(userId);
-  const from = dayjs(now).tz(settings.timezone).subtract(Math.min(Math.max(days, 1), 30), "day").startOf("day").toDate();
+  // `days` local calendar days ending today, inclusive (days=7 -> today and the 6 days before).
+  const from = dayjs(now).tz(settings.timezone).subtract(Math.min(Math.max(Math.floor(days), 1), 30) - 1, "day").startOf("day").toDate();
   const activities = await prisma.activity.findMany({
     where: { session: { userId }, projectId: null, startTime: { gte: from } },
     orderBy: { startTime: "desc" },

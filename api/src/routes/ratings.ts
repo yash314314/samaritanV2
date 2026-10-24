@@ -7,11 +7,15 @@ const router = Router();
 router.post('/', async (req, res) => {
   const { userId, rating, deepWorkId } = req.body;
 
-  if (!userId || !rating) {
-    return res.status(400).json({ error: 'Missing required fields: userId, rating' });
+  if (!userId || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Provide userId and a whole-number rating from 1 to 5' });
   }
 
   try {
+    if (deepWorkId) {
+      const session = await prisma.deepWorkSession.findFirst({ where: { id: String(deepWorkId), userId }, select: { id: true } });
+      if (!session) return res.status(404).json({ error: 'Focus session not found' });
+    }
     const r = await prisma.rating.create({
       data: {
         userId,

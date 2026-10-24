@@ -1,4 +1,5 @@
 import type { Activity, CalendarEvent, CalendarSession } from "@prisma/client";
+import { assertOwnedProject } from "./ownership";
 import { prisma } from "../prisma";
 import {
   classifyCalendarEvent,
@@ -9,7 +10,7 @@ import {
 import { emitCalendarSessionChanged } from "../websocket/broadcaster";
 import { refreshRecurringCalendarEvents } from "./calendarRecurrenceService";
 import { finalizeCalendarFocusSession, reconcileCalendarFocusSessions } from "./calendarFocusService";
-import { normalizeCalendarTimezone } from "./calendarTimeService";
+import { calendarSessionDurationInRange, normalizeCalendarTimezone } from "./calendarTimeService";
 
 const DEFAULT_SETTINGS: CalendarClassifierSettings & {
   offlineMeetingCreation: boolean;
@@ -438,11 +439,11 @@ export async function listCalendarSessions(userId: string, from?: Date, to?: Dat
             OR: [
               {
                 scheduledStart: { ...(to ? { lte: to } : {}) },
-                scheduledEnd: { ...(from ? { gte: from } : {}) },
+                scheduledEnd: { ...(from ? { gt: from } : {}) },
               },
               {
                 actualStart: { ...(to ? { lte: to } : {}) },
-                actualEnd: { ...(from ? { gte: from } : {}) },
+                actualEnd: { ...(from ? { gt: from } : {}) },
               },
               {
                 actualStart: to ? { lte: to } : { not: null },
@@ -547,6 +548,7 @@ export async function updateCalendarSession(
   const existing = await prisma.calendarSession.findFirst({ where: { id: sessionId, userId } });
   if (!existing) throw new Error("Calendar session not found");
   if (existing.status === "active") throw new Error("End an active session before correcting it");
+  if (input.projectId) await assertOwnedProject(userId, input.projectId);
 
   const type = input.type ?? existing.type;
   validateManualSessionType(type);
@@ -604,6 +606,7 @@ export async function startManualCalendarSession(
   input: { type: string; title?: string; projectId?: string | null }
 ) {
   validateManualSessionType(input.type);
+  await assertOwnedProject(userId, input.projectId);
   const active = await prisma.calendarSession.findFirst({
     where: { userId, source: "manual", status: "active", actualEnd: null },
   });
@@ -629,6 +632,7 @@ export async function logManualCalendarSession(
   input: { type: string; title?: string; startAt: Date; endAt: Date; projectId?: string | null }
 ) {
   validateManualSessionType(input.type);
+  await assertOwnedProject(userId, input.projectId);
   if (Number.isNaN(input.startAt.getTime()) || Number.isNaN(input.endAt.getTime())) {
     throw new Error("Provide valid start and end times");
   }
@@ -686,14 +690,7 @@ export async function deleteManualCalendarSession(userId: string, sessionId: str
 export async function getCalendarSessionSummary(userId: string, from: Date, to: Date, now = new Date()) {
   const sessions = await listCalendarSessions(userId, from, to);
   const included = sessions.filter((session) => !["rejected", "missed"].includes(session.status));
-  const durationFor = (session: typeof included[number]) => {
-    if (session.status === "active" && session.actualStart) {
-      return Math.max(0, Math.min(now.getTime(), to.getTime()) - Math.max(session.actualStart.getTime(), from.getTime()));
-    }
-    return session.actualDurationMs || (session.actualStart && session.actualEnd
-      ? Math.max(0, session.actualEnd.getTime() - session.actualStart.getTime())
-      : 0);
-  };
+  const durationFor = (session: typeof included[number]) => calendarSessionDurationInRange(session, from, to, now);
   const byType = (type: string) => included.filter((session) => session.type === type);
   const meetings = byType("meeting");
   const meetingWindows = meetings

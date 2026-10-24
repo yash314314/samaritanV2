@@ -4,15 +4,12 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Calendar as CalendarIcon,
-  Filter,
   Download,
   BarChart3,
   Layers,
   Clock,
   Zap,
   TrendingUp,
-  Loader2,
   Activity,
   Eye,
   EyeOff,
@@ -28,9 +25,12 @@ import {
 import { fetchHeatmap, fetchTimeline } from "../../lib/api";
 import { useRealtimeRefresh } from "../../lib/useRealtimeRefresh";
 import HeatmapInsights from "../../components/HeatmapInsights";
+import { DecodeText } from "../../components/sam/Decode";
+import SamLoading from "../../components/sam/SamLoading";
 import AppCategoryTags from "../../components/AppCategoryTags";
+import { playSamaritanDialogSequence, playSamaritanDismiss } from "../../lib/samaritanAudio";
+import { getUserId } from "@/lib/auth";
 
-const USER_ID = "7007b337-6f7b-4d6a-86f9-dc4da4ed48c4";
 
 // ═══════════════════════════════════════════════════════════
 //  TYPES
@@ -204,40 +204,40 @@ function round2(n: number): number {
 // ═══════════════════════════════════════════════════════════
 
 const colorScales: Record<ViewMode, string[]> = {
+  // Luminance ramp: brightness is the score (signal ink at the top).
   score: [
-    "bg-zinc-950", "bg-purple-950/40", "bg-purple-950", "bg-purple-900/80",
-    "bg-purple-900", "bg-purple-800/80", "bg-purple-800", "bg-purple-700",
-    "bg-purple-600", "bg-purple-500", "bg-purple-400",
+    "bg-zinc-950", "bg-zinc-900", "bg-zinc-800", "bg-zinc-700", "bg-zinc-600", "bg-zinc-500",
+    "bg-zinc-400", "bg-zinc-300", "bg-zinc-200", "bg-zinc-100", "bg-white",
   ],
   productivity: [
-    "bg-zinc-950", "bg-emerald-950/40", "bg-emerald-950", "bg-emerald-900/80",
-    "bg-emerald-900", "bg-emerald-800/80", "bg-emerald-800", "bg-emerald-700",
-    "bg-emerald-600", "bg-emerald-500", "bg-emerald-400",
+    "bg-zinc-950", "bg-red-950/40", "bg-red-950", "bg-red-900/80",
+    "bg-red-900", "bg-red-800/80", "bg-red-800", "bg-red-700",
+    "bg-red-600", "bg-red-500", "bg-[#fb0915]",
   ],
   duration: [
-    "bg-zinc-950", "bg-blue-950/40", "bg-blue-950", "bg-blue-900/80",
-    "bg-blue-900", "bg-blue-800/80", "bg-blue-800", "bg-blue-700",
-    "bg-blue-600", "bg-blue-500", "bg-blue-400",
+    "bg-zinc-950", "bg-zinc-900", "bg-zinc-850", "bg-zinc-800",
+    "bg-zinc-700", "bg-zinc-600", "bg-zinc-500", "bg-zinc-400",
+    "bg-zinc-300", "bg-zinc-200", "bg-white",
   ],
   focus: [
-    "bg-zinc-950", "bg-cyan-950/40", "bg-cyan-950", "bg-cyan-900/80",
-    "bg-cyan-900", "bg-cyan-800/80", "bg-cyan-800", "bg-cyan-700",
-    "bg-cyan-600", "bg-cyan-500", "bg-cyan-400",
+    "bg-zinc-950", "bg-red-950/30", "bg-red-950/60", "bg-red-900/60",
+    "bg-red-900", "bg-red-850", "bg-red-800", "bg-red-700",
+    "bg-red-600", "bg-red-500", "bg-white",
   ],
   idle: [
-    "bg-zinc-950", "bg-rose-950/40", "bg-rose-950", "bg-rose-900/80",
-    "bg-rose-900", "bg-rose-800/80", "bg-rose-800", "bg-rose-700",
-    "bg-rose-600", "bg-rose-500", "bg-rose-400",
+    "bg-zinc-950", "bg-red-950/30", "bg-red-950/60", "bg-red-900/50",
+    "bg-red-900/80", "bg-red-800/70", "bg-red-800", "bg-red-700/80",
+    "bg-red-600/70", "bg-red-500/80", "bg-red-500",
   ],
 };
 
 // Module-scope (stable reference) so it isn't reallocated on every render.
 const viewModeConfig: Record<ViewMode, { label: string; color: string; desc: string }> = {
-  score: { label: "Raw Score", color: "purple", desc: "Normalized productivity score" },
-  productivity: { label: "Productivity", color: "emerald", desc: "Productivity percentage" },
-  duration: { label: "Duration", color: "blue", desc: "Tracked hours per cell" },
-  focus: { label: "Focus", color: "cyan", desc: "Average focus impact" },
-  idle: { label: "Idle", color: "rose", desc: "Idle time ratio" },
+  score: { label: "Raw Score", color: "zinc", desc: "Normalized productivity score" },
+  productivity: { label: "Productivity", color: "red", desc: "Productivity percentage" },
+  duration: { label: "Duration", color: "zinc", desc: "Tracked hours per cell" },
+  focus: { label: "Focus", color: "red", desc: "Average focus impact" },
+  idle: { label: "Idle", color: "red", desc: "Idle time ratio" },
 };
 
 function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
@@ -255,15 +255,17 @@ function getMetricValue(bucket: HeatmapBucket, mode: ViewMode): number {
 // ═══════════════════════════════════════════════════════════
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`samaritan-card min-w-0 max-w-full overflow-hidden ${className}`}>{children}</div>
+  <div className={`samaritan-card min-w-0 max-w-full ${className}`}>{children}</div>
 );
 
-const SkeletonCell = () => <div className="h-6 rounded-sm bg-zinc-800 animate-pulse" />;
+// Empty frame of the grid while it loads; the hairline above sweeps.
+const SkeletonCell = () => <div className="h-6 bg-track" />;
 
 const HeatmapSkeleton = () => {
   const hours = Array.from({ length: 24 }, (_, i) => i);
   return (
-    <div className="min-w-[600px] space-y-1">
+    <div className="min-w-[600px] space-y-1" role="status" aria-label="Loading heatmap">
+      <div className="sam-loading-line mb-2 h-px w-full" aria-hidden />
       <div className="flex">
         <div className="w-16 flex-shrink-0" />
         {hours.map((h) => (
@@ -273,7 +275,7 @@ const HeatmapSkeleton = () => {
       {Array.from({ length: 7 }).map((_, d) => (
         <div key={d} className="flex items-center py-0.5">
           <div className="w-16 flex-shrink-0 pr-2">
-            <div className="h-3 bg-zinc-800 rounded animate-pulse w-10" />
+            <div className="h-3 w-10 bg-track" />
           </div>
           {hours.map((h) => (
             <div key={h} className="flex-1 px-0.5"><SkeletonCell /></div>
@@ -286,12 +288,7 @@ const HeatmapSkeleton = () => {
 
 const InsightsSkeleton = () => (
   <Card className="p-6 h-full">
-    <div className="animate-pulse space-y-4">
-      <div className="h-5 bg-zinc-800 rounded w-2/3" />
-      <div className="h-4 bg-zinc-800 rounded w-full" />
-      <div className="h-4 bg-zinc-800 rounded w-5/6" />
-      <div className="h-4 bg-zinc-800 rounded w-3/4" />
-    </div>
+    <SamLoading compact label="Computing insights" />
   </Card>
 );
 
@@ -368,7 +365,7 @@ const HeatmapTooltipCard = ({
                       viewMode === "productivity" ? "Productivity" : "Score";
 
   return (
-    <div className="bg-zinc-950 border border-zinc-700 rounded-xl shadow-2xl shadow-black/80 p-4 w-80 backdrop-blur-sm">
+    <div className="bg-zinc-950 border border-zinc-700 rounded-xl p-4 w-80 backdrop-blur-sm">
       <div className="flex items-start justify-between mb-3 pb-3 border-b border-zinc-800">
         <div>
           <p className="text-zinc-500 text-xs font-medium uppercase tracking-wider">{date}</p>
@@ -383,17 +380,17 @@ const HeatmapTooltipCard = ({
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="bg-zinc-900/60 rounded-lg p-2 text-center border border-zinc-800">
+        <div className="bg-zinc-900/60 rounded-none p-2 text-center border border-zinc-800">
           <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{metricLabel}</p>
-          <p className="text-sm font-bold text-purple-400 font-mono">{metricDisplay}</p>
+          <p className="text-sm font-bold text-white font-mono">{metricDisplay}</p>
         </div>
-        <div className="bg-zinc-900/60 rounded-lg p-2 text-center border border-zinc-800">
+        <div className="bg-zinc-900/60 rounded-none p-2 text-center border border-zinc-800">
           <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Productivity</p>
-          <p className="text-sm font-bold text-emerald-400 font-mono">{round2(bucket.productivity)}%</p>
+          <p className="text-sm font-bold text-red-400 font-mono">{round2(bucket.productivity)}%</p>
         </div>
-        <div className="bg-zinc-900/60 rounded-lg p-2 text-center border border-zinc-800">
+        <div className="bg-zinc-900/60 rounded-none p-2 text-center border border-zinc-800">
           <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Idle</p>
-          <p className="text-sm font-bold text-rose-400 font-mono">{bucket.idleMinutes}m</p>
+          <p className="text-sm font-bold text-red-500/80 font-mono">{bucket.idleMinutes}m</p>
         </div>
       </div>
 
@@ -403,7 +400,7 @@ const HeatmapTooltipCard = ({
           <div className="space-y-1.5">
             {bucket.categoryBreakdown.map((cat) => (
               <div key={cat.name} className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-signal text-void shrink-0" />
                 <span className="text-zinc-300 text-xs flex-1">{cat.name}</span>
                 <span className="text-zinc-500 text-xs font-mono">{cat.minutes}m</span>
                 <span className="text-zinc-600 text-xs w-8 text-right">{cat.percentage}%</span>
@@ -541,7 +538,10 @@ const HeatmapGrid = ({
                   <div key={h} className="flex-1 px-0.5">
                     <button
                       type="button"
-                      className={`relative block h-6 w-full cursor-pointer rounded-sm ${getColor(bucket)} transition-all hover:ring-2 hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400`}
+                      className={`relative block h-6 w-full cursor-pointer ${isEmpty ? "bg-void" : getColor(bucket)} transition-all hover:ring-1 hover:ring-signal focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal`}
+                      // Empty hours: a void square with a thin signal-ink border, so "no
+                      // activity" never reads as "low score".
+                      style={isEmpty ? { boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--sam-signal) 45%, transparent)" } : undefined}
                       onMouseEnter={(e) => handleMouseEnter(date, h, bucket, e)}
                       onClick={() => onCellClick(date, h, bucket ?? EMPTY_HEATMAP_BUCKET)}
                       aria-label={`${date}, ${h.toString().padStart(2, "0")}:00 IST, open activity details${bucket ? "" : ", no activity recorded"}`}
@@ -552,6 +552,12 @@ const HeatmapGrid = ({
             </div>
           ))}
           <div className="flex items-center gap-2 mt-3 ml-16">
+            {showEmpty && (
+              <span className="mr-3 flex items-center gap-2 text-xs text-zinc-600">
+                <span className="h-3 w-3 bg-void" style={{ boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--sam-signal) 45%, transparent)" }} />
+                No activity
+              </span>
+            )}
             <span className="text-xs text-zinc-600">{round2(minVal)}</span>
             {colorScales[viewMode].map((c, i) => (
               <div key={i} className={`w-3 h-3 rounded-[1px] ${c}`} />
@@ -588,6 +594,12 @@ const SessionDetailModal = ({
 }) => {
   const [itemsExpanded, setItemsExpanded] = useState(true);
 
+  useEffect(() => {
+    if (open && session) {
+      playSamaritanDialogSequence(1.0);
+    }
+  }, [open, session]);
+
   // FIXED: useMemo must be called before any early return
   const domainStats = useMemo(() => {
     if (!session) return [] as { name: string; count: number; duration: number }[];
@@ -611,33 +623,51 @@ const SessionDetailModal = ({
   const sessionDurationSec = session.duration / 1000;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[85vh] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4">
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="samaritan-card sam-dialog-aperture relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden border border-zinc-800 bg-zinc-950">
+        {/* Single Phosphor Laser Scanline Sweep */}
+        <div className="sam-scanline-beam" aria-hidden="true" />
+
+        {/* Surveillance Directive Banner */}
+        <div className="flex shrink-0 select-none items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-4 py-2 font-mono text-[10px] tracking-wider">
+          <div className="flex items-center gap-2">
+            <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
+              ▼
+            </span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
+            <span className="font-bold uppercase text-white">SESSION.TELEMETRY</span>
+          </div>
+          <div className="flex items-center gap-2 text-zinc-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" aria-hidden="true" />
+            <span className="font-mono">[{session.category.toUpperCase()}]</span>
+          </div>
+        </div>
+
         {/* Header */}
-        <div className="sticky top-0 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-start justify-between z-10">
+        <div className="sticky top-0 z-10 flex shrink-0 items-start justify-between border-b border-zinc-800 bg-zinc-950/95 px-6 py-4 backdrop-blur">
           <div className="flex items-start gap-4">
-            <AppIcon src={session.iconUrl} appName={session.appName} size={48} className="rounded-xl" />
+            <AppIcon src={session.iconUrl} appName={session.appName} size={48} className="rounded-none border border-zinc-800" />
             <div>
-              <h2 className="text-xl font-bold text-white">{session.appName}</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700 uppercase font-semibold tracking-wider">
+              <h2 className="font-mono text-xl font-bold uppercase text-white">{session.appName}</h2>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="rounded-none border border-zinc-700 bg-zinc-800 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-zinc-300">
                   {session.category}
                 </span>
                 {session.domain && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-500 border border-zinc-800 flex items-center gap-1">
-                    <Globe className="w-3 h-3" />
+                  <span className="flex items-center gap-1 rounded-none border border-zinc-800 bg-zinc-900 px-2 py-0.5 font-mono text-[10px] text-zinc-400">
+                    <Globe className="h-3 w-3" />
                     {session.domain}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-zinc-500 mt-1 font-mono">
+              <p className="mt-1 font-mono text-xs text-zinc-500">
                 {formatDateFull(session.start)} • {formatTimeIST(session.start)} – {formatTimeIST(session.end)} IST
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="rounded-none p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
@@ -650,18 +680,18 @@ const SessionDetailModal = ({
             </Card>
             <Card className="p-4 text-center">
               <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Tracks</p>
-              <p className="text-xl font-bold text-purple-400 mt-1 font-mono">{session.items?.length ?? 0}</p>
+              <p className="text-xl font-bold text-zinc-200 mt-1 font-mono">{session.items?.length ?? 0}</p>
             </Card>
             <Card className="p-4 text-center">
               <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Domains</p>
-              <p className="text-xl font-bold text-emerald-400 mt-1 font-mono">{domainStats.length}</p>
+              <p className="text-xl font-bold text-red-400 mt-1 font-mono">{domainStats.length}</p>
             </Card>
           </div>
 
           {session.url && (
-            <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 flex items-center gap-3">
+            <div className="p-3 rounded-none bg-zinc-900/60 border border-zinc-800 flex items-center gap-3">
               <ExternalLink className="w-4 h-4 text-zinc-500 shrink-0" />
-              <a href={session.url} target="_blank" rel="noreferrer" className="text-sm text-purple-400 hover:text-purple-300 truncate font-mono">
+              <a href={session.url} target="_blank" rel="noreferrer" className="text-sm text-red-400 hover:text-red-300 truncate font-mono">
                 {session.url}
               </a>
             </div>
@@ -676,7 +706,7 @@ const SessionDetailModal = ({
                 {domainStats.map((d) => (
                   <div key={d.name} className="flex items-center gap-3">
                     <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-600 rounded-full" style={{ width: `${Math.min(100, (d.duration / session.duration) * 100)}%` }} />
+                      <div className="h-full bg-signal text-void rounded-full" style={{ width: `${Math.min(100, (d.duration / session.duration) * 100)}%` }} />
                     </div>
                     <span className="text-xs text-zinc-400 w-32 truncate text-right">{d.name}</span>
                     <span className="text-xs text-zinc-500 font-mono w-16 text-right">{formatHMS(d.duration / 1000)}</span>
@@ -743,7 +773,7 @@ const SessionDetailModal = ({
                               )}
                             </div>
                             {item.url && (
-                              <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-purple-500/70 hover:text-purple-400 truncate block mt-0.5 font-mono">
+                              <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-red-400/80 hover:text-red-300 truncate block mt-0.5 font-mono">
                                 {item.url}
                               </a>
                             )}
@@ -791,12 +821,18 @@ const HourDetailDrawer = ({
 }) => {
   useEffect(() => {
     if (!open) return;
+    if (bucket) {
+      playSamaritanDialogSequence(1.0);
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        playSamaritanDismiss(0.9);
+        onClose();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open, bucket, onClose]);
 
   const filteredSessions = useMemo(() => {
     if (!open || !date) return [];
@@ -849,16 +885,34 @@ const HourDetailDrawer = ({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="samaritan-card relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden border-purple-500/35 shadow-2xl shadow-black/80">
+      <div className="samaritan-card sam-dialog-aperture relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden border border-zinc-800 bg-zinc-950">
+        {/* Single Phosphor Laser Scanline Sweep */}
+        <div className="sam-scanline-beam" aria-hidden="true" />
+
+        {/* Surveillance Directive Banner */}
+        <div className="flex shrink-0 select-none items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-4 py-2 font-mono text-[10px] tracking-wider">
+          <div className="flex items-center gap-2">
+            <span className="text-xs leading-none text-red-500 animate-pulse" aria-hidden="true">
+              ▼
+            </span>
+            <span className="uppercase text-zinc-500">{"/// SYS.DIRECTIVE //"}</span>
+            <span className="font-bold uppercase text-white">TEMPORAL.ANALYSIS</span>
+          </div>
+          <div className="flex items-center gap-2 text-zinc-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" aria-hidden="true" />
+            <span className="font-mono">[{date} {"//"} {hour.toString().padStart(2, "0")}:00]</span>
+          </div>
+        </div>
+
         <div className="z-10 flex shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-4 py-4 backdrop-blur sm:px-6">
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wider">{date}</p>
-            <h2 id="heatmap-hour-title" className="text-xl font-bold text-white">
-              {hour.toString().padStart(2, "0")}:00 - {nextHour.toString().padStart(2, "0")}:00 <span className="text-zinc-500 text-base font-normal">IST</span>
+            <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">{date}</p>
+            <h2 id="heatmap-hour-title" className="font-mono text-xl font-bold uppercase text-white">
+              {hour.toString().padStart(2, "0")}:00 - {nextHour.toString().padStart(2, "0")}:00 <span className="text-base font-normal text-zinc-500">IST</span>
             </h2>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors" aria-label="Close hour details">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} className="rounded-none p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white" aria-label="Close hour details">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
@@ -870,15 +924,15 @@ const HourDetailDrawer = ({
             </Card>
             <Card className="p-4">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Raw Score</p>
-              <p className="text-2xl font-bold text-purple-400 mt-1 font-mono">{bucket.score.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-white mt-1 font-mono">{bucket.score.toFixed(2)}</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Productivity</p>
-              <p className="text-2xl font-bold text-emerald-400 mt-1">{bucket.productivity.toFixed(0)}%</p>
+              <p className="text-2xl font-bold text-red-400 mt-1">{bucket.productivity.toFixed(0)}%</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Focus</p>
-              <p className="text-2xl font-bold text-blue-400 mt-1">{(bucket.focus * 100).toFixed(0)}%</p>
+              <p className="text-2xl font-bold text-zinc-300 mt-1">{(bucket.focus * 100).toFixed(0)}%</p>
             </Card>
           </div>
 
@@ -891,7 +945,7 @@ const HourDetailDrawer = ({
                 {bucket.categoryBreakdown.map((cat) => (
                   <div key={cat.name} className="flex items-center gap-3">
                     <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${cat.percentage}%` }} />
+                      <div className="h-full bg-signal text-void rounded-full" style={{ width: `${cat.percentage}%` }} />
                     </div>
                     <span className="text-xs text-zinc-400 w-20 text-right">{cat.name}</span>
                     <span className="text-xs text-zinc-500 font-mono w-12 text-right">{cat.percentage}%</span>
@@ -1052,8 +1106,8 @@ export default function HeatmapPage() {
     setError(null);
     try {
       const [hData, tData] = await Promise.all([
-        fetchHeatmap(USER_ID, from, to, viewMode, categoryFilter),
-        fetchTimeline(USER_ID, from, to),
+        fetchHeatmap(getUserId(), from, to, viewMode, categoryFilter),
+        fetchTimeline(getUserId(), from, to),
       ]);
       setHeatmap(hData ?? null);
       setTimeline(Array.isArray(tData) ? tData : []);
@@ -1173,19 +1227,19 @@ export default function HeatmapPage() {
   return (
     <div className="dashboard-page flex flex-col text-zinc-100">
       {/* ═══ HEADER ═══ */}
-      <div className="samaritan-card z-40 mb-3 shrink-0">
-        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5">
+      <div className="relative z-40 mb-4 shrink-0 border-b border-grid pb-4">
+        <div className="w-full">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
-                <Zap className="w-6 h-6 text-purple-500" />
-                Temporal Heatmap
+                <Zap className="w-6 h-6 text-red-500" />
+                <DecodeText text="Heatmap" />
               </h1>
-              <p className="mt-0.5 text-xs text-zinc-500">Deep-dive into your hourly cognitive patterns</p>
+              <p className="mt-2 text-[12px] text-key">Hour-by-hour productivity and focus across days.</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex bg-zinc-950 rounded-lg p-1 border border-zinc-800">
+              <div className="sam-segment" role="group" aria-label="Range">
                 {([
                   { key: "today", label: "Today" },
                   { key: "week", label: "Week" },
@@ -1194,10 +1248,9 @@ export default function HeatmapPage() {
                 ] as { key: TimeScale; label: string }[]).map((t) => (
                   <button
                     key={t.key}
+                    type="button"
+                    aria-pressed={timeScale === t.key}
                     onClick={() => { setTimeScale(t.key); setWeekOffset(0); }}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                      timeScale === t.key ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"
-                    }`}
                   >
                     {t.label}
                   </button>
@@ -1207,32 +1260,31 @@ export default function HeatmapPage() {
               {timeScale === "custom" && (
                 <div className="flex items-center gap-2">
                   <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
-                    className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-zinc-300 px-2 py-1.5 outline-none focus:border-purple-500" />
-                  <span className="text-zinc-600 text-xs">→</span>
+                    aria-label="From" className="sam-input w-auto" />
+                  <span className="text-[12px] text-key">to</span>
                   <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
-                    className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-zinc-300 px-2 py-1.5 outline-none focus:border-purple-500" />
+                    aria-label="To" className="sam-input w-auto" />
                 </div>
               )}
 
               {timeScale === "week" && (
-                <div className="flex items-center bg-zinc-950 rounded-lg border border-zinc-800">
-                  <button onClick={goPrev} className="p-2 hover:bg-zinc-800 text-zinc-400 rounded-l-lg transition-colors" title="Previous week (Ctrl + ←)">
-                    <ChevronLeft className="w-4 h-4" />
+                <div className="flex items-center border border-control">
+                  <button type="button" onClick={goPrev} className="p-2 text-key transition-colors hover:text-signal" title="Previous week (Ctrl + ←)" aria-label="Previous week">
+                    <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </button>
-                  <div className="px-3 py-2 text-xs font-medium text-zinc-300 font-mono border-x border-zinc-800 flex items-center gap-2">
-                    <CalendarIcon className="w-3 h-3 text-zinc-500" />
+                  <div className="sam-value flex items-center border-x border-control px-3 py-1.5 text-[12px]">
                     {displayLabel}
                   </div>
-                  <button onClick={goNext} className="p-2 hover:bg-zinc-800 text-zinc-400 rounded-r-lg transition-colors" title="Next week (Ctrl + →)">
-                    <ChevronRight className="w-4 h-4" />
+                  <button type="button" onClick={goNext} className="p-2 text-key transition-colors hover:text-signal" title="Next week (Ctrl + →)" aria-label="Next week">
+                    <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </button>
                 </div>
               )}
 
-              <button onClick={goToday} className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
+              <button onClick={goToday} className="sam-button">
                 Today
               </button>
-              <button onClick={handleExport} disabled={!heatmap || loading} className="p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-30" title="Export JSON">
+              <button onClick={handleExport} disabled={!heatmap || loading} className="sam-button p-2" title="Export JSON">
                 <Download className="w-4 h-4" />
               </button>
             </div>
@@ -1240,13 +1292,10 @@ export default function HeatmapPage() {
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Color by</span>
-              <div className="flex bg-zinc-950 rounded-lg p-0.5 border border-zinc-800">
+              <span className="sam-key">Colour by</span>
+              <div className="sam-segment" role="group" aria-label="Colour by">
                 {(Object.entries(viewModeConfig) as [ViewMode, typeof viewModeConfig.score][]).map(([key, config]) => (
-                  <button key={key} onClick={() => setViewMode(key)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                      viewMode === key ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-                    }`}
+                  <button key={key} type="button" aria-pressed={viewMode === key} onClick={() => setViewMode(key)}
                     title={config.desc}>
                     {config.label}
                   </button>
@@ -1256,26 +1305,23 @@ export default function HeatmapPage() {
 
             {availableCategories.length > 0 && (
               <div className="flex items-center gap-2">
-                <Filter className="w-3 h-3 text-zinc-500" />
                 <select value={categoryFilter ?? ""} onChange={(e) => setCategoryFilter(e.target.value || null)}
-                  className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-zinc-300 px-2.5 py-1.5 outline-none focus:border-purple-500">
+                  aria-label="Category" className="sam-select w-auto">
                   <option value="">All Categories</option>
                   {availableCategories.map((c) => (<option key={c} value={c}>{c}</option>))}
                 </select>
               </div>
             )}
 
-            <button onClick={() => setShowEmptyCells(!showEmptyCells)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                showEmptyCells ? "bg-zinc-800 text-zinc-300 border-zinc-700" : "bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-300"
-              }`}>
-              {showEmptyCells ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+            <button type="button" onClick={() => setShowEmptyCells(!showEmptyCells)} aria-pressed={showEmptyCells}
+              className="sam-button">
+              {showEmptyCells ? <Eye className="h-3 w-3" strokeWidth={1.5} /> : <EyeOff className="h-3 w-3" strokeWidth={1.5} />}
               Empty cells
             </button>
 
             {loading && (
               <div className="flex items-center gap-2 text-xs text-zinc-500 ml-auto">
-                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="sam-triangle sam-pulse h-2 w-2.5" aria-hidden />
                 Syncing…
               </div>
             )}
@@ -1284,15 +1330,16 @@ export default function HeatmapPage() {
       </div>
 
       {/* ═══ CONTENT ═══ */}
-      <div className="dashboard-scroll-panel mx-auto grid min-h-0 w-full max-w-7xl flex-1 grid-cols-12 gap-4 overflow-y-auto overflow-x-hidden px-4 py-1 pr-2 sm:px-5">
+      <div className="dashboard-scroll-panel grid min-h-0 w-full flex-1 grid-cols-12 gap-3 overflow-y-auto overflow-x-hidden py-1 pr-1">
         {error && (
-          <div className="col-span-12 flex items-center gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-400">
+          <div className="col-span-12 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
             <Activity className="w-4 h-4 flex-shrink-0" />
             {error}
           </div>
         )}
 
-        <Card className="dashboard-grid-card col-span-12 min-h-[430px] p-4">
+        {/* ── Row 1: Heatmap Grid (left, wider) + Insights (right, sidebar) ── */}
+        <Card className="dashboard-grid-card col-span-12 xl:col-span-8 p-4">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
@@ -1324,10 +1371,11 @@ export default function HeatmapPage() {
           )}
         </Card>
 
-        <div className="col-span-12 min-h-0">
+        <div className="col-span-12 xl:col-span-4 min-h-0">
           {heatmap && !loading ? <HeatmapInsights data={heatmap} /> : <InsightsSkeleton />}
         </div>
 
+        {/* ── Row 2: Hourly Timeline (full width) ── */}
         <div className="col-span-12 min-h-[360px]">
             <Card className="flex h-full min-h-0 flex-col p-4">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-100">
@@ -1335,9 +1383,7 @@ export default function HeatmapPage() {
                 Hourly Timeline
               </h3>
               {loading ? (
-                <div className="animate-pulse space-y-4">
-                  {Array.from({ length: 4 }).map((_, i) => (<div key={i} className="h-20 bg-zinc-800 rounded-xl" />))}
-                </div>
+                <SamLoading compact label="Loading timeline" />
               ) : groupedTimeline.length > 0 ? (
                 <div className="dashboard-scroll-panel space-y-4 pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
                   {groupedTimeline.map(({ date, hours }) => (
@@ -1391,7 +1437,7 @@ export default function HeatmapPage() {
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between">
                                           <div className="flex items-center gap-2">
-                                            <span className="text-xs text-zinc-300 font-medium truncate group-hover:text-purple-300 transition-colors">{s.appName}</span>
+                                            <span className="text-xs text-zinc-300 font-medium truncate group-hover:text-red-400 transition-colors">{s.appName}</span>
                                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-500 border border-zinc-700 uppercase">
                                               {s.category}
                                             </span>

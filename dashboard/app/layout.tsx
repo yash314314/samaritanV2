@@ -1,11 +1,15 @@
 import "./globals.css";
-import Sidebar from "../components/Sidebar";
-import TopBar from "../components/TopBar";
+import "./motion.css";
+import { fontVariables } from "./fonts";
+import AppChrome from "../components/AppChrome";
 import { AppProvider } from "../context/AppContext";
+import { AppearanceProvider } from "../context/AppearanceContext";
+import { AuthProvider } from "../context/AuthContext";
+import { TourProvider } from "../context/TourContext";
 import { WsProvider } from "../components/WsProvider";
-import ElectronFocusBridge from "../components/ElectronFocusBridge";
-import SmartBreakController from "../components/SmartBreakController";
-import PageScrollBridge from "../components/PageScrollBridge";
+import SamaritanSoundscape from "../components/sam/SamaritanSoundscape";
+import { appearanceScript } from "../lib/appearance";
+import { bootScript } from "../lib/motionBoot";
 
 export default function RootLayout({
   children
@@ -13,24 +17,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    // The <head> script below sets appearance variables on <html> before
+    // hydration, so React must not treat those attributes as a mismatch.
+    <html lang="en" className={fontVariables} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: appearanceScript() }} />
+        <script dangerouslySetInnerHTML={{ __html: bootScript() }} />
+      </head>
       <body>
-        <AppProvider>
-          <WsProvider>
-            <div className="flex min-h-screen bg-[#050506] text-zinc-100">
-              <ElectronFocusBridge />
-              <SmartBreakController />
-              <PageScrollBridge />
-              <Sidebar />
-
-              <main className="flex min-w-0 flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
-                <TopBar />
-                <div className="min-h-0 flex-1 pb-8">{children}</div>
-              </main>
-
-            </div>
-          </WsProvider>
-        </AppProvider>
+        <AppearanceProvider>
+          <AuthProvider>
+            <AppProvider>
+              <TourProvider>
+                <WsProvider>
+                  <SamaritanSoundscape />
+                  <AppChrome>{children}</AppChrome>
+                </WsProvider>
+              </TourProvider>
+            </AppProvider>
+          </AuthProvider>
+        </AppearanceProvider>
       </body>
     </html>
   );

@@ -24,7 +24,7 @@ export default function TimelineRibbon({ data }: { data?: RibbonItem[] }) {
           <div
             key={i}
             style={{ width: `${a.duration/60000}px` }}
-            className="h-8 bg-purple-400 mr-1"
+            className="h-8 bg-zinc-400 hover:bg-red-500 mr-1 transition-colors"
             title={`${a.appName} — ${a.intent}`}
           />
 

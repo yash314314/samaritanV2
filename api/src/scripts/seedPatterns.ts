@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+// Shared client: follows DATABASE_TARGET like the API does.
+import { prisma } from "../prisma";
 
-const prisma = new PrismaClient();
 
 type PatternSeed = {
   appNames: string[];
@@ -34,6 +34,16 @@ const browserApps = [
   "Brave",
   "Brave Browser",
   "Avast Secure Browser",
+  // Linux window classes (Hyprland class / X11 WM_CLASS)
+  "brave-browser",
+  "chromium",
+  "google-chrome",
+  "firefox",
+  "Firefox",
+  "Mozilla Firefox",
+  "librewolf",
+  "vivaldi-stable",
+  "opera",
 ];
 
 const patterns = [
@@ -47,7 +57,7 @@ const patterns = [
     confidence: 0.95,
   }),
   ...pattern({
-    appNames: ["Microsoft Visual Studio Code", "Visual Studio Code", "VS Code", "Code", "Code.exe"],
+    appNames: ["Microsoft Visual Studio Code", "Visual Studio Code", "VS Code", "Code", "Code.exe", "code-oss", "codium", "VSCodium", "com.visualstudio.code", "zed", "dev.zed.Zed", "jetbrains-idea", "jetbrains-pycharm", "jetbrains-webstorm"],
     titleRegex: ".*",
     category: "deep_work",
     intent: "coding",
@@ -74,7 +84,7 @@ const patterns = [
     confidence: 0.9,
   }),
   ...pattern({
-    appNames: ["Obsidian", "Obsidian.exe", "Codex"],
+    appNames: ["Obsidian", "Obsidian.exe", "Codex", "md.obsidian.Obsidian", "obsidian"],
     titleRegex: ".*",
     category: "deep_work",
     intent: "thinking",
@@ -84,7 +94,7 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["Docker Desktop", "Docker", "Git", "Node.js", "Node", "XAMPP", "Miniconda", "Terminal", "Windows Terminal", "PowerShell"],
+    appNames: ["Docker Desktop", "Docker", "Git", "Node.js", "Node", "XAMPP", "Miniconda", "Terminal", "Windows Terminal", "PowerShell", "kitty", "Alacritty", "foot", "wezterm", "org.wezfurlong.wezterm", "gnome-terminal-server", "org.gnome.Terminal", "konsole", "org.kde.konsole", "xterm", "ghostty", "com.mitchellh.ghostty", "tilix", "terminator"],
     titleRegex: ".*",
     category: "development_tools",
     intent: "runtime",
@@ -93,7 +103,7 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["Notion", "Notion.exe", "Notion Calendar", "Microsoft OneNote", "OneNote"],
+    appNames: ["Notion", "Notion.exe", "Notion Calendar", "Microsoft OneNote", "OneNote", "todoist", "Todoist", "ticktick", "logseq", "Logseq"],
     titleRegex: ".*",
     category: "productivity",
     intent: "planning",
@@ -102,7 +112,7 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["Discord", "Discord.exe", "Slack", "Slack.exe", "WhatsApp", "WhatsApp.exe", "Telegram", "Telegram.exe", "Microsoft Teams", "Teams", "Outlook"],
+    appNames: ["Discord", "Discord.exe", "Slack", "Slack.exe", "WhatsApp", "WhatsApp.exe", "Telegram", "Telegram.exe", "Microsoft Teams", "Teams", "Outlook", "discord", "vesktop", "dev.vencord.Vesktop", "com.discordapp.Discord", "slack", "com.slack.Slack", "org.telegram.desktop", "TelegramDesktop", "thunderbird", "org.mozilla.Thunderbird"],
     titleRegex: ".*",
     category: "communication",
     intent: "chat",
@@ -120,7 +130,7 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["VLC media player", "VLC", "vlc"],
+    appNames: ["VLC media player", "VLC", "vlc", "org.videolan.VLC", "mpv", "io.mpv.Mpv", "celluloid"],
     titleRegex: ".*",
     category: "media",
     intent: "video",
@@ -128,7 +138,7 @@ const patterns = [
     confidence: 0.9,
   }),
   ...pattern({
-    appNames: ["Spotify", "Spotify.exe"],
+    appNames: ["Spotify", "Spotify.exe", "spotify", "com.spotify.Client"],
     titleRegex: ".*",
     category: "media",
     intent: "music",
@@ -137,12 +147,24 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["VALORANT", "Riot Client", "Battle.net", "Steam", "Epic Games Launcher", "Zenless Zone Zero"],
+    appNames: ["VALORANT", "Riot Client", "Battle.net", "Steam", "Epic Games Launcher", "Zenless Zone Zero", "steam", "com.valvesoftware.Steam", "heroic", "lutris"],
     titleRegex: ".*",
     category: "entertainment",
     intent: "gaming",
     focusImpact: 0.05,
     energyImpact: 0.25,
+    confidence: 1,
+  }),
+
+  // Streaming services installed as their own window (web app or wrapper),
+  // which the browser title rule below never sees.
+  ...pattern({
+    appNames: ["netflix", "Netflix", "youtube", "YouTube", "FreeTube", "freetube", "io.freetubeapp.FreeTube", "primevideo", "prime-video", "hotstar", "jiohotstar", "disneyplus", "twitch"],
+    titleRegex: ".*",
+    category: "entertainment",
+    intent: "streaming_video",
+    focusImpact: 0.1,
+    energyImpact: 0.05,
     confidence: 1,
   }),
 
@@ -181,7 +203,7 @@ const patterns = [
   }),
   ...pattern({
     appNames: browserApps,
-    titleRegex: ".*(reddit|instagram|twitter|x\\.com|facebook|linkedin).*",
+    titleRegex: ".*(reddit|instagram|twitter|x\\.com|facebook|linkedin|pinterest|tiktok|threads|bluesky).*",
     category: "communication",
     intent: "social_media",
     focusImpact: 0.25,
@@ -198,7 +220,7 @@ const patterns = [
   }),
 
   ...pattern({
-    appNames: ["File Explorer", "Windows Explorer", "Explorer", "explorer"],
+    appNames: ["File Explorer", "Windows Explorer", "Explorer", "explorer", "thunar", "Thunar", "org.gnome.Nautilus", "nautilus", "org.kde.dolphin", "dolphin", "nemo", "pcmanfm"],
     titleRegex: ".*",
     category: "system",
     intent: "file_management",
@@ -206,12 +228,22 @@ const patterns = [
     confidence: 0.8,
   }),
   ...pattern({
-    appNames: ["WinRAR", "7-Zip", "MKVToolNix"],
+    appNames: ["WinRAR", "7-Zip", "MKVToolNix", "blueman-manager", "pavucontrol", "nm-connection-editor", "nwg-look", "qt5ct", "qt6ct", "dev.noctalia.Noctalia", "systemsettings", "org.gnome.Settings", "gnome-control-center", "file-roller", "org.gnome.FileRoller"],
     titleRegex: ".*",
     category: "system",
     intent: "utility",
     focusImpact: 0.3,
     confidence: 0.8,
+  }),
+  // Samaritan's own windows: reviewing tracked time is planning, not a distraction.
+  // "desktop" is the Electron window class of the tracker on Linux.
+  ...pattern({
+    appNames: ["Samaritan", "desktop"],
+    titleRegex: ".*",
+    category: "productivity",
+    intent: "planning",
+    focusImpact: 0.55,
+    confidence: 0.85,
   }),
   ...pattern({
     appNames: ["System Idle", "Idle"],
@@ -225,8 +257,15 @@ const patterns = [
 ];
 
 async function main() {
+  // --if-empty: container start-up seeds a fresh database once and never
+  // replaces patterns that already exist.
+  if (process.argv.includes("--if-empty") && (await prisma.appPattern.count({ where: { userId: null } })) > 0) {
+    console.log("Classifier patterns already present; skipping seed.");
+    return;
+  }
   console.log("Seeding Samaritan classifier patterns...");
-  await prisma.appPattern.deleteMany();
+  // Only the shared set is replaced; patterns users taught through reviews survive.
+  await prisma.appPattern.deleteMany({ where: { userId: null } });
   await prisma.appPattern.createMany({ data: patterns });
   console.log(`Classifier patterns seeded: ${patterns.length}`);
 }

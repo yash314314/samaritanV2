@@ -1,33 +1,449 @@
 @import "tailwindcss";
 
+/* =====================================================================
+   Samaritan design tokens
+   Every colour and typeface is a custom property. lib/appearance.ts
+   writes the --sam-* and --cat-* values for the chosen theme, accent,
+   palette and font onto <html> (before first paint), so switching
+   appearance restyles everything, charts included, with no re-render.
+   The :root values below are the default appearance, used only if that
+   script cannot run.
+   ===================================================================== */
+
+:root {
+  --sam-void: #000000;
+  --sam-signal: #f8f8ff;
+  --sam-trace: #d6d6d6;
+  --sam-key: #9a9a9a;
+  --sam-dim: #5c5c5c;
+  --sam-grid: #262626;
+  --sam-track: #141414;
+  --sam-raised: #0a0a0a;
+  --sam-control: #3a3a3a;
+  --sam-alert: #fb0915;
+  --sam-ok: #f8f8ff;
+  --sam-warn: #fb0915;
+  --sam-info: #d6d6d6;
+  --sam-accent: #fb0915;
+
+  --cat-deep_work: #f8f8ff;
+  --cat-development_tools: #e4e4e9;
+  --cat-productivity: #c2c2c9;
+  --cat-research: #9a9a9a;
+  --cat-communication: #707070;
+  --cat-media: #991b1b;
+  --cat-entertainment: #fb0915;
+  --cat-system: #585858;
+  --cat-unknown: #404040;
+  --cat-idle: #262626;
+
+  --sam-font-display: var(--font-samaritan-display);
+  --sam-font-text: var(--font-samaritan-text);
+  --sam-display-weight: 700;
+
+  /* Chart series: signal first, then hues from the chosen category palette
+     (lib/appearance.ts rewrites 2-5 per palette; Monochrome has its own
+     lightness steps). */
+  --sam-series-1: var(--sam-signal);
+  --sam-series-2: var(--cat-development_tools);
+  --sam-series-3: var(--cat-productivity);
+  --sam-series-4: var(--cat-communication);
+  --sam-series-5: var(--cat-media);
+
+  /* Ramps derived from the theme. Because signal and void swap between dark
+     and light themes, every ramp inverts automatically. */
+  --sam-gray-50: color-mix(in srgb, var(--sam-signal) 100%, var(--sam-void));
+  --sam-gray-100: color-mix(in srgb, var(--sam-signal) 96%, var(--sam-void));
+  --sam-gray-200: color-mix(in srgb, var(--sam-signal) 88%, var(--sam-void));
+  --sam-gray-300: color-mix(in srgb, var(--sam-signal) 80%, var(--sam-void));
+  --sam-gray-400: color-mix(in srgb, var(--sam-signal) 62%, var(--sam-void));
+  --sam-gray-500: color-mix(in srgb, var(--sam-signal) 46%, var(--sam-void));
+  --sam-gray-600: color-mix(in srgb, var(--sam-signal) 34%, var(--sam-void));
+  --sam-gray-700: color-mix(in srgb, var(--sam-signal) 25%, var(--sam-void));
+  --sam-gray-800: color-mix(in srgb, var(--sam-signal) 13%, var(--sam-void));
+  --sam-gray-900: color-mix(in srgb, var(--sam-signal) 6%, var(--sam-void));
+  --sam-gray-950: color-mix(in srgb, var(--sam-signal) 3%, var(--sam-void));
+  --sam-accent-50: color-mix(in srgb, var(--sam-accent) 20%, var(--sam-signal));
+  --sam-accent-100: color-mix(in srgb, var(--sam-accent) 30%, var(--sam-signal));
+  --sam-accent-200: color-mix(in srgb, var(--sam-accent) 45%, var(--sam-signal));
+  --sam-accent-300: color-mix(in srgb, var(--sam-accent) 65%, var(--sam-signal));
+  --sam-accent-400: color-mix(in srgb, var(--sam-accent) 85%, var(--sam-signal));
+  --sam-accent-500: var(--sam-accent);
+  --sam-accent-600: color-mix(in srgb, var(--sam-accent) 85%, var(--sam-void));
+  --sam-accent-700: color-mix(in srgb, var(--sam-accent) 70%, var(--sam-void));
+  --sam-accent-800: color-mix(in srgb, var(--sam-accent) 50%, var(--sam-void));
+  --sam-accent-900: color-mix(in srgb, var(--sam-accent) 35%, var(--sam-void));
+  --sam-accent-950: color-mix(in srgb, var(--sam-accent) 22%, var(--sam-void));
+  --sam-ok-50: color-mix(in srgb, var(--sam-ok) 20%, var(--sam-signal));
+  --sam-ok-100: color-mix(in srgb, var(--sam-ok) 30%, var(--sam-signal));
+  --sam-ok-200: color-mix(in srgb, var(--sam-ok) 45%, var(--sam-signal));
+  --sam-ok-300: color-mix(in srgb, var(--sam-ok) 65%, var(--sam-signal));
+  --sam-ok-400: color-mix(in srgb, var(--sam-ok) 85%, var(--sam-signal));
+  --sam-ok-500: var(--sam-ok);
+  --sam-ok-600: color-mix(in srgb, var(--sam-ok) 85%, var(--sam-void));
+  --sam-ok-700: color-mix(in srgb, var(--sam-ok) 70%, var(--sam-void));
+  --sam-ok-800: color-mix(in srgb, var(--sam-ok) 50%, var(--sam-void));
+  --sam-ok-900: color-mix(in srgb, var(--sam-ok) 35%, var(--sam-void));
+  --sam-ok-950: color-mix(in srgb, var(--sam-ok) 22%, var(--sam-void));
+  --sam-warn-50: color-mix(in srgb, var(--sam-warn) 20%, var(--sam-signal));
+  --sam-warn-100: color-mix(in srgb, var(--sam-warn) 30%, var(--sam-signal));
+  --sam-warn-200: color-mix(in srgb, var(--sam-warn) 45%, var(--sam-signal));
+  --sam-warn-300: color-mix(in srgb, var(--sam-warn) 65%, var(--sam-signal));
+  --sam-warn-400: color-mix(in srgb, var(--sam-warn) 85%, var(--sam-signal));
+  --sam-warn-500: var(--sam-warn);
+  --sam-warn-600: color-mix(in srgb, var(--sam-warn) 85%, var(--sam-void));
+  --sam-warn-700: color-mix(in srgb, var(--sam-warn) 70%, var(--sam-void));
+  --sam-warn-800: color-mix(in srgb, var(--sam-warn) 50%, var(--sam-void));
+  --sam-warn-900: color-mix(in srgb, var(--sam-warn) 35%, var(--sam-void));
+  --sam-warn-950: color-mix(in srgb, var(--sam-warn) 22%, var(--sam-void));
+  --sam-alert-50: color-mix(in srgb, var(--sam-alert) 20%, var(--sam-signal));
+  --sam-alert-100: color-mix(in srgb, var(--sam-alert) 30%, var(--sam-signal));
+  --sam-alert-200: color-mix(in srgb, var(--sam-alert) 45%, var(--sam-signal));
+  --sam-alert-300: color-mix(in srgb, var(--sam-alert) 65%, var(--sam-signal));
+  --sam-alert-400: color-mix(in srgb, var(--sam-alert) 85%, var(--sam-signal));
+  --sam-alert-500: var(--sam-alert);
+  --sam-alert-600: color-mix(in srgb, var(--sam-alert) 85%, var(--sam-void));
+  --sam-alert-700: color-mix(in srgb, var(--sam-alert) 70%, var(--sam-void));
+  --sam-alert-800: color-mix(in srgb, var(--sam-alert) 50%, var(--sam-void));
+  --sam-alert-900: color-mix(in srgb, var(--sam-alert) 35%, var(--sam-void));
+  --sam-alert-950: color-mix(in srgb, var(--sam-alert) 22%, var(--sam-void));
+  --sam-info-50: color-mix(in srgb, var(--sam-info) 20%, var(--sam-signal));
+  --sam-info-100: color-mix(in srgb, var(--sam-info) 30%, var(--sam-signal));
+  --sam-info-200: color-mix(in srgb, var(--sam-info) 45%, var(--sam-signal));
+  --sam-info-300: color-mix(in srgb, var(--sam-info) 65%, var(--sam-signal));
+  --sam-info-400: color-mix(in srgb, var(--sam-info) 85%, var(--sam-signal));
+  --sam-info-500: var(--sam-info);
+  --sam-info-600: color-mix(in srgb, var(--sam-info) 85%, var(--sam-void));
+  --sam-info-700: color-mix(in srgb, var(--sam-info) 70%, var(--sam-void));
+  --sam-info-800: color-mix(in srgb, var(--sam-info) 50%, var(--sam-void));
+  --sam-info-900: color-mix(in srgb, var(--sam-info) 35%, var(--sam-void));
+  --sam-info-950: color-mix(in srgb, var(--sam-info) 22%, var(--sam-void));
+}
+
+@theme inline {
+  --color-void: var(--sam-void);
+  --color-signal: var(--sam-signal);
+  --color-trace: var(--sam-trace);
+  --color-key: var(--sam-key);
+  --color-dim: var(--sam-dim);
+  --color-grid: var(--sam-grid);
+  --color-track: var(--sam-track);
+  --color-raised: var(--sam-raised);
+  --color-control: var(--sam-control);
+  --color-accent: var(--sam-accent);
+  --color-alert: var(--sam-alert);
+  --color-ok: var(--sam-ok);
+  --color-warn: var(--sam-warn);
+  --color-info: var(--sam-info);
+
+  --font-display: var(--sam-font-display), ui-monospace, monospace;
+  --font-text: var(--sam-font-text), ui-monospace, monospace;
+  --font-sans: var(--sam-font-text), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--sam-font-text), ui-monospace, monospace;
+
+  /* Tailwind's palette, remapped onto the Samaritan ramps so every page
+     follows the chosen appearance without per-class rewrites. Former brand
+     purple maps to ink: emphasis is signal, and the accent is reserved for
+     Samaritan's marks (the triangle, the current page, selections). */
+  --color-white: var(--sam-signal);
+  --color-black: var(--sam-void);
+  --color-zinc-50: var(--sam-gray-50);
+  --color-zinc-100: var(--sam-gray-100);
+  --color-zinc-200: var(--sam-gray-200);
+  --color-zinc-300: var(--sam-gray-300);
+  --color-zinc-400: var(--sam-gray-400);
+  --color-zinc-500: var(--sam-gray-500);
+  --color-zinc-600: var(--sam-gray-600);
+  --color-zinc-700: var(--sam-gray-700);
+  --color-zinc-800: var(--sam-gray-800);
+  --color-zinc-900: var(--sam-gray-900);
+  --color-zinc-950: var(--sam-gray-950);
+  --color-gray-50: var(--sam-gray-50);
+  --color-gray-100: var(--sam-gray-100);
+  --color-gray-200: var(--sam-gray-200);
+  --color-gray-300: var(--sam-gray-300);
+  --color-gray-400: var(--sam-gray-400);
+  --color-gray-500: var(--sam-gray-500);
+  --color-gray-600: var(--sam-gray-600);
+  --color-gray-700: var(--sam-gray-700);
+  --color-gray-800: var(--sam-gray-800);
+  --color-gray-900: var(--sam-gray-900);
+  --color-gray-950: var(--sam-gray-950);
+  --color-neutral-50: var(--sam-gray-50);
+  --color-neutral-100: var(--sam-gray-100);
+  --color-neutral-200: var(--sam-gray-200);
+  --color-neutral-300: var(--sam-gray-300);
+  --color-neutral-400: var(--sam-gray-400);
+  --color-neutral-500: var(--sam-gray-500);
+  --color-neutral-600: var(--sam-gray-600);
+  --color-neutral-700: var(--sam-gray-700);
+  --color-neutral-800: var(--sam-gray-800);
+  --color-neutral-900: var(--sam-gray-900);
+  --color-neutral-950: var(--sam-gray-950);
+  --color-slate-50: var(--sam-gray-50);
+  --color-slate-100: var(--sam-gray-100);
+  --color-slate-200: var(--sam-gray-200);
+  --color-slate-300: var(--sam-gray-300);
+  --color-slate-400: var(--sam-gray-400);
+  --color-slate-500: var(--sam-gray-500);
+  --color-slate-600: var(--sam-gray-600);
+  --color-slate-700: var(--sam-gray-700);
+  --color-slate-800: var(--sam-gray-800);
+  --color-slate-900: var(--sam-gray-900);
+  --color-slate-950: var(--sam-gray-950);
+  --color-stone-50: var(--sam-gray-50);
+  --color-stone-100: var(--sam-gray-100);
+  --color-stone-200: var(--sam-gray-200);
+  --color-stone-300: var(--sam-gray-300);
+  --color-stone-400: var(--sam-gray-400);
+  --color-stone-500: var(--sam-gray-500);
+  --color-stone-600: var(--sam-gray-600);
+  --color-stone-700: var(--sam-gray-700);
+  --color-stone-800: var(--sam-gray-800);
+  --color-stone-900: var(--sam-gray-900);
+  --color-stone-950: var(--sam-gray-950);
+  --color-purple-50: var(--sam-gray-50);
+  --color-purple-100: var(--sam-gray-100);
+  --color-purple-200: var(--sam-gray-200);
+  --color-purple-300: var(--sam-gray-300);
+  --color-purple-400: var(--sam-gray-400);
+  --color-purple-500: var(--sam-gray-500);
+  --color-purple-600: var(--sam-gray-600);
+  --color-purple-700: var(--sam-gray-700);
+  --color-purple-800: var(--sam-gray-800);
+  --color-purple-900: var(--sam-gray-900);
+  --color-purple-950: var(--sam-gray-950);
+  --color-violet-50: var(--sam-gray-50);
+  --color-violet-100: var(--sam-gray-100);
+  --color-violet-200: var(--sam-gray-200);
+  --color-violet-300: var(--sam-gray-300);
+  --color-violet-400: var(--sam-gray-400);
+  --color-violet-500: var(--sam-gray-500);
+  --color-violet-600: var(--sam-gray-600);
+  --color-violet-700: var(--sam-gray-700);
+  --color-violet-800: var(--sam-gray-800);
+  --color-violet-900: var(--sam-gray-900);
+  --color-violet-950: var(--sam-gray-950);
+  --color-indigo-50: var(--sam-gray-50);
+  --color-indigo-100: var(--sam-gray-100);
+  --color-indigo-200: var(--sam-gray-200);
+  --color-indigo-300: var(--sam-gray-300);
+  --color-indigo-400: var(--sam-gray-400);
+  --color-indigo-500: var(--sam-gray-500);
+  --color-indigo-600: var(--sam-gray-600);
+  --color-indigo-700: var(--sam-gray-700);
+  --color-indigo-800: var(--sam-gray-800);
+  --color-indigo-900: var(--sam-gray-900);
+  --color-indigo-950: var(--sam-gray-950);
+  --color-fuchsia-50: var(--sam-gray-50);
+  --color-fuchsia-100: var(--sam-gray-100);
+  --color-fuchsia-200: var(--sam-gray-200);
+  --color-fuchsia-300: var(--sam-gray-300);
+  --color-fuchsia-400: var(--sam-gray-400);
+  --color-fuchsia-500: var(--sam-gray-500);
+  --color-fuchsia-600: var(--sam-gray-600);
+  --color-fuchsia-700: var(--sam-gray-700);
+  --color-fuchsia-800: var(--sam-gray-800);
+  --color-fuchsia-900: var(--sam-gray-900);
+  --color-fuchsia-950: var(--sam-gray-950);
+  --color-emerald-50: var(--sam-ok-50);
+  --color-emerald-100: var(--sam-ok-100);
+  --color-emerald-200: var(--sam-ok-200);
+  --color-emerald-300: var(--sam-ok-300);
+  --color-emerald-400: var(--sam-ok-400);
+  --color-emerald-500: var(--sam-ok-500);
+  --color-emerald-600: var(--sam-ok-600);
+  --color-emerald-700: var(--sam-ok-700);
+  --color-emerald-800: var(--sam-ok-800);
+  --color-emerald-900: var(--sam-ok-900);
+  --color-emerald-950: var(--sam-ok-950);
+  --color-green-50: var(--sam-ok-50);
+  --color-green-100: var(--sam-ok-100);
+  --color-green-200: var(--sam-ok-200);
+  --color-green-300: var(--sam-ok-300);
+  --color-green-400: var(--sam-ok-400);
+  --color-green-500: var(--sam-ok-500);
+  --color-green-600: var(--sam-ok-600);
+  --color-green-700: var(--sam-ok-700);
+  --color-green-800: var(--sam-ok-800);
+  --color-green-900: var(--sam-ok-900);
+  --color-green-950: var(--sam-ok-950);
+  --color-lime-50: var(--sam-ok-50);
+  --color-lime-100: var(--sam-ok-100);
+  --color-lime-200: var(--sam-ok-200);
+  --color-lime-300: var(--sam-ok-300);
+  --color-lime-400: var(--sam-ok-400);
+  --color-lime-500: var(--sam-ok-500);
+  --color-lime-600: var(--sam-ok-600);
+  --color-lime-700: var(--sam-ok-700);
+  --color-lime-800: var(--sam-ok-800);
+  --color-lime-900: var(--sam-ok-900);
+  --color-lime-950: var(--sam-ok-950);
+  --color-amber-50: var(--sam-warn-50);
+  --color-amber-100: var(--sam-warn-100);
+  --color-amber-200: var(--sam-warn-200);
+  --color-amber-300: var(--sam-warn-300);
+  --color-amber-400: var(--sam-warn-400);
+  --color-amber-500: var(--sam-warn-500);
+  --color-amber-600: var(--sam-warn-600);
+  --color-amber-700: var(--sam-warn-700);
+  --color-amber-800: var(--sam-warn-800);
+  --color-amber-900: var(--sam-warn-900);
+  --color-amber-950: var(--sam-warn-950);
+  --color-yellow-50: var(--sam-warn-50);
+  --color-yellow-100: var(--sam-warn-100);
+  --color-yellow-200: var(--sam-warn-200);
+  --color-yellow-300: var(--sam-warn-300);
+  --color-yellow-400: var(--sam-warn-400);
+  --color-yellow-500: var(--sam-warn-500);
+  --color-yellow-600: var(--sam-warn-600);
+  --color-yellow-700: var(--sam-warn-700);
+  --color-yellow-800: var(--sam-warn-800);
+  --color-yellow-900: var(--sam-warn-900);
+  --color-yellow-950: var(--sam-warn-950);
+  --color-orange-50: var(--sam-warn-50);
+  --color-orange-100: var(--sam-warn-100);
+  --color-orange-200: var(--sam-warn-200);
+  --color-orange-300: var(--sam-warn-300);
+  --color-orange-400: var(--sam-warn-400);
+  --color-orange-500: var(--sam-warn-500);
+  --color-orange-600: var(--sam-warn-600);
+  --color-orange-700: var(--sam-warn-700);
+  --color-orange-800: var(--sam-warn-800);
+  --color-orange-900: var(--sam-warn-900);
+  --color-orange-950: var(--sam-warn-950);
+  --color-red-50: var(--sam-alert-50);
+  --color-red-100: var(--sam-alert-100);
+  --color-red-200: var(--sam-alert-200);
+  --color-red-300: var(--sam-alert-300);
+  --color-red-400: var(--sam-alert-400);
+  --color-red-500: var(--sam-alert-500);
+  --color-red-600: var(--sam-alert-600);
+  --color-red-700: var(--sam-alert-700);
+  --color-red-800: var(--sam-alert-800);
+  --color-red-900: var(--sam-alert-900);
+  --color-red-950: var(--sam-alert-950);
+  --color-rose-50: var(--sam-alert-50);
+  --color-rose-100: var(--sam-alert-100);
+  --color-rose-200: var(--sam-alert-200);
+  --color-rose-300: var(--sam-alert-300);
+  --color-rose-400: var(--sam-alert-400);
+  --color-rose-500: var(--sam-alert-500);
+  --color-rose-600: var(--sam-alert-600);
+  --color-rose-700: var(--sam-alert-700);
+  --color-rose-800: var(--sam-alert-800);
+  --color-rose-900: var(--sam-alert-900);
+  --color-rose-950: var(--sam-alert-950);
+  --color-pink-50: var(--sam-alert-50);
+  --color-pink-100: var(--sam-alert-100);
+  --color-pink-200: var(--sam-alert-200);
+  --color-pink-300: var(--sam-alert-300);
+  --color-pink-400: var(--sam-alert-400);
+  --color-pink-500: var(--sam-alert-500);
+  --color-pink-600: var(--sam-alert-600);
+  --color-pink-700: var(--sam-alert-700);
+  --color-pink-800: var(--sam-alert-800);
+  --color-pink-900: var(--sam-alert-900);
+  --color-pink-950: var(--sam-alert-950);
+  --color-sky-50: var(--sam-info-50);
+  --color-sky-100: var(--sam-info-100);
+  --color-sky-200: var(--sam-info-200);
+  --color-sky-300: var(--sam-info-300);
+  --color-sky-400: var(--sam-info-400);
+  --color-sky-500: var(--sam-info-500);
+  --color-sky-600: var(--sam-info-600);
+  --color-sky-700: var(--sam-info-700);
+  --color-sky-800: var(--sam-info-800);
+  --color-sky-900: var(--sam-info-900);
+  --color-sky-950: var(--sam-info-950);
+  --color-cyan-50: var(--sam-info-50);
+  --color-cyan-100: var(--sam-info-100);
+  --color-cyan-200: var(--sam-info-200);
+  --color-cyan-300: var(--sam-info-300);
+  --color-cyan-400: var(--sam-info-400);
+  --color-cyan-500: var(--sam-info-500);
+  --color-cyan-600: var(--sam-info-600);
+  --color-cyan-700: var(--sam-info-700);
+  --color-cyan-800: var(--sam-info-800);
+  --color-cyan-900: var(--sam-info-900);
+  --color-cyan-950: var(--sam-info-950);
+  --color-blue-50: var(--sam-info-50);
+  --color-blue-100: var(--sam-info-100);
+  --color-blue-200: var(--sam-info-200);
+  --color-blue-300: var(--sam-info-300);
+  --color-blue-400: var(--sam-info-400);
+  --color-blue-500: var(--sam-info-500);
+  --color-blue-600: var(--sam-info-600);
+  --color-blue-700: var(--sam-info-700);
+  --color-blue-800: var(--sam-info-800);
+  --color-blue-900: var(--sam-info-900);
+  --color-blue-950: var(--sam-info-950);
+  --color-teal-50: var(--sam-info-50);
+  --color-teal-100: var(--sam-info-100);
+  --color-teal-200: var(--sam-info-200);
+  --color-teal-300: var(--sam-info-300);
+  --color-teal-400: var(--sam-info-400);
+  --color-teal-500: var(--sam-info-500);
+  --color-teal-600: var(--sam-info-600);
+  --color-teal-700: var(--sam-info-700);
+  --color-teal-800: var(--sam-info-800);
+  --color-teal-900: var(--sam-info-900);
+  --color-teal-950: var(--sam-info-950);
+
+  /* Crisp: no rounded corners and no drop shadows anywhere. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+}
+
+@layer utilities {
+  /* rounded-full is not token-driven in Tailwind v4. */
+  .rounded-full {
+    border-radius: 0;
+  }
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-:root {
-  --soft-bg: #050506;
-  --soft-surface: #18181B;
-  --soft-surface-raised: #202024;
-  --soft-text: #F4F4F5;
-  --soft-muted: #A1A1AA;
-  --soft-border: rgba(255, 255, 255, 0.09);
-  --soft-border-strong: rgba(255, 255, 255, 0.14);
-  --soft-blue: #6D8BFF;
-  --soft-violet: #A78BFA;
-}
-
 html {
-  background: var(--soft-bg);
+  background: var(--sam-void);
 }
 
 body {
-  background-color: var(--soft-bg);
-  color: var(--soft-text);
-  font-family: system-ui, sans-serif;
+  background-color: var(--sam-void);
+  color: var(--sam-trace);
+  font-family: var(--font-text);
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--sam-accent) 35%, transparent);
+  color: var(--sam-signal);
+}
+
+/* The display face is bold-only in the Samaritan set; other faces need the
+   weight asked for explicitly. */
+.font-display {
+  font-weight: var(--sam-display-weight);
 }
 
 @layer components {
@@ -47,8 +463,7 @@ body {
   .dashboard-surface {
     min-height: 100%;
     width: 100%;
-    max-width: 90rem;
-    margin: 0 auto;
+    max-width: 100%;
     overflow: visible;
   }
 
@@ -68,38 +483,273 @@ body {
     overflow: visible;
   }
 
-  .samaritan-card {
+  /* Panel: a hairline frame on the void. No fill, no radius, no shadow. */
+  .samaritan-card,
+  .rize-card {
     position: relative;
     min-width: 0;
     max-width: 100%;
-    overflow: visible !important;
-    border: 1px solid var(--soft-border);
-    border-radius: 1rem;
-    background: linear-gradient(180deg, var(--soft-surface-raised), var(--soft-surface));
-    color: var(--soft-text);
-    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.03) inset, 0 16px 42px rgba(0, 0, 0, 0.28);
-    transition:
-      border-color 180ms ease,
-      background-color 180ms ease,
-      box-shadow 180ms ease,
-      transform 180ms ease;
+    border: 1px solid var(--sam-grid);
+    border-radius: 0;
+    background: var(--sam-void);
+    color: var(--sam-trace);
+    box-shadow: none;
+    transition: border-color 150ms ease;
   }
 
-  .samaritan-card::before {
-    content: none;
+  /* Cards grow with the page instead of scrolling inside it; height-capped
+     cards (modal forms) keep their own scroll. */
+  .samaritan-card:not([class*="max-h-"]) {
+    overflow: visible !important;
   }
 
   .samaritan-card:hover {
-    border-color: var(--soft-border-strong);
-    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.04) inset, 0 18px 48px rgba(0, 0, 0, 0.34);
+    border-color: var(--sam-control);
   }
 
-  .rize-card {
-    border: 1px solid var(--soft-border);
-    border-radius: 1rem;
-    background: linear-gradient(180deg, var(--soft-surface-raised), var(--soft-surface));
-    box-shadow: 0 1px 1px rgba(255, 255, 255, 0.03) inset, 0 16px 42px rgba(0, 0, 0, 0.28);
+  /* ---------------- Samaritan readout ---------------- */
+
+  .sam-ui {
+    font-family: var(--font-text);
+    font-size: 12px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    color: var(--sam-trace);
   }
+
+  :focus-visible {
+    outline: 1px solid var(--sam-signal);
+    outline-offset: 2px;
+  }
+
+  /* Section heading: the lock screen's "SYSTEM STATUS" voice. */
+  .sam-head {
+    font-family: var(--font-display);
+    font-weight: var(--sam-display-weight);
+    font-size: 13px;
+    line-height: 1.2;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sam-signal);
+  }
+
+  /* Page title. */
+  .sam-title {
+    font-family: var(--font-display);
+    font-weight: var(--sam-display-weight);
+    font-size: 22px;
+    line-height: 1.15;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sam-signal);
+  }
+
+  /* Key of a key/value readout. */
+  .sam-key {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sam-key);
+  }
+
+  .sam-value {
+    color: var(--sam-signal);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sam-numeral {
+    font-family: var(--font-display);
+    font-weight: var(--sam-display-weight);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--sam-signal);
+  }
+
+  .sam-rule {
+    border-top: 1px solid var(--sam-grid);
+  }
+
+  /* Samaritan's triangle. Drawn, not typed: neither Samaritan font has it. */
+  .sam-triangle {
+    display: inline-block;
+    width: 14px;
+    height: 12px;
+    background: var(--sam-accent);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  .sam-triangle-right {
+    display: inline-block;
+    width: 6px;
+    height: 8px;
+    background: var(--sam-accent);
+    clip-path: polygon(0 0, 100% 50%, 0 100%);
+  }
+
+  .sam-pulse {
+    animation: sam-pulse 1.7s ease-in-out infinite;
+  }
+
+  /* Thin magnitude bar on a near-void track. */
+  .sam-bar {
+    position: relative;
+    height: 2px;
+    background: var(--sam-track);
+    overflow: hidden;
+  }
+
+  .sam-bar > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--sam-signal);
+    transition: width 600ms ease-out;
+  }
+
+  .sam-bar[data-alert="true"] > span {
+    background: var(--sam-alert);
+  }
+
+  .sam-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--sam-control);
+    padding: 5px 10px;
+    font-family: var(--font-text);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sam-trace);
+    background: transparent;
+    transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+  }
+
+  .sam-button:hover:not(:disabled) {
+    border-color: var(--sam-signal);
+    color: var(--sam-signal);
+  }
+
+  .sam-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .sam-button[data-variant="primary"] {
+    border-color: var(--sam-signal);
+    background: var(--sam-signal);
+    color: var(--sam-void);
+  }
+
+  .sam-button[data-variant="primary"]:hover:not(:disabled) {
+    background: var(--sam-trace);
+    border-color: var(--sam-trace);
+    color: var(--sam-void);
+  }
+
+  .sam-button[data-variant="danger"] {
+    border-color: color-mix(in srgb, var(--sam-alert) 60%, transparent);
+    color: var(--sam-alert);
+  }
+
+  .sam-button[data-variant="danger"]:hover:not(:disabled) {
+    border-color: var(--sam-alert);
+    background: color-mix(in srgb, var(--sam-alert) 12%, transparent);
+    color: var(--sam-alert);
+  }
+
+  .sam-select,
+  .sam-input {
+    width: 100%;
+    border: 1px solid var(--sam-control);
+    border-radius: 0;
+    padding: 5px 8px;
+    font-family: var(--font-text);
+    font-size: 12px;
+    color: var(--sam-trace);
+    background-color: var(--sam-void);
+  }
+
+  .sam-select {
+    appearance: none;
+    padding-right: 28px;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--sam-key) 50%),
+      linear-gradient(135deg, var(--sam-key) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+  }
+
+  .sam-input::placeholder {
+    color: var(--sam-dim);
+  }
+
+  .sam-select:focus,
+  .sam-input:focus {
+    outline: none;
+    border-color: var(--sam-signal);
+  }
+
+  /* Segmented choice: one bordered strip, the selected option inverted like
+     a primary button. Options carry aria-pressed (or aria-selected as tabs). */
+  .sam-segment {
+    display: inline-flex;
+    border: 1px solid var(--sam-control);
+  }
+
+  .sam-segment > button {
+    padding: 5px 10px;
+    font-family: var(--font-text);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sam-key);
+    transition: color 120ms ease, background-color 120ms ease;
+  }
+
+  .sam-segment > button + button {
+    border-left: 1px solid var(--sam-control);
+  }
+
+  .sam-segment > button:hover {
+    color: var(--sam-signal);
+  }
+
+  .sam-segment > button:is([aria-pressed="true"], [aria-selected="true"]) {
+    background: var(--sam-signal);
+    color: var(--sam-void);
+  }
+
+  .sam-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sam-control) transparent;
+  }
+
+  /* Recharts sets font-family as an SVG attribute; a stylesheet rule wins. */
+  .recharts-text,
+  .recharts-label,
+  .recharts-legend-item-text {
+    font-family: var(--font-text);
+    letter-spacing: 0.04em;
+  }
+
+  .recharts-default-tooltip {
+    border-radius: 0 !important;
+    border-color: var(--sam-grid) !important;
+    background: var(--sam-void) !important;
+    font-family: var(--font-text);
+  }
+}
+
+@keyframes sam-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sam-pulse { animation: none; }
+  .sam-bar > span { transition: none; }
 }
 
 @keyframes calendar-bar-rise {
@@ -120,83 +770,10 @@ body {
 .webhook-row-enter {
   animation: webhook-row-enter 220ms ease-out both;
 }
-/* ===========================
-   Square Tile Calendar (Fixed)
-   =========================== */
-
-   /* ===========================
-   Modern Square Grid Calendar (v9 compatible)
-   =========================== */
-
-/* ===========================
-   Square Grid Calendar - v9.13.2
-   =========================== */
-
-   .rdp {
-    background: #111111;
-    padding: 16px;
-    border-radius: 16px;
-    color: white;
-    display: grid;
-  }
-  
-  /* Header */
-  .rdp-caption {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    font-weight: 600;
-  }
-  /* Dark Scrollbar */
-
-/* ===========================
-   Dark Scrollbars
-   =========================== */
-
-   * {
-    scrollbar-width: thin;
-    scrollbar-color: #3F3F46 #111113;
-  }
-  
-  /* Chrome / Edge / Safari */
-  
-  ::-webkit-scrollbar {
-    height: 10px;
-    width: 10px;
-  }
-  
-  ::-webkit-scrollbar-track {
-    background: #111113;
-  }
-  
-  ::-webkit-scrollbar-thumb {
-    background: #3F3F46;
-    border-radius: 8px;
-    border: 2px solid #111113;
-  }
-  /* Heatmap specific scrollbar */
-
-.heatmap-scroll::-webkit-scrollbar {
-  height: 10px;
-}
-
-.heatmap-scroll::-webkit-scrollbar-track {
-  background: #14141A;
-}
-
-.heatmap-scroll::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
-  border-radius: 8px;
-}
-
-.heatmap-scroll::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
-}
 
 @keyframes calendar-reminder-enter {
-  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes calendar-bell {
@@ -208,13 +785,13 @@ body {
 }
 
 @keyframes smart-break-enter {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes smart-break-breathe {
-  0%, 100% { transform: scale(0.94); box-shadow: 0 0 35px rgba(168, 85, 247, 0.08); }
-  50% { transform: scale(1.04); box-shadow: 0 0 75px rgba(168, 85, 247, 0.2); }
+  0%, 100% { transform: scale(0.94); opacity: 0.7; }
+  50% { transform: scale(1.04); opacity: 1; }
 }
 
 .smart-break-enter {
@@ -225,89 +802,205 @@ body {
   animation: smart-break-breathe 5s ease-in-out infinite;
 }
 
+.calendar-reminder-enter {
+  animation: calendar-reminder-enter 220ms ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .smart-break-enter,
-  .smart-break-breathe {
+  .smart-break-breathe,
+  .calendar-reminder-enter,
+  .webhook-row-enter {
     animation: none;
   }
 }
 
-.calendar-reminder-enter {
-  animation: calendar-reminder-enter 220ms ease-out both;
+/* ---------------- Scrollbars ---------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sam-control) transparent;
 }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #3a3a3a;
-  }
-  /* Weekday header row */
-  .rdp-weekdays {
-    display: grid;
-    grid-template-columns: repeat(7, 42px);
-    gap: 10px;
-    justify-content: center;
-    margin-bottom: 8px;
-  }
-  
-  .rdp-weekday {
-    text-align: center;
-    font-size: 12px;
-    color: #666;
-  }
-  
-  /* Each week row becomes a 7-column grid */
-  .rdp-week {
-    display: grid;
-    grid-template-columns: repeat(7, 42px);
-    gap: 10px;
-    justify-content: center;
-    margin-bottom: 10px;
-  }
-  
-  /* Day tiles */
-  .rdp-day {
-    width: 42px;
-    height: 42px;
-    background: #1a1a1a;
-    border: 1px solid #222;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    cursor: pointer;
-  }
-  
-  /* Hover */
-  .rdp-day:hover {
-    background: #262626;
-  }
-  
-  /* Selected */
-  .rdp-day_selected {
-    background: #333333 !important;
-    border: 1px solid #555 !important;
-  }
-  
-  /* Today */
-  .rdp-day_today {
-    border: 1px solid #888;
-  }
-  
-  /* Outside month */
-  .rdp-day_outside {
-    opacity: 0.3;
-  }
-  
-  /* Navigation buttons */
-  .rdp-nav_button {
-    background: #1f1f1f;
-    border: 1px solid #2a2a2a;
-    border-radius: 6px;
-    padding: 4px 8px;
-    color: #aaa;
-  }
-  
-  .rdp-nav_button:hover {
-    background: #2a2a2a;
-  }
-  
+
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sam-control);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sam-key);
+}
+
+/* ---------------- Date picker (react-day-picker v9) ---------------- */
+
+.rdp {
+  background: var(--sam-void);
+  padding: 12px;
+  color: var(--sam-trace);
+  font-family: var(--font-text);
+  display: grid;
+}
+
+.rdp-caption,
+.rdp-month_caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-family: var(--font-display);
+  font-weight: var(--sam-display-weight);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sam-signal);
+}
+
+.rdp-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 36px);
+  gap: 4px;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.rdp-weekday {
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--sam-key);
+}
+
+.rdp-week {
+  display: grid;
+  grid-template-columns: repeat(7, 36px);
+  gap: 4px;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.rdp-day {
+  width: 36px;
+  height: 36px;
+  background: var(--sam-void);
+  border: 1px solid var(--sam-grid);
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 120ms ease;
+  cursor: pointer;
+}
+
+.rdp-day:hover {
+  border-color: var(--sam-signal);
+}
+
+.rdp-day_selected,
+.rdp-selected .rdp-day_button {
+  background: var(--sam-signal) !important;
+  color: var(--sam-void) !important;
+  border-color: var(--sam-signal) !important;
+}
+
+.rdp-day_today,
+.rdp-today {
+  outline: 1px solid var(--sam-accent);
+  outline-offset: -1px;
+}
+
+.rdp-day_outside {
+  opacity: 0.3;
+}
+
+.rdp-nav_button,
+.rdp-button_previous,
+.rdp-button_next {
+  background: transparent;
+  border: 1px solid var(--sam-control);
+  border-radius: 0;
+  padding: 2px 6px;
+  color: var(--sam-key);
+}
+
+.rdp-nav_button:hover,
+.rdp-button_previous:hover,
+.rdp-button_next:hover {
+  border-color: var(--sam-signal);
+  color: var(--sam-signal);
+}
+
+.rdp-chevron {
+  fill: currentColor;
+}
+
+/* ---------------- Uniform headings ----------------
+   Unlayered on purpose: these outrank per-page utility classes, so every
+   page title and panel heading speaks in the same readout voice. */
+
+main h1 {
+  font-family: var(--font-display);
+  font-weight: var(--sam-display-weight);
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sam-signal);
+}
+
+main :is(h2, h3) {
+  font-family: var(--font-display);
+  font-weight: var(--sam-display-weight);
+  font-size: 13px;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sam-signal);
+}
+
+/* Decorative icons inside headings are dropped; the words carry the meaning. */
+main :is(h1, h2, h3) > svg {
+  display: none;
+}
+
+/* Chart legends speak like readout keys. */
+.recharts-legend-wrapper .recharts-legend-item-text {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recharts-legend-wrapper .recharts-legend-item {
+  margin-right: 16px !important;
+}
+
+/* Native form controls look the same on every page and in every modal,
+   whatever utility classes a component gave them. */
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), select, textarea) {
+  border-radius: 0;
+  border-color: var(--sam-control);
+  background-color: var(--sam-void);
+  color: var(--sam-trace);
+  font-family: var(--font-text);
+  font-size: 13px;
+  box-shadow: none;
+}
+
+:is(input, select, textarea):focus {
+  border-color: var(--sam-signal);
+}
+
+:is(input, textarea)::placeholder {
+  color: var(--sam-dim);
+}
+
+input:is([type="checkbox"], [type="radio"], [type="range"]) {
+  accent-color: var(--sam-accent);
+}

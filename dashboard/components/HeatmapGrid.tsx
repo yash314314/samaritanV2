@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import AppCategoryTags from "./AppCategoryTags";
+import { ALERT_THRESHOLD, scoreLuminance } from "../lib/samaritanTheme";
 
 const TOOLTIP_WIDTH = 288;
 const TOOLTIP_HEIGHT = 260;
@@ -30,10 +30,7 @@ export default function HeatmapGrid({ data }: any) {
   const [pinnedTooltip, setPinnedTooltip] = useState(false);
 
   function formatHour(hour: number) {
-    const suffix = hour >= 12 ? "PM" : "AM";
-    const normalized = hour % 12 || 12;
-
-    return `${normalized} ${suffix}`;
+    return `${String(hour).padStart(2, "0")}:00`;
   }
 
   function getProductivityLabel(value: number) {
@@ -45,20 +42,21 @@ export default function HeatmapGrid({ data }: any) {
     return "Idle";
   }
 
-  function getColor(value: number, trackedMinutes?: number | null) {
-    if (!trackedMinutes || value === 0) return "#18181b";
-
-    if (value < 20) return "#27272a";
-    if (value < 35) return "#312e81";
-    if (value < 55) return "#4c1d95";
-    if (value < 70) return "#6d28d9";
-    if (value < 85) return "#8b5cf6";
-
-    return "#c084fc";
+  function isEmpty(value: number, trackedMinutes?: number | null) {
+    return !trackedMinutes || value === 0;
   }
 
+  // Brightness is productivity. Empty hours are void squares with a thin
+  // signal-ink border, so "no activity" never reads as "low productivity".
+  function getColor(value: number, trackedMinutes?: number | null) {
+    if (isEmpty(value, trackedMinutes)) return "var(--sam-void)";
+    return scoreLuminance(Math.max(8, value));
+  }
+
+  const EMPTY_BORDER = "inset 0 0 0 1px color-mix(in srgb, var(--sam-signal) 45%, transparent)";
+
   function getOpacity(trackedMinutes?: number | null) {
-    if (!trackedMinutes) return 0.45;
+    if (!trackedMinutes) return 1;
     return Math.min(1, Math.max(0.45, trackedMinutes / 60));
   }
 
@@ -66,9 +64,9 @@ export default function HeatmapGrid({ data }: any) {
     const d = new Date(date + "T00:00:00");
 
     return {
-      weekday: d.toLocaleDateString("en-IN", { weekday: "short" }),
-      date: d.toLocaleDateString("en-IN", {
-        day: "numeric",
+      weekday: d.toLocaleDateString("en-GB", { weekday: "short" }),
+      date: d.toLocaleDateString("en-GB", {
+        day: "2-digit",
         month: "short"
       })
     };
@@ -107,46 +105,43 @@ export default function HeatmapGrid({ data }: any) {
   }
 
   return (
-    <div
-      className="samaritan-card flex w-full max-w-full flex-col overflow-hidden p-4"
+    <section
+      className="flex w-full max-w-full flex-col"
       onClick={() => {
         if (pinnedTooltip) closePinnedTooltip();
       }}
     >
-      <div className="mb-3 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-300">
-            Productivity Heatmap
-          </h2>
-
-          <div className="text-[11px] text-zinc-500 mt-1">
-            Activity-weighted productivity by hour
-          </div>
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+        <div className="flex items-baseline gap-4">
+          <h2 className="sam-head">Heatmap</h2>
+          <span className="sam-key">Productivity by hour, click a cell to pin</span>
         </div>
 
-        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-          <span>Low</span>
-          <div className="flex gap-1">
-            {[15, 35, 55, 70, 85].map(value => (
-              <div
-                key={value}
-                className="h-3 w-3 rounded-sm border border-zinc-800"
-                style={{ backgroundColor: getColor(value, 60) }}
-              />
-            ))}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="h-2.5 w-2.5" style={{ backgroundColor: "var(--sam-void)", boxShadow: EMPTY_BORDER }} />
+            <span className="sam-key">No activity</span>
           </div>
-          <span>High</span>
+          <div className="flex items-center gap-2">
+            <span className="sam-key">Low</span>
+            <div className="flex gap-px">
+              {[15, 35, 55, 75, 95].map(value => (
+                <div key={value} className="h-2.5 w-2.5" style={{ backgroundColor: getColor(value, 60) }} />
+              ))}
+            </div>
+            <span className="sam-key">High</span>
+          </div>
         </div>
       </div>
 
-      <div className="relative w-full max-w-full overflow-x-auto">
+      <div className="sam-scroll relative w-full max-w-full overflow-x-auto">
         <div className="min-w-max">
-          <div className="grid grid-cols-[90px_repeat(24,30px)] gap-2 mb-4 text-[11px] text-zinc-500">
+          <div className="mb-2 grid grid-cols-[72px_repeat(24,28px)] gap-[3px] text-[10px] text-key">
             <div />
 
             {hours.map(hour => (
-              <div key={hour} className="text-center">
-                {formatHour(hour)}
+              <div key={hour} className="text-center tabular-nums">
+                {String(hour).padStart(2, "0")}
               </div>
             ))}
           </div>
@@ -158,14 +153,11 @@ export default function HeatmapGrid({ data }: any) {
             return (
               <div
                 key={date}
-                className="grid grid-cols-[90px_repeat(24,30px)] gap-2 mb-2 items-center"
+                className="mb-[3px] grid grid-cols-[72px_repeat(24,28px)] items-center gap-[3px]"
               >
-                <div className="text-sm text-zinc-400 leading-tight">
-                  <div>{formatted.weekday}</div>
-
-                  <div className="text-[11px] text-zinc-500">
-                    {formatted.date}
-                  </div>
+                <div className="leading-tight">
+                  <div className="sam-key">{formatted.weekday}</div>
+                  <div className="text-[10px] tabular-nums text-dim">{formatted.date}</div>
                 </div>
 
                 {hours.map(hour => {
@@ -174,6 +166,7 @@ export default function HeatmapGrid({ data }: any) {
                   const trackedMinutes = getCellTrackedMinutes(cell);
                   const idleMinutes = getCellIdleMinutes(cell);
                   const key = `${date}-${hour}`;
+                  const selected = tooltip?.key === key;
 
                   const payload = {
                     x: 0,
@@ -189,11 +182,14 @@ export default function HeatmapGrid({ data }: any) {
                   };
 
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={hour}
-                      className="w-7 h-7 rounded-sm border border-zinc-800 transition-all hover:scale-110 hover:border-purple-400 hover:shadow-[0_0_6px_rgba(139,92,246,0.6)] cursor-pointer"
+                      aria-label={`${formatted.weekday} ${formatHour(hour)}, productivity ${value.toFixed(0)}`}
+                      className={`h-7 w-7 cursor-pointer outline-offset-1 hover:outline hover:outline-1 hover:outline-signal ${selected ? "outline outline-1 outline-signal" : ""}`}
                       style={{
                         backgroundColor: getColor(value, trackedMinutes),
+                        boxShadow: isEmpty(value, trackedMinutes) ? EMPTY_BORDER : undefined,
                         opacity: getOpacity(trackedMinutes)
                       }}
                       onMouseEnter={(e) => {
@@ -234,117 +230,77 @@ export default function HeatmapGrid({ data }: any) {
 
         {tooltip && (
           <div
-            className="fixed bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs shadow-xl w-72 max-h-[260px] overflow-y-auto z-[9999]"
+            className="sam-scroll fixed z-[9999] max-h-[260px] w-72 overflow-y-auto border border-grid bg-void p-3 text-[11px]"
             style={getTooltipPosition()}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div className="font-semibold text-zinc-200">
-                {new Date(tooltip.date + "T00:00:00").toDateString()}
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="tabular-nums text-signal">
+                {formatDay(tooltip.date).weekday} {formatDay(tooltip.date).date}, {formatHour(tooltip.hour)}
               </div>
 
               {pinnedTooltip && (
                 <button
                   type="button"
                   onClick={closePinnedTooltip}
-                  className="text-zinc-500 hover:text-zinc-200 text-sm leading-none"
-                  aria-label="Close tooltip"
+                  className="sam-key hover:text-signal"
+                  aria-label="Close details"
                 >
-                  ×
+                  Close
                 </button>
               )}
             </div>
 
-            <div className="space-y-1 text-zinc-400">
-              <div>Hour: {formatHour(tooltip.hour)}</div>
-
-              <div>
-                Productivity:{" "}
-                <span className="text-purple-400">
-                  {tooltip.value.toFixed(1)}
-                </span>
-              </div>
-
-              <div>
-                State:{" "}
-                <span className="text-zinc-200">
-                  {tooltip.label}
-                </span>
-              </div>
-
-              <div>
-                Tracked: {formatMinutes(tooltip.trackedMinutes)}
-              </div>
-
-              <div>
-                Idle: {formatMinutes(tooltip.idleMinutes)}
-              </div>
-
-              {typeof tooltip.cell !== "number" && (
-                <>
-                  {tooltip.cell?.dominantApp && (
-                    <div>
-                      Dominant app:{" "}
-                      <span className="text-zinc-200">
-                        {tooltip.cell.dominantApp}
-                      </span>
-                    </div>
-                  )}
-
-                  {tooltip.cell?.dominantCategory && (
-                    <div>
-                      Category:{" "}
-                      <span className="text-zinc-200">
-                        {tooltip.cell.dominantCategory}
-                      </span>
-                    </div>
-                  )}
-
-                  {tooltip.cell?.dominantIntent && (
-                    <div>
-                      Intent:{" "}
-                      <span className="text-zinc-200">
-                        {tooltip.cell.dominantIntent}
-                      </span>
-                    </div>
-                  )}
-
-                  {tooltip.cell?.topApps?.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-zinc-700">
-                      <div className="text-zinc-500 mb-1">
-                        Top apps
-                      </div>
-
-                      <div className="space-y-1">
-                        {tooltip.cell.topApps.map((app: any) => (
-                          <div
-                            key={app.name}
-                            className="flex items-start justify-between gap-3"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-zinc-400">{app.name}</div>
-                              <AppCategoryTags app={app} />
-                            </div>
-
-                            <span className="text-zinc-500 shrink-0">
-                              {app.minutes}m
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+            <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-0.5">
+              <dt className="sam-key">Productivity</dt>
+              <dd className={`tabular-nums ${tooltip.value < ALERT_THRESHOLD && tooltip.trackedMinutes ? "text-alert" : "text-signal"}`}>
+                {tooltip.value.toFixed(1)}
+              </dd>
+              <dt className="sam-key">State</dt>
+              <dd className="text-trace">{tooltip.label}</dd>
+              <dt className="sam-key">Tracked</dt>
+              <dd className="tabular-nums text-trace">{formatMinutes(tooltip.trackedMinutes)}</dd>
+              <dt className="sam-key">Idle</dt>
+              <dd className="tabular-nums text-trace">{formatMinutes(tooltip.idleMinutes)}</dd>
+              {typeof tooltip.cell !== "number" && tooltip.cell?.dominantApp && (
+                <><dt className="sam-key">Dominant</dt><dd className="truncate text-trace">[{tooltip.cell.dominantApp}]</dd></>
               )}
-            </div>
+              {typeof tooltip.cell !== "number" && tooltip.cell?.dominantCategory && (
+                <><dt className="sam-key">Category</dt><dd className="truncate text-trace">{String(tooltip.cell.dominantCategory).replaceAll("_", " ")}</dd></>
+              )}
+              {typeof tooltip.cell !== "number" && tooltip.cell?.dominantIntent && (
+                <><dt className="sam-key">Intent</dt><dd className="truncate text-trace">{String(tooltip.cell.dominantIntent).replaceAll("_", " ")}</dd></>
+              )}
+            </dl>
 
-            <div className="mt-2 pt-2 border-t border-zinc-700 text-zinc-500">
-              Score is weighted by activity category, intent, focus impact,
-              confidence, and duration.
-            </div>
+            {typeof tooltip.cell !== "number" && tooltip.cell?.topApps?.length > 0 && (
+              <div className="mt-2 border-t border-grid pt-2">
+                <div className="sam-key mb-1">Top apps</div>
+                <ul className="space-y-1">
+                  {tooltip.cell.topApps.map((app: any) => (
+                    <li key={app.name} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-trace">[{app.name}]</div>
+                        <div className="truncate text-[10px] text-dim">
+                          {(app.categories?.length ? app.categories.map((c: any) => c.name) : [app.category ?? "unknown"])
+                            .slice(0, 2)
+                            .map((name: string) => name.replaceAll("_", " "))
+                            .join(", ")}
+                        </div>
+                      </div>
+                      <span className="shrink-0 tabular-nums text-key">{app.minutes}m</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="mt-2 border-t border-grid pt-2 text-dim">
+              Weighted by category, intent, focus impact, confidence and duration.
+            </p>
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

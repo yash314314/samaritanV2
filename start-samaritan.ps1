@@ -215,8 +215,8 @@ try {
     -Name "Dashboard" `
     -Directory $DashboardDirectory `
     -Arguments @("run", "dev") `
-    -Port 3000 `
-    -HealthUrl "http://localhost:3000"
+    -Port 4001 `
+    -HealthUrl "http://localhost:4001"
 
   $trackerProcess = $null
   $trackerLog = $null
@@ -255,7 +255,7 @@ try {
   $state = [ordered]@{
     startedAt = (Get-Date).ToString("o")
     api = @{ url = "http://localhost:4000"; pid = $apiPid; reused = $null -eq $apiProcess }
-    dashboard = @{ url = "http://localhost:3000"; pid = $dashboardPid; reused = $null -eq $dashboardProcess }
+    dashboard = @{ url = "http://localhost:4001"; pid = $dashboardPid; reused = $null -eq $dashboardProcess }
     tracker = @{ pid = $trackerPid; log = $trackerLog; skipped = [bool]$SkipTracker }
     logDirectory = $LogDirectory
   }
@@ -263,13 +263,13 @@ try {
 
   Write-Host ""
   Write-Host "Samaritan is ready." -ForegroundColor Green
-  Write-Host "Dashboard : http://localhost:3000"
+  Write-Host "Dashboard : http://localhost:4001"
   Write-Host "API       : http://localhost:4000"
   Write-Host "Logs      : $LogDirectory"
   Write-Host "State     : $StateFile"
 
   if ($OpenDashboard) {
-    Start-Process "http://localhost:3000"
+    Start-Process "http://localhost:4001"
   }
 } catch {
   Write-Host ""

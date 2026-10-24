@@ -52,10 +52,10 @@ function compactDuration(ms: number) {
 }
 
 function statusClass(status: string) {
-  if (status === "active") return "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-200";
-  if (status === "confirmed") return "border-emerald-500/20 bg-emerald-500/10 text-emerald-300";
-  if (status === "tentative" || status === "detecting") return "border-amber-500/20 bg-amber-500/10 text-amber-300";
-  if (status === "missed" || status === "rejected") return "border-rose-500/20 bg-rose-500/10 text-rose-300";
+  if (status === "active") return "border-red-500/40 bg-red-500/15 text-red-200";
+  if (status === "confirmed") return "border-zinc-700 bg-zinc-800 text-zinc-200";
+  if (status === "tentative" || status === "detecting") return "border-zinc-800 bg-zinc-900 text-zinc-400";
+  if (status === "missed" || status === "rejected") return "border-red-500/30 bg-red-500/10 text-red-400";
   return "border-zinc-700 bg-zinc-900 text-zinc-400";
 }
 
@@ -95,7 +95,7 @@ export function CalendarAgenda({ events, sessions, timeZone, onEditEvent }: Prop
           <section key={key} className="border-b border-zinc-900 last:border-b-0">
             <div className="sticky top-0 z-20 flex items-center justify-between border-b border-zinc-900 bg-black/95 px-4 py-2 backdrop-blur">
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
-                <CalendarDays className="h-3.5 w-3.5 text-purple-400" />
+                <CalendarDays className="h-3.5 w-3.5 text-zinc-400" />
                 {dayLabel(dayEvents[0].startAt, timeZone)}
               </div>
               <span className="text-[10px] text-zinc-600">{dayEvents.length}</span>
@@ -111,7 +111,7 @@ export function CalendarAgenda({ events, sessions, timeZone, onEditEvent }: Prop
                   : startKey === endKey
                   ? `${calendarTimeLabel(event.startAt, timeZone)} to ${calendarTimeLabel(event.endAt, timeZone)}`
                   : `${calendarTimeLabel(event.startAt, timeZone)} to ${dayLabel(event.endAt, timeZone)}, ${calendarTimeLabel(event.endAt, timeZone)}`;
-                const color = event.color || event.project?.color || "#8b5cf6";
+                const color = event.color || event.project?.color || "#fb0915";
 
                 return (
                   <button
@@ -124,12 +124,12 @@ export function CalendarAgenda({ events, sessions, timeZone, onEditEvent }: Prop
                     <span style={{ backgroundColor: color }} />
                     <span className="min-w-0 px-4 py-3">
                       <span className="flex min-w-0 items-center gap-2">
-                        {(event.recurrenceRule || event.recurrenceParentId) && <Repeat2 className="h-3 w-3 shrink-0 text-purple-400" />}
+                        {(event.recurrenceRule || event.recurrenceParentId) && <Repeat2 className="h-3 w-3 shrink-0 text-zinc-400" />}
                         <span className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">{event.title}</span>
                         {event.eventType && event.eventType !== "event" && (
                           <span className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-zinc-500">{event.eventType}</span>
                         )}
-                        {event.focusAutoStart && <ShieldCheck className="h-3 w-3 shrink-0 text-purple-400" />}
+                        {event.focusAutoStart && <ShieldCheck className="h-3 w-3 shrink-0 text-zinc-400" />}
                       </span>
                       <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
                         <span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{time}</span>

@@ -4,7 +4,7 @@
   "description": "",
   "main": "main.js",
   "scripts": {
-    "test": "node verifyDistractionMatcher.js",
+    "test": "node verifyDistractionMatcher.js && node verifyWidgetRenderer.js",
     "verify:blocker": "node verifyDistractionMatcher.js",
     "verify:widget": "node verifyWidgetRenderer.js",
     "start": "electron ."
@@ -24,5 +24,8 @@
   "devDependencies": {
     "@types/node": "^25.2.3",
     "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "electron@40.6.0": true
   }
 }

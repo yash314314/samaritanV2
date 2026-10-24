@@ -47,28 +47,28 @@ export default function WeeklyChart({ data, comparison }: any) {
             <defs>
 
               <linearGradient id="focusGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.6}/>
-                <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                <stop offset="5%" stopColor="var(--sam-series-1)" stopOpacity={0.6}/>
+                <stop offset="95%" stopColor="var(--sam-series-1)" stopOpacity={0}/>
               </linearGradient>
 
             </defs>
 
             <CartesianGrid
-              stroke="#27272a"
+              stroke="var(--sam-grid)"
               strokeDasharray="3 3"
             />
 
             <XAxis
               dataKey="date"
-              tick={{ fill:"#a1a1aa", fontSize:12 }}
-              axisLine={{ stroke:"#3f3f46" }}
+              tick={{ fill:"var(--sam-key)", fontSize:12 }}
+              axisLine={{ stroke:"var(--sam-grid)" }}
               tickLine={false}
             />
 
             <YAxis
               domain={[0,100]}
-              tick={{ fill:"#a1a1aa", fontSize:12 }}
-              axisLine={{ stroke:"#3f3f46" }}
+              tick={{ fill:"var(--sam-key)", fontSize:12 }}
+              axisLine={{ stroke:"var(--sam-grid)" }}
               tickLine={false}
             />
 
@@ -76,8 +76,8 @@ export default function WeeklyChart({ data, comparison }: any) {
               formatter={(value:any)=>`${value.toFixed(1)} Focus`}
               labelFormatter={(label)=>`Date: ${label}`}
               contentStyle={{
-                background:"#18181b",
-                border:"1px solid #3f3f46",
+                background:"var(--sam-void)",
+                border:"1px solid var(--sam-grid)",
                 borderRadius:"8px"
               }}
             />
@@ -85,10 +85,10 @@ export default function WeeklyChart({ data, comparison }: any) {
             <Area
               type="monotone"
               dataKey="averageFocus"
-              stroke="#8b5cf6"
+              stroke="var(--sam-series-1)"
               strokeWidth={3}
               fill="url(#focusGradient)"
-              dot={{ r:4, fill:"#8b5cf6" }}
+              dot={{ r:4, fill:"var(--sam-series-1)" }}
               activeDot={{ r:6 }}
             />
 
@@ -106,7 +106,7 @@ export default function WeeklyChart({ data, comparison }: any) {
 
           <div
             className={`text-sm font-semibold ${
-              isUp ? "text-emerald-400" : "text-red-400"
+              isUp ? "text-zinc-200" : "text-red-500"
             }`}
           >
             {isUp ? "▲" : "▼"} {Math.abs(change).toFixed(1)}

@@ -6,22 +6,17 @@ const browserApps = [
     "avast secure browser"
   ];
   
+  // Only icons that exist in dashboard/public/icons/apps. A missing file here
+  // outranks the real icon the desktop tracker sends and renders as broken.
   const appIconMap: Record<string, string> = {
     brave: "/icons/apps/brave.png",
     "brave browser": "/icons/apps/brave.png",
-  
+
     edge: "/icons/apps/edge.png",
     "microsoft edge": "/icons/apps/edge.png",
-  
-    chrome: "/icons/apps/chrome.png",
-    "google chrome": "/icons/apps/chrome.png",
-  
-    cursor: "/icons/apps/cursor.png",
-    spotify: "/icons/apps/spotify.png",
-    codex: "/icons/apps/codex.png",
+
     whatsapp: "/icons/apps/whatsapp.png",
-    "whatsapp.root": "/icons/apps/whatsapp.png",
-    "visual studio code": "/icons/apps/vscode.png"
+    "whatsapp.root": "/icons/apps/whatsapp.png"
   };
   
   function normalize(value: string) {

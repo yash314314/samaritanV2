@@ -25,9 +25,9 @@ function getEntropyLevel(score:number){
 
 function getEntropyColor(score:number){
 
-  if(score > 70) return "text-red-400";
-  if(score > 40) return "text-yellow-400";
-  return "text-emerald-400";
+  if(score > 70) return "text-red-500";
+  if(score > 40) return "text-red-400";
+  return "text-zinc-200";
 
 }
 
@@ -121,7 +121,7 @@ export default function ContextSwitchStats({data}:any){
           <div className="w-full bg-zinc-800 h-2 rounded">
 
             <div
-              className="bg-purple-500 h-2 rounded"
+              className="bg-signal text-void h-2 rounded"
               style={{width:`${Math.min(entropy,100)}%`}}
             />
 

@@ -120,22 +120,22 @@ export default function DistractionBlockerCard({ focusActive }: { focusActive: b
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-300">
-            <ShieldAlert className="h-4 w-4 text-purple-400" />
+            <ShieldAlert className="h-4 w-4 text-red-500" />
             Distraction Blocker
           </h2>
           <p className="mt-0.5 text-xs text-zinc-500">
             {activeNow} enforced now · {data.summary.killedToday} blocked today
           </p>
         </div>
-        <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold ${activeNow ? "border-purple-500/30 bg-purple-500/10 text-purple-300" : "border-zinc-800 bg-zinc-950 text-zinc-500"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${activeNow ? "animate-pulse bg-purple-400" : "bg-zinc-700"}`} />
+        <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold ${activeNow ? "border-red-500/30 bg-red-500/10 text-red-300" : "border-zinc-800 bg-zinc-950 text-zinc-500"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${activeNow ? "animate-pulse bg-red-500" : "bg-zinc-700"}`} />
           {activeNow ? "Armed" : "Standby"}
         </span>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+      <div className="sam-segment mt-3 grid grid-cols-3" role="tablist" aria-label="Blocker views">
         {tabs.map((item) => (
-          <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`h-7 rounded-md text-[10px] font-medium transition ${tab === item.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}>
+          <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)}>
             {item.label}
           </button>
         ))}
@@ -146,17 +146,17 @@ export default function DistractionBlockerCard({ focusActive }: { focusActive: b
           <form onSubmit={addRule} className="space-y-2 border-b border-zinc-900 pb-3">
             <div className="grid grid-cols-[auto_1fr] gap-2">
               <div className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
-                <button type="button" title="Block an application" onClick={() => setTargetType("app")} className={`flex h-8 w-8 items-center justify-center rounded-md ${targetType === "app" ? "bg-purple-500/15 text-purple-300" : "text-zinc-600 hover:text-zinc-300"}`}><AppWindow className="h-3.5 w-3.5" /></button>
-                <button type="button" title="Block a website domain" onClick={() => setTargetType("domain")} className={`flex h-8 w-8 items-center justify-center rounded-md ${targetType === "domain" ? "bg-purple-500/15 text-purple-300" : "text-zinc-600 hover:text-zinc-300"}`}><Globe2 className="h-3.5 w-3.5" /></button>
+                <button type="button" title="Block an application" onClick={() => setTargetType("app")} className={`flex h-8 w-8 items-center justify-center rounded-md ${targetType === "app" ? "bg-red-500/15 text-red-300" : "text-zinc-600 hover:text-zinc-300"}`}><AppWindow className="h-3.5 w-3.5" /></button>
+                <button type="button" title="Block a website domain" onClick={() => setTargetType("domain")} className={`flex h-8 w-8 items-center justify-center rounded-md ${targetType === "domain" ? "bg-red-500/15 text-red-300" : "text-zinc-600 hover:text-zinc-300"}`}><Globe2 className="h-3.5 w-3.5" /></button>
               </div>
-              <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder={targetType === "app" ? "Application name" : "example.com"} className="h-9 min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-purple-500/40" />
+              <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder={targetType === "app" ? "Application name" : "example.com"} className="h-9 min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-red-500/40" />
             </div>
             <div className="grid grid-cols-[1fr_auto] gap-2">
-              <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)} className="h-8 min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-400 outline-none focus:border-purple-500/40">
+              <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)} className="h-8 min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-400 outline-none focus:border-red-500/40">
                 <option value="during_focus">During focus</option>
                 <option value="always">Always</option>
               </select>
-              <button type="submit" title="Add blocker rule" disabled={!target.trim() || Boolean(busy)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500 text-white transition hover:bg-purple-400 disabled:opacity-40">
+              <button type="submit" title="Add blocker rule" disabled={!target.trim() || Boolean(busy)} className="sam-button h-8 w-8 px-0" data-variant="primary">
                 {busy === "create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
               </button>
             </div>
@@ -167,13 +167,13 @@ export default function DistractionBlockerCard({ focusActive }: { focusActive: b
               <div className="flex h-full items-center justify-center text-xs text-zinc-600">No persistent rules</div>
             ) : data.rules.map((rule) => (
               <div key={rule.id} className="flex items-center gap-2 rounded-lg border border-zinc-900 bg-zinc-950 px-2.5 py-2">
-                {rule.targetType === "app" ? <AppWindow className="h-3.5 w-3.5 shrink-0 text-purple-400" /> : <Globe2 className="h-3.5 w-3.5 shrink-0 text-sky-400" />}
+                {rule.targetType === "app" ? <AppWindow className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <Globe2 className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium text-zinc-300">{rule.target}</div>
                   <div className="text-[10px] text-zinc-600">{rule.scope === "always" ? "Always" : "During focus"}</div>
                 </div>
-                <input type="checkbox" title={rule.active ? "Disable rule" : "Enable rule"} checked={rule.active} onChange={(event) => run(rule.id, () => distractionBlocksApi.update(rule.id, { active: event.target.checked }))} disabled={busy === rule.id} className="h-3.5 w-3.5 shrink-0 accent-purple-500" />
-                <button type="button" title="Delete rule" onClick={() => run(rule.id, () => distractionBlocksApi.delete(rule.id))} disabled={busy === rule.id} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-700 transition hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>
+                <input type="checkbox" title={rule.active ? "Disable rule" : "Enable rule"} checked={rule.active} onChange={(event) => run(rule.id, () => distractionBlocksApi.update(rule.id, { active: event.target.checked }))} disabled={busy === rule.id} className="h-3.5 w-3.5 shrink-0 accent-red-500" />
+                <button type="button" title="Delete rule" onClick={() => run(rule.id, () => distractionBlocksApi.delete(rule.id))} disabled={busy === rule.id} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-700 transition hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             ))}
           </div>
@@ -186,29 +186,29 @@ export default function DistractionBlockerCard({ focusActive }: { focusActive: b
             <div className="flex h-full items-center justify-center text-xs text-zinc-600">No block attempts today</div>
           ) : data.recentEvents.map((event) => (
             <div key={event.id} className="flex items-start gap-2.5 border-b border-zinc-900 pb-2">
-              {event.outcome === "killed" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-400" />}
+              {event.outcome === "killed" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300" /> : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs text-zinc-300">{event.appName}</div>
                 <div className="truncate text-[10px] text-zinc-600">{event.target} · {new Date(event.occurredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
               </div>
-              <span className={`text-[10px] font-medium ${event.outcome === "killed" ? "text-emerald-400" : "text-rose-400"}`}>{event.outcome}</span>
+              <span className={`text-[10px] font-medium ${event.outcome === "killed" ? "text-zinc-300" : "text-red-400"}`}>{event.outcome}</span>
             </div>
           ))}
         </div>
       )}
 
       {tab === "levels" && <EnforcementLevels />}
-      {error && <div className="mt-2 rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 text-[10px] text-rose-300">{error}</div>}
+      {error && <div className="mt-2 rounded-md border border-red-500/20 bg-red-500/10 px-2 py-1.5 text-[10px] text-red-300">{error}</div>}
     </div>
   );
 }
 
 function EnforcementLevels() {
   const levels = [
-    { label: "Observe", detail: "Record violations", icon: Activity, tone: "text-sky-400" },
-    { label: "Warn", detail: "Notify immediately", icon: Shield, tone: "text-amber-400" },
-    { label: "Require Reason", detail: "Capture justification", icon: ShieldAlert, tone: "text-orange-400" },
-    { label: "Block", detail: "Terminate safe-listed apps", icon: XCircle, tone: "text-rose-400" },
+    { label: "Observe", detail: "Record violations", icon: Activity, tone: "text-zinc-400" },
+    { label: "Warn", detail: "Notify immediately", icon: Shield, tone: "text-zinc-200" },
+    { label: "Require Reason", detail: "Capture justification", icon: ShieldAlert, tone: "text-red-400" },
+    { label: "Block", detail: "Terminate safe-listed apps", icon: XCircle, tone: "text-red-500" },
   ];
   return (
     <div className="dashboard-scroll-panel mt-3 flex-1 space-y-2 pr-1">

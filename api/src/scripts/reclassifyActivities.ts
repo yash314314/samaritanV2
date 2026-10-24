@@ -3,6 +3,8 @@ import { prisma } from "../prisma";
 
 async function main() {
   const activities = await prisma.activity.findMany({
+    // Manual reviews are stored with confidence 1; never overwrite them.
+    where: { OR: [{ confidence: { lt: 1 } }, { confidence: null }] },
     orderBy: { startTime: "asc" },
     select: {
       id: true,
@@ -12,6 +14,7 @@ async function main() {
       url: true,
       category: true,
       intent: true,
+      session: { select: { userId: true } },
     },
   });
 
@@ -21,7 +24,8 @@ async function main() {
     const classification = await classifyActivity(
       activity.appName,
       activity.windowTitle,
-      activity.domain ?? activity.url ?? null
+      activity.domain ?? activity.url ?? null,
+      activity.session.userId
     );
 
     const changed =

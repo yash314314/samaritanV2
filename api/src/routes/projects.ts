@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { prisma } from '../prisma';
 import { getCurrentProjectWeek } from '../services/projectTimeService';
 import { emitProjectChanged } from '../websocket/broadcaster';
@@ -8,6 +9,7 @@ import {
   getProjectDashboard,
   getUnassignedProjectActivities,
 } from '../services/projectTrackingService';
+import { parseIntegerParam, publicMessage } from '../utils/requestParams';
 
 const router = Router();
 
@@ -59,9 +61,10 @@ router.get('/unassigned', async (req, res) => {
   const { userId } = req.query;
   if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
   try {
-    res.json(await getUnassignedProjectActivities(userId, Number(req.query.days) || 7));
+    const days = parseIntegerParam(req.query.days, { name: 'days', min: 1, max: 30, fallback: 7 });
+    res.json(await getUnassignedProjectActivities(userId, days));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fetch unassigned activity';
+    const message = publicMessage(error, 'Failed to fetch unassigned activity');
     res.status(400).json({ error: message });
   }
 });
@@ -72,7 +75,7 @@ router.post('/activities/assign', async (req, res) => {
   try {
     res.json(await assignActivitiesToProject(userId, activityIds.map(String), projectId || null, Boolean(remember)));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to assign activities';
+    const message = publicMessage(error, 'Failed to assign activities');
     res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
   }
 });
@@ -81,9 +84,10 @@ router.get('/:id/dashboard', async (req, res) => {
   const { userId } = req.query;
   if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Missing userId' });
   try {
-    res.json(await getProjectDashboard(userId, req.params.id, Number(req.query.days) || 14));
+    const days = parseIntegerParam(req.query.days, { name: 'days', min: 7, max: 60, fallback: 14 });
+    res.json(await getProjectDashboard(userId, req.params.id, days));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load project dashboard';
+    const message = publicMessage(error, 'Failed to load project dashboard');
     res.status(/not found/i.test(message) ? 404 : 400).json({ error: message });
   }
 });
@@ -91,13 +95,13 @@ router.get('/:id/dashboard', async (req, res) => {
 router.post('/:id/restore', async (req, res) => {
   const { userId } = req.body;
   try {
-    const project = await prisma.project.findFirst({ where: { id: req.params.id, ...(userId ? { userId } : {}) } });
+    const project = await prisma.project.findFirst({ where: { id: req.params.id, userId: (req as AuthenticatedRequest).user!.userId } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
     const restored = await prisma.project.update({ where: { id: project.id }, data: { active: true } });
     emitProjectChanged(restored.userId, 'updated', { project: restored });
     res.json(restored);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to restore project' });
+    res.status(400).json({ error: publicMessage(error, 'Failed to restore project') });
   }
 });
 
@@ -136,7 +140,7 @@ router.patch('/:id', async (req, res) => {
   const { name, description, icon, color, weeklyHourGoal, active, userId } = req.body;
 
   try {
-    const existing = await prisma.project.findFirst({ where: { id, ...(userId ? { userId } : {}) } });
+    const existing = await prisma.project.findFirst({ where: { id, userId: (req as AuthenticatedRequest).user!.userId } });
     if (!existing) return res.status(404).json({ error: 'Project not found' });
     const project = await prisma.project.update({
       where: { id: existing.id },
@@ -164,7 +168,9 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const project = await prisma.project.update({ where: { id }, data: { active: false } });
+    const owned = await prisma.project.findFirst({ where: { id, userId: (req as AuthenticatedRequest).user!.userId }, select: { id: true } });
+    if (!owned) return res.status(404).json({ error: 'Project not found' });
+    const project = await prisma.project.update({ where: { id: owned.id }, data: { active: false } });
     emitProjectChanged(project.userId, 'deleted', { id });
     void dispatchWebhookEvent(project.userId, 'project.changed', { action: 'deleted', id }, `${id}:deleted`)
       .catch((error) => console.error('Project webhook dispatch failed:', error));

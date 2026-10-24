@@ -14,4 +14,5 @@ contextBridge.exposeInMainWorld("widgetAPI", {
   onState: (callback) => ipcRenderer.on("widget:state", (_event, payload) => callback(payload)),
   onActionResult: (callback) => ipcRenderer.on("widget:actionResult", (_event, payload) => callback(payload)),
   onWindowState: (callback) => ipcRenderer.on("widget:windowState", (_event, payload) => callback(payload)),
+  onAppearance: (callback) => ipcRenderer.on("widget:appearance", (_event, payload) => callback(payload)),
 });

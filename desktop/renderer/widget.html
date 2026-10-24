@@ -10,7 +10,7 @@
 <body>
   <main id="widget" class="widget-shell">
     <header class="widget-header drag-region">
-      <div class="brand-mark">S</div>
+      <span class="brand-mark" aria-hidden="true"></span>
       <div class="brand-copy">
         <span class="brand-name">SAMARITAN</span>
         <span id="connectionLabel" class="connection-label"><span class="status-dot"></span>Live</span>
@@ -46,7 +46,7 @@
         </div>
         <div class="state-cell">
           <span class="state-label">Project</span>
-          <strong id="projectValue" class="state-value purple">Unassigned</strong>
+          <strong id="projectValue" class="state-value">Unassigned</strong>
         </div>
       </div>
 
@@ -73,6 +73,7 @@
       <button id="dashboardButton" type="button" class="dashboard-button">Open dashboard</button>
     </section>
   </main>
+  <script src="widgetTheme.js"></script>
   <script src="widget.js"></script>
 </body>
 </html>

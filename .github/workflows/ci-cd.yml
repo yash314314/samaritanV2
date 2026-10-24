@@ -1,0 +1,192 @@
+name: SamaritanV2 CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, 'agent/**' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-and-build:
+    name: Build & Verify Samaritan Stack
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: acpe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Integration tests truncate tables, so they get their own database.
+      TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/acpe_test?schema=public
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install API Dependencies & Generate Prisma Client
+        run: |
+          cd api
+          cp .env.example .env
+          npm ci
+          npx prisma generate
+          # migrate deploy (not db push) so a schema change without a migration fails CI
+          npm run db:migrate
+          npm run bootstrap:user
+
+      - name: Type Check & Verify Express API
+        run: |
+          cd api
+          npx tsc --noEmit
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "postgresql://postgres:password@localhost:5432/postgres" --exit-code
+          npm test
+
+      - name: Auth & Isolation Integration Tests
+        run: |
+          cd api
+          psql "postgresql://postgres:password@localhost:5432/postgres" -c "CREATE DATABASE acpe_test"
+          DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+          npm run test:integration
+
+      # Blocks on critical advisories. Prisma 6 still carries high ones that
+      # only its 7.x major fixes; `npm audit --omit=dev` lists them.
+      - name: Dependency Audit (production dependencies)
+        run: |
+          cd api && npm audit --omit=dev --audit-level=critical
+          cd ../dashboard && npm audit --omit=dev --audit-level=critical
+
+      - name: Verify Desktop Tracker Logic
+        run: |
+          cd desktop
+          npm ci --ignore-scripts
+          npm test
+          for file in *.js; do node --check "$file"; done
+
+      - name: Install Dashboard Dependencies, Lint & Build Next.js
+        run: |
+          cd dashboard
+          npm ci
+          npx tsc --noEmit
+          npx eslint . --quiet
+          npm run build
+
+  # Builds the production images and boots docker-compose.prod.yml the way a
+  # server would, then checks it from the outside, through nginx only.
+  production-stack:
+    name: Boot & Smoke-Test Production Stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      COMPOSE_FILE: docker-compose.prod.yml
+      COMPOSE_PROJECT_NAME: samaritan-ci
+      ORIGIN: http://localhost:8080
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Secrets exist for this run only. The refresh cookie keeps its production
+      # Secure flag: Chrome accepts Secure cookies on http://localhost, and the
+      # smoke test sends its cookie by hand.
+      - name: Write Throwaway Production Settings
+        run: |
+          postgres_password=$(openssl rand -hex 24)
+          jwt_secret=$(openssl rand -hex 48)
+          smoke_password=$(openssl rand -hex 16)
+          echo "::add-mask::$postgres_password"
+          echo "::add-mask::$jwt_secret"
+          echo "::add-mask::$smoke_password"
+          cat > .env <<EOF
+          POSTGRES_PASSWORD=$postgres_password
+          JWT_SECRET=$jwt_secret
+          PUBLIC_ORIGIN=$ORIGIN
+          HTTP_PORT=8080
+          EOF
+          echo "SMOKE_EMAIL=smoke-${GITHUB_RUN_ID}@example.test" >> "$GITHUB_ENV"
+          echo "SMOKE_PASSWORD=$smoke_password" >> "$GITHUB_ENV"
+          docker compose config --quiet
+
+      - name: Build Production Images
+        run: docker compose build
+
+      - name: Boot the Stack
+        run: docker compose up -d --wait --wait-timeout 180
+
+      - name: Check Isolation, Users & Migrations
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          # Only nginx may publish a port.
+          for container in samaritan_postgres samaritan_api samaritan_dashboard; do
+            bindings=$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$container")
+            case "$bindings" in "{}"|"null") ;; *) fail "$container publishes $bindings" ;; esac
+          done
+          [ "$(docker network inspect -f '{{.Internal}}' "${COMPOSE_PROJECT_NAME}_backend")" = "true" ] || fail "the backend network has a route out"
+          for service in api dashboard; do
+            [ "$(docker compose exec -T "$service" id -u)" != "0" ] || fail "$service runs as root"
+          done
+          expected=$(find api/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l)
+          applied=$(docker compose exec -T postgres psql -U postgres -d acpe -tAc 'SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
+          [ "$applied" = "$expected" ] || fail "$applied of $expected migrations applied"
+          patterns=$(docker compose exec -T postgres psql -U postgres -d acpe -tAc 'SELECT count(*) FROM "AppPattern" WHERE "userId" IS NULL')
+          [ "$patterns" -gt 0 ] || fail "the classifier was not seeded"
+          echo "SEEDED_PATTERNS=$patterns" >> "$GITHUB_ENV"
+          echo "Only nginx publishes a port; the backend network is internal; api and dashboard run unprivileged; $applied/$expected migrations applied; $patterns default patterns seeded."
+
+      - name: Install Browser Driver
+        run: npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund puppeteer-core@25.8.0
+
+      - name: Smoke-Test Through nginx
+        run: node .github/scripts/prod-smoke.mjs "$ORIGIN" --browser "$RUNNER_TEMP/browser"
+
+      # A restarted API re-runs migrate and seed --if-empty: both must change
+      # nothing, and the account registered above must still sign in.
+      - name: Restart the API & Test Again
+        run: |
+          set -euo pipefail
+          docker compose restart api
+          docker compose up -d --wait --wait-timeout 120
+          patterns=$(docker compose exec -T postgres psql -U postgres -d acpe -tAc 'SELECT count(*) FROM "AppPattern" WHERE "userId" IS NULL')
+          [ "$patterns" = "$SEEDED_PATTERNS" ] || { echo "::error::the restart changed the default patterns ($SEEDED_PATTERNS -> $patterns)"; exit 1; }
+          node .github/scripts/prod-smoke.mjs "$ORIGIN" --after-restart
+
+      - name: Show Service State & Logs
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 300
+
+      - name: Tear Down
+        if: always()
+        run: docker compose down -v --remove-orphans

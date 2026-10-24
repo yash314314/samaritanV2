@@ -33,7 +33,7 @@ export default function DeepWorkStats({ data }: any) {
     <div className="samaritan-card p-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-sm font-semibold text-zinc-300">Deep Work</h2>
-        <span className="text-xs text-purple-400">{deepWorkSessions} sessions</span>
+        <span className="text-xs text-zinc-400">{deepWorkSessions} sessions</span>
       </div>
 
       <div className="space-y-4 text-sm">
@@ -43,7 +43,7 @@ export default function DeepWorkStats({ data }: any) {
             <span className="text-zinc-200">{formatDuration(deepWorkSeconds)}</span>
           </div>
           <div className="w-full bg-zinc-800 h-2 rounded">
-            <div className="bg-purple-500 h-2 rounded" style={{ width: `${Math.min(deepWorkRatio, 100)}%` }} />
+            <div className="bg-signal text-void h-2 rounded" style={{ width: `${Math.min(deepWorkRatio, 100)}%` }} />
           </div>
         </div>
 
@@ -59,7 +59,7 @@ export default function DeepWorkStats({ data }: any) {
 
         <div className="flex justify-between">
           <span className="text-zinc-400">Focus Score</span>
-          <span className="text-purple-400 font-medium">{focusScore.toFixed(1)}</span>
+          <span className="text-red-500 font-medium">{focusScore.toFixed(1)}</span>
         </div>
       </div>
 

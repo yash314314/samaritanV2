@@ -66,9 +66,9 @@ function duration(ms: number) {
 }
 
 function severityStyle(severity: CalendarIntelligence["recommendations"][number]["severity"]) {
-  if (severity === "critical") return { icon: ShieldAlert, color: "text-rose-300", background: "bg-rose-500/10", border: "border-rose-500/20" };
-  if (severity === "warning") return { icon: AlertTriangle, color: "text-amber-300", background: "bg-amber-500/10", border: "border-amber-500/20" };
-  return { icon: Sparkles, color: "text-purple-300", background: "bg-purple-500/10", border: "border-purple-500/20" };
+  if (severity === "critical") return { icon: ShieldAlert, color: "text-red-400", background: "bg-red-500/10", border: "border-red-500/30" };
+  if (severity === "warning") return { icon: AlertTriangle, color: "text-red-300", background: "bg-red-500/5", border: "border-red-500/20" };
+  return { icon: Sparkles, color: "text-zinc-200", background: "bg-zinc-900/60", border: "border-zinc-700" };
 }
 
 function suggestionLabel(suggestion: CalendarSlotSuggestion, timeZone: string) {
@@ -99,7 +99,7 @@ export function CalendarIntelligencePanel({
   const [slotSuggestions, setSlotSuggestions] = useState<Record<string, CalendarSlotSuggestion>>({});
   const [slotErrors, setSlotErrors] = useState<Record<string, string>>({});
   const [busyConflict, setBusyConflict] = useState<string | null>(null);
-  const pressureTone = intelligence.summary.pressureScore >= 75 ? "text-rose-300" : intelligence.summary.pressureScore >= 50 ? "text-amber-300" : "text-emerald-300";
+  const pressureTone = intelligence.summary.pressureScore >= 75 ? "text-red-400" : intelligence.summary.pressureScore >= 50 ? "text-zinc-200" : "text-zinc-400";
   const busiestDays = [...intelligence.days].sort((a, b) => b.pressureScore - a.pressureScore).slice(0, 8);
   const enabledDayCount = intelligence.workHours.filter((item) => item.enabled).length;
 
@@ -138,9 +138,9 @@ export function CalendarIntelligencePanel({
       <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-b border-zinc-800 lg:border-b-0 lg:border-r">
         <div className="grid grid-cols-2 divide-x divide-y divide-zinc-800 border-b border-zinc-800 sm:grid-cols-4 sm:divide-y-0">
           <div className="px-4 py-3"><div className={`text-xl font-semibold ${pressureTone}`}>{intelligence.summary.pressureScore}</div><div className="text-[9px] uppercase text-zinc-600">Pressure · {intelligence.summary.pressureLevel}</div></div>
-          <div className="px-4 py-3"><div className="text-xl font-semibold text-rose-300">{intelligence.summary.conflictCount}</div><div className="text-[9px] uppercase text-zinc-600">Conflicts</div></div>
-          <div className="px-4 py-3"><div className="text-xl font-semibold text-amber-300">{intelligence.summary.compressedGapCount}</div><div className="text-[9px] uppercase text-zinc-600">Tight transitions</div></div>
-          <div className="px-4 py-3"><div className="text-xl font-semibold text-purple-300">{intelligence.summary.overloadedDayCount}</div><div className="text-[9px] uppercase text-zinc-600">Heavy days</div></div>
+          <div className="px-4 py-3"><div className="text-xl font-semibold text-red-400">{intelligence.summary.conflictCount}</div><div className="text-[9px] uppercase text-zinc-600">Conflicts</div></div>
+          <div className="px-4 py-3"><div className="text-xl font-semibold text-zinc-200">{intelligence.summary.compressedGapCount}</div><div className="text-[9px] uppercase text-zinc-600">Tight transitions</div></div>
+          <div className="px-4 py-3"><div className="text-xl font-semibold text-zinc-300">{intelligence.summary.overloadedDayCount}</div><div className="text-[9px] uppercase text-zinc-600">Heavy days</div></div>
         </div>
 
         <div className="grid min-h-0 md:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]">
@@ -156,26 +156,26 @@ export function CalendarIntelligencePanel({
                 const error = slotErrors[conflictKey];
                 const busy = busyConflict === conflictKey;
                 return (
-                <div key={conflictKey} className="border-l-2 border-rose-500 bg-rose-500/10 px-3 py-2.5">
+                <div key={conflictKey} className="border-l-2 border-red-500 bg-red-500/10 px-3 py-2.5">
                   <div className="flex items-start gap-2.5">
-                    <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" />
+                    <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-3"><span className="truncate text-xs font-medium text-zinc-200">{conflict.first.title} overlaps {conflict.second.title}</span><span className="shrink-0 text-[9px] text-rose-300">{duration(conflict.overlapMs)}</span></div>
+                      <div className="flex items-center justify-between gap-3"><span className="truncate text-xs font-medium text-zinc-200">{conflict.first.title} overlaps {conflict.second.title}</span><span className="shrink-0 text-[9px] text-red-400">{duration(conflict.overlapMs)}</span></div>
                       <p className="mt-1 text-[10px] text-zinc-500">{zonedTimeLabel(conflict.first.start, intelligence.timezone)} - {zonedTimeLabel(conflict.first.end, intelligence.timezone)} / {zonedTimeLabel(conflict.second.start, intelligence.timezone)} - {zonedTimeLabel(conflict.second.end, intelligence.timezone)}</p>
                       {suggestion ? (
-                        <div className="mt-2 rounded border border-purple-500/20 bg-black/35 p-2">
-                          <div className="flex items-center gap-1.5 text-[10px] text-purple-200"><CalendarClock className="h-3 w-3" />{suggestionLabel(suggestion, intelligence.timezone)}</div>
+                        <div className="mt-2 rounded border border-zinc-800 bg-black/35 p-2">
+                          <div className="flex items-center gap-1.5 text-[10px] text-zinc-300"><CalendarClock className="h-3 w-3" />{suggestionLabel(suggestion, intelligence.timezone)}</div>
                           <div className="mt-1 text-[9px] text-zinc-600">Includes a {suggestion.bufferMinutes}m recovery buffer{suggestion.movedToAnotherDay ? " on the next available workday" : ""}.</div>
-                          <button type="button" disabled={busy} onClick={() => applySlot(conflictKey, suggestion)} className="mt-2 flex items-center gap-1 rounded-md bg-purple-500 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-purple-600 disabled:opacity-40">
+                          <button type="button" disabled={busy} onClick={() => applySlot(conflictKey, suggestion)} className="sam-button mt-2" data-variant="primary">
                             {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <MoveRight className="h-3 w-3" />}Move {conflict.second.title}
                           </button>
                         </div>
                       ) : (
-                        <button type="button" disabled={busy} onClick={() => findSlot(conflictKey, conflict.second.id)} className="mt-2 flex items-center gap-1 rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40">
+                        <button type="button" disabled={busy} onClick={() => findSlot(conflictKey, conflict.second.id)} className="mt-2 flex items-center gap-1 rounded-md border border-red-500/20 bg-red-500/10 px-2 py-1 text-[10px] text-red-200 transition hover:bg-red-500/20 disabled:opacity-40">
                           {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <CalendarClock className="h-3 w-3" />}Find open time
                         </button>
                       )}
-                      {error && <p className="mt-2 text-[10px] text-rose-300">{error}</p>}
+                      {error && <p className="mt-2 text-[10px] text-red-400">{error}</p>}
                     </div>
                   </div>
                 </div>
@@ -212,7 +212,7 @@ export function CalendarIntelligencePanel({
                     <span className="text-zinc-600">{day.eventCount} events / {day.meetingLoadPercent}% busy</span>
                   </div>
                   <div className="h-1.5 overflow-hidden bg-zinc-900">
-                    <div className={`h-full origin-left ${day.pressureScore >= 70 ? "bg-rose-400" : day.pressureScore >= 45 ? "bg-amber-400" : "bg-purple-500"}`} style={{ width: `${Math.max(2, day.pressureScore)}%`, animation: "calendar-width-in 650ms ease-out both" }} />
+                    <div className={`h-full origin-left ${day.pressureScore >= 70 ? "bg-red-500" : day.pressureScore >= 45 ? "bg-zinc-400" : "bg-zinc-600"}`} style={{ width: `${Math.max(2, day.pressureScore)}%`, animation: "calendar-width-in 650ms ease-out both" }} />
                   </div>
                   <div className="mt-1 flex justify-between text-[9px] text-zinc-700"><span>{day.conflictCount} conflicts</span><span>{duration(day.longestFocusMs)} longest focus</span></div>
                 </div>
@@ -226,24 +226,24 @@ export function CalendarIntelligencePanel({
       <section className="flex min-h-0 flex-col p-4">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2"><Focus className="h-4 w-4 text-purple-400" /><h3 className="text-sm font-semibold text-zinc-200">Focus opportunities</h3></div>
+            <div className="flex items-center gap-2"><Focus className="h-4 w-4 text-zinc-400" /><h3 className="text-sm font-semibold text-zinc-200">Focus opportunities</h3></div>
             <p className="mt-1 text-[10px] text-zinc-600">Open time inside your configured schedule · {enabledDayCount} workdays</p>
           </div>
-          <div className="text-right"><div className="text-sm font-semibold text-purple-200">{duration(intelligence.summary.availableFocusMs)}</div><div className="text-[9px] text-zinc-600">available</div></div>
+          <div className="text-right"><div className="text-sm font-semibold text-zinc-200">{duration(intelligence.summary.availableFocusMs)}</div><div className="text-[9px] text-zinc-600">available</div></div>
         </div>
         <div className="dashboard-scroll-panel space-y-2 pr-1">
           {intelligence.focusWindows.map((window) => (
-            <div key={`${window.date}-${window.startAt}`} className="group border-l-2 border-purple-500 bg-purple-500/5 px-3 py-2.5 transition hover:bg-purple-500/10">
+            <div key={`${window.date}-${window.startAt}`} className="group border-l-2 border-zinc-700 bg-zinc-900/40 px-3 py-2.5 transition hover:bg-zinc-900/70">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-medium text-zinc-200">{zonedDateLabel(window.startAt, intelligence.timezone)}</span>
-                <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${window.quality === "prime" ? "bg-purple-500/20 text-purple-200" : "bg-zinc-900 text-zinc-500"}`}>{window.quality}</span>
+                <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${window.quality === "prime" ? "bg-zinc-800 text-zinc-200 border border-zinc-700" : "bg-zinc-950 text-zinc-500"}`}>{window.quality}</span>
               </div>
               <div className="mt-1.5 flex items-center justify-between text-[11px]">
                 <span className="flex items-center gap-1.5 text-zinc-400"><Clock3 className="h-3 w-3" />{zonedTimeLabel(window.startAt, intelligence.timezone)} - {zonedTimeLabel(window.endAt, intelligence.timezone)}</span>
-                <span className="font-medium text-purple-300">{duration(window.durationMs)}</span>
+                <span className="font-medium text-zinc-200">{duration(window.durationMs)}</span>
               </div>
               <p className="mt-1.5 text-[9px] leading-relaxed text-zinc-600">{window.reason}</p>
-              <button type="button" onClick={() => onProtectFocus(window)} className="mt-2 flex items-center gap-1 rounded-md border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-[10px] text-purple-200 opacity-80 transition hover:bg-purple-500/20 group-hover:opacity-100"><Plus className="h-3 w-3" />Protect</button>
+              <button type="button" onClick={() => onProtectFocus(window)} className="mt-2 flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] text-zinc-200 opacity-80 transition hover:bg-zinc-750 group-hover:opacity-100"><Plus className="h-3 w-3" />Protect</button>
             </div>
           ))}
           {intelligence.focusWindows.length === 0 && <div className="py-10 text-center text-xs text-zinc-600">No future 60-minute focus window in this range</div>}

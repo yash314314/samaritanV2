@@ -1,12 +1,12 @@
 import { prisma } from "../prisma";
-import { getISTDayRange } from "../utils/time";
+import { buildISTDateRange, parseDateKey } from "../utils/time";
 
 export async function getDashboard(userId: string, date: string) {
 
   /* ---------- IST DAY RANGE ---------- */
 
-  const { start, end } =
-    getISTDayRange(new Date(date + "T00:00:00"));
+  const dateKey = parseDateKey(date);
+  const { start, end } = buildISTDateRange(dateKey, dateKey);
 
   /* ---------- TIMELINE ---------- */
 
