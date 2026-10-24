@@ -6,7 +6,10 @@ COPY package*.json ./
 COPY prisma ./prisma/
 RUN npm ci
 COPY . .
-RUN npx prisma generate && npm run build
+# prisma.config.ts resolves the database URL as soon as the CLI loads it, but
+# generating the client never connects; a placeholder satisfies it here, where
+# no database settings exist (.env is never copied into the image).
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate && npm run build
 
 FROM node:24-alpine AS runner
 RUN apk add --no-cache openssl
