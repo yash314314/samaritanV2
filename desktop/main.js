@@ -24,6 +24,10 @@ const OPEN_DEVTOOLS = process.env.SAMARITAN_DEVTOOLS === "1";
 const WIDGET_TITLE = "Samaritan Widget";
 const OUTBOX_FLUSH_INTERVAL_MS = 60 * 1000;
 
+// The dashboard's audio (the Samaritan soundscape) may start before the first
+// click inside the app window; browsers keep the gesture rule.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 let mainWindow;
 let widgetWindow;
 let tray;

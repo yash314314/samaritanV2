@@ -63,6 +63,19 @@ function adopt(body: { user: AuthUser; accessToken: string; accessTokenExpiresAt
   });
 }
 
+export interface RequestOutcome {
+  method: string;
+  path: string;
+  ok: boolean;
+  status: number;
+}
+
+/** Announces a finished API request as a "samaritan:request" window event (the soundscape listens). */
+function announce(outcome: RequestOutcome) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<RequestOutcome>("samaritan:request", { detail: outcome }));
+}
+
 function signedOut() {
   if (state.user || state.accessToken) setState({ user: null, accessToken: null, expiresAt: 0 });
 }
@@ -84,6 +97,7 @@ async function authPost(path: string, body?: unknown, token?: string | null) {
   } catch {
     // Empty body.
   }
+  announce({ method: "POST", path: `/api/auth${path}`, ok: response.ok, status: response.status });
   return { ok: response.ok, status: response.status, body: json };
 }
 
@@ -138,6 +152,12 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
     response = await send(retry);
     if (response.status === 401) signedOut();
   }
+  announce({
+    method: (init.method || "GET").toUpperCase(),
+    path: input.replace(/^https?:\/\/[^/]+/, "").split("?")[0],
+    ok: response.ok,
+    status: response.status,
+  });
   return response;
 }
 

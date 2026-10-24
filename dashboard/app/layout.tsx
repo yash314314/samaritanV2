@@ -7,6 +7,7 @@ import { AppearanceProvider } from "../context/AppearanceContext";
 import { AuthProvider } from "../context/AuthContext";
 import { TourProvider } from "../context/TourContext";
 import { WsProvider } from "../components/WsProvider";
+import SamaritanSoundscape from "../components/sam/SamaritanSoundscape";
 import { appearanceScript } from "../lib/appearance";
 import { bootScript } from "../lib/motionBoot";
 
@@ -29,6 +30,7 @@ export default function RootLayout({
             <AppProvider>
               <TourProvider>
                 <WsProvider>
+                  <SamaritanSoundscape />
                   <AppChrome>{children}</AppChrome>
                 </WsProvider>
               </TourProvider>

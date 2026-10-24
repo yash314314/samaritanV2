@@ -21,6 +21,15 @@ import {
   getSamaritanAudioVolume,
   setSamaritanAudioVolume,
   subscribeSamaritanAudioPreferences,
+  isSamaritanAmbientEnabled,
+  setSamaritanAmbientEnabled,
+  isSamaritanInterfaceSoundEnabled,
+  setSamaritanInterfaceSoundEnabled,
+  playSamaritanAcquire,
+  playSamaritanBoot,
+  playSamaritanRatchet,
+  playSamaritanScanSweep,
+  playSamaritanToggle,
   playSamaritanRev,
   playSamaritanLock,
   playSamaritanDialogSequence,
@@ -88,6 +97,8 @@ export default function SettingsPage() {
   // and the stored preference takes over after hydration.
   const audioEnabled = useSyncExternalStore(subscribeSamaritanAudioPreferences, isSamaritanAudioEnabled, () => true);
   const audioVolume = useSyncExternalStore(subscribeSamaritanAudioPreferences, getSamaritanAudioVolume, () => 0.28);
+  const ambientEnabled = useSyncExternalStore(subscribeSamaritanAudioPreferences, isSamaritanAmbientEnabled, () => true);
+  const interfaceEnabled = useSyncExternalStore(subscribeSamaritanAudioPreferences, isSamaritanInterfaceSoundEnabled, () => true);
 
   const handleToggleAudio = (enabled: boolean) => {
     setSamaritanAudioEnabled(enabled);
@@ -253,6 +264,41 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  {
+                    label: "Ambient presence",
+                    detail: "Mainframe hum, idle scan sweeps and the servo that follows your cursor",
+                    on: ambientEnabled,
+                    set: setSamaritanAmbientEnabled,
+                  },
+                  {
+                    label: "Interface sounds",
+                    detail: "Hover acquisition, presses, typing, scrolling and toggles",
+                    on: interfaceEnabled,
+                    set: setSamaritanInterfaceSoundEnabled,
+                  },
+                ].map((layer) => (
+                  <button
+                    key={layer.label}
+                    type="button"
+                    role="switch"
+                    aria-checked={layer.on}
+                    disabled={!audioEnabled}
+                    onClick={() => layer.set(!layer.on)}
+                    className={`flex items-start gap-3 border p-3 text-left transition-colors disabled:opacity-40 ${
+                      layer.on ? "border-signal" : "border-grid hover:border-control"
+                    }`}
+                  >
+                    <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 border ${layer.on ? "border-alert bg-alert" : "border-key"}`} aria-hidden />
+                    <span>
+                      <span className="block font-mono text-[11px] uppercase text-signal">{layer.label}</span>
+                      <span className="block text-[11px] text-key">{layer.detail}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
               <div>
                 <span className="mb-2 block font-mono text-[10px] uppercase tracking-wider text-key">
                   Sound Signature Audition
@@ -320,6 +366,51 @@ export default function SettingsPage() {
                     className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
                   >
                     <span className="truncate font-mono text-[11px]">Data Packet Decode</span>
+                    <Play size={11} className="shrink-0 text-signal" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playSamaritanAcquire(0.6)}
+                    disabled={!audioEnabled}
+                    className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
+                  >
+                    <span className="truncate font-mono text-[11px]">Target Acquire</span>
+                    <Play size={11} className="shrink-0 text-signal" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playSamaritanToggle(true, 0.8)}
+                    disabled={!audioEnabled}
+                    className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
+                  >
+                    <span className="truncate font-mono text-[11px]">Toggle Actuator</span>
+                    <Play size={11} className="shrink-0 text-signal" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playSamaritanRatchet(1, 0.7)}
+                    disabled={!audioEnabled}
+                    className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
+                  >
+                    <span className="truncate font-mono text-[11px]">Scroll Ratchet</span>
+                    <Play size={11} className="shrink-0 text-signal" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playSamaritanScanSweep(0.6)}
+                    disabled={!audioEnabled}
+                    className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
+                  >
+                    <span className="truncate font-mono text-[11px]">Scan Sweep</span>
+                    <Play size={11} className="shrink-0 text-signal" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playSamaritanBoot(0.9)}
+                    disabled={!audioEnabled}
+                    className="sam-button flex items-center justify-between px-3 py-2 text-left disabled:opacity-40"
+                  >
+                    <span className="truncate font-mono text-[11px]">Core Online</span>
                     <Play size={11} className="shrink-0 text-signal" />
                   </button>
                 </div>

@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import SoundToggle from "./sam/SoundToggle";
 import {
   LayoutDashboard,
   BarChart3,
@@ -103,6 +104,7 @@ export default function Sidebar() {
       </nav>
 
       <nav aria-label="Preferences" className="border-t border-grid py-3">
+        <SoundToggle />
         {renderItem(settingsItem)}
       </nav>
     </aside>
